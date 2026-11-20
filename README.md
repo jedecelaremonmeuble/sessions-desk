@@ -85,7 +85,10 @@ or the `SD_CONFIG` environment variable). The file is optional. A template is in
 |---|---|
 | `ui.pathPrefix` | Folder prefix not repeated in the list (for instance your main repository) |
 | `ui.prUrl`, `ui.ticketUrl`, `ui.ticketLabel` | Where pull-request and ticket links point |
-| `ui.models` | Relative cost of each model, so the page flags sessions on a pricier model: `[{ "match": "fable", "label": "Fable", "cost": 2, "note": "8 $ / 40 $" }, …]` — `match` is a piece of the model id (first match wins), `cost` a multiplier against the reference model (cost 1). Omitted: built-in table from public API prices (Opus = 1, Fable ×2, Sonnet ×0.5, Haiku ×0.025). When set, it replaces the built-in table. |
+| `ui.models` | Relative cost of each model, so the page flags sessions on a pricier model: `[{ "match": "fable", "label": "Fable", "cost": 2, "note": "8 $ / 40 $" }, …]` — `match` is a piece of the model id (first match wins), `cost` a multiplier against the reference model (cost 1). Omitted: built-in table from public API prices (Opus = 1, Fable ×2, Sonnet ×0.5, Haiku ×0.025). When set, it replaces the built-in table. Entries with `"offer": false` are not offered in the new-session form (there, `match` is passed as is to `claude --model`). |
+| `ui.quota` | Weekly quota thresholds in %: `{ "warn": 75, "alert": 90 }` (orange, then red + launcher alert) |
+| `delays` | `{ "notifyAfterSeconds": 15, "notifyDoneAfterMinutes": 3, "closedDays": 14 }` — the command-line options of the same role win |
+| `tailscaleExe` | Path to `tailscale.exe` (`""` turns remote access off); default: the standard install folder |
 | `ui.language` | `en` or `fr`: the page language on this machine (default: the browser's) |
 | `modules` | The optional modules below |
 

@@ -383,7 +383,7 @@ export class Launcher {
       const det = psString(g.detail).replace(/\s+/g, ' ');
       alerts.push({ key, hd: name, title: `Lanceur : HD-${name} t'attend — ${WAIT_FR[stg] ?? stg}`, text: det.slice(0, Math.min(200, det.length)) });
     }
-    // 4. Quota hebdomadaire > 90 % : une fois par compte et par période.
+    // 4. Quota hebdomadaire ≥ seuil d'alerte (ui.quota.alert, 90 % par défaut) : une fois par compte et par période.
     try {
       const raw = readUsageRaw(this.d.cfg) as Record<string, Obj> | undefined;
       //    Même règle pour la limite propre à un modèle (limitsJson, « Fable ») : elle peut saturer avant la limite globale.
@@ -392,7 +392,7 @@ export class Launcher {
         if (reset && reset < now) continue;
         const when = reset ? ' ; remise à zéro le ' + formatLocal(reset) : '';
         const key = `quota:${psString(q.alias)}:${psDateString(q.weeklyResetsAt)}`;
-        if ((Number(q.weeklyPct) || 0) >= 90 && !seen[key]) {
+        if ((Number(q.weeklyPct) || 0) >= this.d.cfg.ui.quota.alert && !seen[key]) {
           alerts.push({ key, title: `Quota Claude à ${psString(q.weeklyPct)} % — ${psString(q.alias)}`, text: `Quota de la semaine presque épuisé${when}.` });
         }
         let limits: unknown[] = [];
