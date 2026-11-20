@@ -21,6 +21,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node
 import type { AutomationDef } from './modules.ts';
 import type { Dashboard } from './state.ts';
 import { nowMs } from './util.ts';
+import { T } from './i18n.ts';
 
 const STATUSES = new Set(['ok', 'nothing', 'dry-run', 'conflict', 'rejected', 'failed']);
 const LEVELS = new Set(['ok', 'warn', 'error']);
@@ -289,10 +290,10 @@ export class Automations {
    *  après 1,5 s au plus : la commande tourne encore, a fini, ou s'est arrêtée en erreur (verrou d'une passe en cours…). */
   async order(id: string, orderId: string): Promise<{ status: number; body: Record<string, unknown> }> {
     const a = this.defs.find((x) => x.id === id); const o = a?.orders.find((x) => x.id === orderId);
-    if (!a || !o) return { status: 400, body: { error: 'ordre inconnu' } };
+    if (!a || !o) return { status: 400, body: { error: T('ordre inconnu', 'unknown order') } };
     const log = join(this.d.cfg.temp, `sessions-desk-automation-${a.id}-${new Date().toISOString().replace(/[:.]/g, '-')}.log`);
     let fd: number;
-    try { fd = openSync(log, 'a'); } catch (e) { return { status: 500, body: { error: `journal impossible : ${(e as Error).message}` } }; }
+    try { fd = openSync(log, 'a'); } catch (e) { return { status: 500, body: { error: T(`journal impossible : ${(e as Error).message}`, `could not open the log: ${(e as Error).message}`) } }; }
     const env: NodeJS.ProcessEnv = { ...process.env, PYTHONIOENCODING: 'utf-8' };
     for (const k of ['CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT']) delete env[k];
     const exit = await new Promise<{ code: number | null; error?: string }>((ok) => {
@@ -305,10 +306,10 @@ export class Automations {
     });
     try { closeSync(fd); } catch { /* idem */ }
     this.#cmd.at = 0;                          // la passe lancée doit apparaître sans attendre 10 s
-    if (exit.error) return { status: 500, body: { error: `lancement impossible : ${exit.error}` } };
+    if (exit.error) return { status: 500, body: { error: T(`lancement impossible : ${exit.error}`, `could not start: ${exit.error}`) } };
     if (exit.code === null) return { status: 200, body: { started: true } };
     const last = lastLine(log);
-    if (exit.code !== 0) return { status: 409, body: { error: `la commande s'est arrêtée (code ${exit.code})${last ? ' : ' + last : ''}`, code: exit.code } };
+    if (exit.code !== 0) return { status: 409, body: { error: T(`la commande s'est arrêtée (code ${exit.code})${last ? ' : ' + last : ''}`, `the command stopped (code ${exit.code})${last ? ': ' + last : ''}`), code: exit.code } };
     return { status: 200, body: { done: true, output: last } };
   }
 

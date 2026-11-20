@@ -60,7 +60,7 @@ describe('réglages d\'affichage du poste (ui)', () => {
   });
   test('seules des adresses http(s) et un chemin absolu sont gardés', () => {
     expect(parseUi({ ui: { pathPrefix: '%USERPROFILE%\\code', prUrl: 'https://github.com/o/r/pull/', ticketUrl: 'http://tickets.example.com/t/', ticketLabel: '  Ticket  ' } }, env))
-      .toEqual({ pathPrefix: 'C:\\Users\\moi\\code', prUrl: 'https://github.com/o/r/pull/', ticketUrl: 'http://tickets.example.com/t/', ticketLabel: 'Ticket' });
+      .toEqual({ pathPrefix: 'C:\\Users\\moi\\code', prUrl: 'https://github.com/o/r/pull/', ticketUrl: 'http://tickets.example.com/t/', ticketLabel: 'Ticket', language: '' });
     expect(parseUi({ ui: { prUrl: 'https://x/"onmouseover="y' } }, env).prUrl).toBe('');
   });
 });

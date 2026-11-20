@@ -14,6 +14,7 @@ import { lastNewsAt } from './quiet.ts';
 import { pendingQueue, type QueuedPrompt } from './queued.ts';
 import { activeAccountUuid, markActiveAccount, readClaudeUsage, promptSuggestionSetting } from './usage.ts';
 import { AskJudge, claudeAskAsync } from './asks-judge.ts';
+import { T } from './i18n.ts';
 import {
   addContent, GUID, ieq, imatch, isDir, isFile, leaf, mtimeMs, netTrim, nowMs, parent, psString, readJson, readTail,
   setContent, setContentAtomic, splitPathParent, transcriptCreatedAt,
@@ -102,11 +103,11 @@ export function applyManual(auto: SessionTag[] | null, m: ManualTags | undefined
   return out.length ? out : null;
 }
 export function checkTag(id: string, axis: string, v: string, vocab: { domaines: string[]; outils: string[] }): string | null {
-  if (!GUID.test(id)) return 'session inconnue';
-  if (!TAG_EDITABLE.has(axis)) return 'axe non modifiable (domaine, outil ou fonction)';
-  if (axis === 'domaine' && !vocab.domaines.includes(v)) return 'domaine hors liste';
-  if (axis === 'outil' && !vocab.outils.includes(v)) return 'outil hors liste';
-  if (axis === 'fonction' && (v.length < 3 || v.length > 40 || !/^[a-z0-9]+(-[a-z0-9]+){0,4}$/.test(v))) return 'fonction : 1 à 5 mots en minuscules reliés par « - », 3 à 40 caractères';
+  if (!GUID.test(id)) return T('session inconnue', 'unknown session');
+  if (!TAG_EDITABLE.has(axis)) return T('axe non modifiable (domaine, outil ou fonction)', 'axis not editable (domaine, outil or fonction)');
+  if (axis === 'domaine' && !vocab.domaines.includes(v)) return T('domaine hors liste', 'domain not in the list');
+  if (axis === 'outil' && !vocab.outils.includes(v)) return T('outil hors liste', 'tool not in the list');
+  if (axis === 'fonction' && (v.length < 3 || v.length > 40 || !/^[a-z0-9]+(-[a-z0-9]+){0,4}$/.test(v))) return T('fonction : 1 à 5 mots en minuscules reliés par « - », 3 à 40 caractères', 'function: 1 to 5 lowercase words joined by "-", 3 to 40 characters');
   return null;
 }
 /** Valeurs admises pour les axes fermés. L'étiqueteur n'est pas une pièce du serveur : il publie son vocabulaire dans

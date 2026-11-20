@@ -5,6 +5,7 @@
 // le reste passe par une FILE traitée une requête à la fois (la « boucle » : actions, recherche, dossiers, lanceur),
 // entre deux calculs d'état — jamais en même temps qu'eux. Mêmes en-têtes, mêmes codes, mêmes refus d'accès.
 // En plus du .ps1 : --allow-write absent ⇒ toute action est refusée (serveur À CÔTÉ en lecture seule).
+import { langOf, T, withLang } from './i18n.ts';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { createServer as createTcpServer, connect, type Server as TcpServer, type Socket } from 'node:net';
 import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -101,7 +102,7 @@ export function readBody(req: IncomingMessage, maxChars = Infinity, maxBytes = M
 function tooBig(req: IncomingMessage, res: ServerResponse): void {
   req.resume();
   try { res.setHeader('Connection', 'close'); } catch { /* en-têtes déjà partis */ }
-  json(res, 413, TOO_BIG);
+  json(res, 413, { error: T(TOO_BIG.error, 'request body too large (1 MB max)') });
   setTimeout(() => { try { req.socket.destroy(); } catch { /* fermé */ } }, 2000).unref();
 }
 /** Réponse du relais à un Host qui n'est pas le nom du poste sur le tailnet : rien n'est transmis au serveur. */
@@ -158,9 +159,9 @@ export class Server {
     for (const host of ['127.0.0.1', '::1']) {
       const s = createServer((req, res) => {
         // Arrêt en cours : refus net, que la page sait lire (bandeau de reconnexion) — jamais une requête acceptée puis coupée.
-        if (this.#draining) { req.resume(); res.setHeader('Connection', 'close'); json(res, 503, { error: "serveur en cours d'arrêt" }); return; }
+        if (this.#draining) { req.resume(); res.setHeader('Connection', 'close'); json(res, 503, { error: withLang(langOf(req.headers['x-sd-lang']), () => T("serveur en cours d'arrêt", 'server is shutting down')) }); return; }
         this.#inflight++; res.once('close', () => { this.#inflight--; });
-        this.#handle(req, res).catch((e) => { this.logError(`${req.url} : ${(e as Error).message}`); reply(res, 500, null, ''); });
+        withLang(langOf(req.headers['x-sd-lang']), () => this.#handle(req, res)).catch((e) => { this.logError(`${req.url} : ${(e as Error).message}`); reply(res, 500, null, ''); });
       });
       s.keepAliveTimeout = 5000;
       await new Promise<void>((ok, ko) => { s.once('error', ko); s.listen(this.cfg.port, host, () => { s.off('error', ko); ok(); }); })
@@ -251,7 +252,7 @@ export class Server {
     // REQUÊTE VENUE D'UN AUTRE SITE (le navigateur le dit : Sec-Fetch-Site) : jamais l'API. Ferme entre autres un
     // GET /api/stop déclenché par une image posée sur une page tierce. La page elle-même reste ouvrable par un lien.
     const site = header(req, 'sec-fetch-site')?.trim().toLowerCase();
-    if (path.startsWith('/api/') && (site === 'cross-site' || site === 'same-site')) { req.resume(); json(res, 403, { error: "requête venue d'un autre site" }); return; }
+    if (path.startsWith('/api/') && (site === 'cross-site' || site === 'same-site')) { req.resume(); json(res, 403, { error: T("requête venue d'un autre site", 'request from another site') }); return; }
     const login = header(req, 'tailscale-user-login');
     const remote = login !== undefined || header(req, 'x-forwarded-for') !== undefined || !isLoopback(req.socket.remoteAddress);
     const owner = remote && this.remoteOwner !== null && ieq(login, this.remoteOwner);
@@ -262,10 +263,10 @@ export class Server {
     }
     // À DISTANCE : le propriétaire du poste seulement, en lecture comme en écriture — un autre membre du tailnet ne lit rien.
     if (remote) {
-      if (!owner) { req.resume(); json(res, 403, { error: 'accès distant réservé au propriétaire du poste' }); return; }
+      if (!owner) { req.resume(); json(res, 403, { error: T('accès distant réservé au propriétaire du poste', 'remote access is reserved for the owner of this machine') }); return; }
       const readOk = method === 'GET' && REMOTE_OK.has(path);
       const writeOk = method === 'POST' && path.startsWith('/api/') && !REMOTE_NEVER.has(path) && this.remoteOrigin !== null && origin === this.remoteOrigin;
-      if (!readOk && !writeOk) { req.resume(); json(res, 403, { error: 'action refusée à distance' }); return; }
+      if (!readOk && !writeOk) { req.resume(); json(res, 403, { error: T('action refusée à distance', 'action refused remotely') }); return; }
     }
     // Corps plafonné (hors pièce jointe, qui a sa propre limite) : longueur annoncée au-delà de 1 Mo ⇒ refus sans lire.
     if (method === 'POST' && path !== '/api/upload' && Number(header(req, 'content-length') ?? 0) > MAX_BODY) { tooBig(req, res); return; }
@@ -276,7 +277,7 @@ export class Server {
     if (path === '/api/upload') {
       const fromPage = origin !== undefined && (origin === this.cfg.origin || (remote && this.remoteOrigin !== null && origin === this.remoteOrigin));
       if (method === 'POST' && fromPage) {
-        if (!this.cfg.allowWrite) { req.resume(); json(res, 403, { error: 'serveur à côté en lecture seule (--allow-write pour écrire)' }); return; }
+        if (!this.cfg.allowWrite) { req.resume(); json(res, 403, { error: T('serveur à côté en lecture seule (--allow-write pour écrire)', 'read-only side server (--allow-write to write)') }); return; }
         const r = await upload(req, this.uploadDir); json(res, r.status, r.body);
       } else { req.resume(); json(res, 403, '{}'); }
       return;
@@ -326,9 +327,9 @@ export class Server {
 
   #transcript(url: URL, res: ServerResponse): void {
     const id = (url.searchParams.get('id') ?? '').trim().toLowerCase();
-    if (!GUID.test(id)) { json(res, 400, { error: 'identifiant de session invalide' }); return; }
+    if (!GUID.test(id)) { json(res, 400, { error: T('identifiant de session invalide', 'invalid session id') }); return; }
     const f = this.d.metaCache.get(id)?.path ?? this.d.findTranscript(id);
-    if (!f || !exists(f)) { json(res, 404, { error: 'transcript introuvable' }); return; }
+    if (!f || !exists(f)) { json(res, 404, { error: T('transcript introuvable', 'transcript not found') }); return; }
     json(res, 200, readTranscript(f, url.searchParams.get('before'), url.searchParams.get('after')));
   }
 
@@ -366,7 +367,7 @@ export class Server {
         this.#wake = () => { clearTimeout(t); this.#wake = null; ok(this.#queue.shift()); };
       });
       if (!item) continue;
-      const isAction = await this.#process(item);
+      const isAction = await withLang(langOf(item.req.headers['x-sd-lang']), () => this.#process(item));
       if (isAction) this.#dirty = true;
     }
   }
@@ -384,10 +385,10 @@ export class Server {
       let err = '', over = false;
       const end = (v: string | null) => { if (!over) { over = true; clearTimeout(timer); done(v); } };
       const p = spawn(process.execPath, [script, 'send', chatId], { windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'], env: { ...process.env, SD_TEAMS_WAITS_DIR: this.d.sf('teams-waits') } });
-      const timer = setTimeout(() => { try { p.kill(); } catch { /* déjà fini */ } end('délai dépassé (45 s) : vérifier dans Teams avant de renvoyer'); }, 45_000);
+      const timer = setTimeout(() => { try { p.kill(); } catch { /* déjà fini */ } end(T('délai dépassé (45 s) : vérifier dans Teams avant de renvoyer', 'timed out (45 s): check in Teams before sending again')); }, 45_000);
       p.stderr.on('data', (b: Buffer) => { if (err.length < 2000) err += b.toString('utf8'); });
-      p.on('error', (e) => end(`veilleur injoignable : ${e.message}`));
-      p.on('close', (code) => end(code === 0 ? null : err.trim().split(/\r?\n/).pop() || `échec (code ${code})`));
+      p.on('error', (e) => end(T(`veilleur injoignable : ${e.message}`, `watcher unreachable: ${e.message}`)));
+      p.on('close', (code) => end(code === 0 ? null : err.trim().split(/\r?\n/).pop() || T(`échec (code ${code})`, `failed (code ${code})`)));
       p.stdin.on('error', () => { /* le veilleur a fermé avant de lire */ });
       p.stdin.end(text);
     });
@@ -400,7 +401,7 @@ export class Server {
     const allowed = isAction ? method === 'POST' && (origin === this.cfg.origin || (this.remoteOrigin !== null && origin === this.remoteOrigin))
       : method === 'GET' && (origin === undefined || origin === this.cfg.origin);
     if (!allowed) { req.resume(); reply(res, 403, null, ''); return isAction; }
-    if (isAction && !this.cfg.allowWrite) { req.resume(); json(res, 403, { error: 'serveur à côté en lecture seule (--allow-write pour écrire)' }); return false; }
+    if (isAction && !this.cfg.allowWrite) { req.resume(); json(res, 403, { error: T('serveur à côté en lecture seule (--allow-write pour écrire)', 'read-only side server (--allow-write to write)') }); return false; }
     // Corps lu UNE fois, en flux et plafonné à 1 Mo (un corps sans longueur annoncée n'est pas arrêté par la façade).
     const raw = method === 'POST' ? await readBody(req) : '';
     if (raw === null) { tooBig(req, res); return isAction; }
@@ -412,7 +413,7 @@ export class Server {
       const knownPid = pidQ !== null && exists(join(this.d.sessionsDir, `${target}.json`));
       const payload = async (): Promise<unknown> => parseBody(raw);
       const headless = knownPid && HEADLESS_REFUSED.has(path) && (await this.d.openSessions()).some((s) => Number(s.pid) === target && s.headless);
-      if (headless) { status = 409; body = '{"code":4,"error":"automate sans terminal (claude -p) : il se pilote depuis son lanceur"}'; }
+      if (headless) { status = 409; body = JSON.stringify({ code: 4, error: T('automate sans terminal (claude -p) : il se pilote depuis son lanceur', 'automation without a terminal (claude -p): drive it from its launcher') }); }
       else if ((!this.launcher.enabled && LAUNCHER_ROUTES.has(path)) || (!this.cfg.modules.teams && TEAMS_ROUTES.has(path)) || (!this.automations.enabled && AUTOMATION_ROUTES.has(path))) { req.resume(); status = 404; body = '{}'; }
       else switch (path) {
         case '/api/state': body = JSON.stringify({ ...(await this.d.state()), server: { boot: BOOT, page: this.#pageVersion() } }); break;
@@ -487,7 +488,7 @@ export class Server {
           if (!isObjBody(j)) { status = 400; body = '{}'; break; }
           const action = psString(pget(j, 'action')), sid = psString(pget(j, 'sessionId')), mid = psString(pget(j, 'messageId'));
           const err = ['dismiss', 'remind', 'snooze'].includes(action) && /^[\w-]+$/.test(sid) && /^\d+$/.test(mid)
-            ? applyAction(this.d.sf('teams-waits'), sid, mid, action, nowMs()) : 'demande invalide';
+            ? applyAction(this.d.sf('teams-waits'), sid, mid, action, nowMs()) : T('demande invalide', 'invalid request');
           if (!err && action === 'remind') spawn(process.execPath, [fileURLToPath(new URL('./teams-watcher.ts', import.meta.url))], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_TEAMS_WAITS_DIR: this.d.sf('teams-waits') } }).unref();
           this.d.teamsCache = { k: '', value: null };
           body = JSON.stringify({ error: err });
@@ -508,7 +509,7 @@ export class Server {
           if (!isObjBody(j)) { status = 400; body = '{}'; break; }
           const chatId = psString(pget(j, 'chatId')), text = psString(pget(j, 'text'));
           const err = chatId.length <= 240 && /^[\w:@.-]+$/.test(chatId) && text.trim() && text.length <= 8000
-            ? await this.#teamsSend(chatId, text) : 'demande invalide';
+            ? await this.#teamsSend(chatId, text) : T('demande invalide', 'invalid request');
           this.d.teamsCache = { k: '', value: null };
           body = JSON.stringify({ error: err });
           break;
@@ -522,7 +523,7 @@ export class Server {
           const note = psString(pget(j, 'note'));
           const anchors = arr(pget(j, 'anchors')).map((x) => psString(x)).filter((x) => /^\d{6,24}$/.test(x)).slice(0, 20);
           const more = { ...(anchors.length ? { anchors } : {}), ...(note.trim() ? { note } : {}), ...(psTruthy(pget(j, 'once')) ? { once: true } : {}) };
-          let err: string | null = 'demande invalide';
+          let err: string | null = T('demande invalide', 'invalid request');
           if (chatId.length <= 240 && /^[\w:@.-]+$/.test(chatId)) {
             if (action === 'detach') err = unlinkConversation(dir, chatId, nowMs());
             else if (action === 'attach' && sid === 'new') err = linkConversation(dir, chatId, randomUUID(), nowMs(), { fresh: true, ...more });
@@ -539,7 +540,7 @@ export class Server {
           if (!isObjBody(j)) { status = 400; body = '{}'; break; }
           const action = psString(pget(j, 'action')), chatId = psString(pget(j, 'chatId')), at = Number(pget(j, 'at'));
           const err = ['seen', 'unseen'].includes(action) && chatId.length <= 240 && (chatId === '*' || /^[\w:@.-]+$/.test(chatId))
-            ? markConversationSeen(this.d.sf('teams-waits'), chatId, action, at, nowMs()) : 'demande invalide';
+            ? markConversationSeen(this.d.sf('teams-waits'), chatId, action, at, nowMs()) : T('demande invalide', 'invalid request');
           this.d.teamsCache = { k: '', value: null };
           body = JSON.stringify({ error: err });
           break;

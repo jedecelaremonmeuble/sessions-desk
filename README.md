@@ -6,7 +6,7 @@ read their screen and conversation, and lets you answer them — from one browse
 
 ![Sessions Desk: one session waiting on a permission dialog, one finished with its pull request, one at work](docs/demo.gif)
 
-<sub>Recorded on the demo profile (`npm run demo`, made-up sessions). The interface is in French for now.</sub>
+<sub>Recorded on the demo profile (`npm run demo`, made-up sessions).</sub>
 
 > **Status: shared as-is.** This is a tool one team built for its own daily use and published in the hope it is
 > useful. There is no support and no compatibility promise. Issues are welcome; they may not get an answer.
@@ -85,6 +85,7 @@ or the `SD_CONFIG` environment variable). The file is optional. A template is in
 |---|---|
 | `ui.pathPrefix` | Folder prefix not repeated in the list (for instance your main repository) |
 | `ui.prUrl`, `ui.ticketUrl`, `ui.ticketLabel` | Where pull-request and ticket links point |
+| `ui.language` | `en` or `fr`: the page language on this machine (default: the browser's) |
 | `modules` | The optional modules below |
 
 Paths may use `~`, `%USERPROFILE%`, `%LOCALAPPDATA%` and `%TEMP%`. A missing or malformed entry is ignored: the
@@ -191,8 +192,16 @@ one finished with a pull request, two at work, one idle) and a closed one to reo
 real `~/.claude` is read or written. `--root C:\some\empty\folder` puts the demo files there instead of the temp
 folder, `--port` changes the port.
 
-Tests never write to a real session: they open their own test consoles. Source comments, test names and the
-interface are in French.
+Tests never write to a real session: they open their own test consoles. Source comments and test names are in
+French.
+
+### Languages
+
+The page is in English or French. It follows `?lang=en|fr` in the address, then the choice made with the button of
+the overview, then `ui.language`, then the browser language. Every text shown to the user is written with both
+versions side by side, `T('texte français', 'English text')`, in `page/app.js` and in `server/src/` (the server
+answers in the language of the page, sent in the `X-SD-Lang` header of each call; see `server/src/i18n.ts`). A new
+text needs both.
 
 ## License
 
