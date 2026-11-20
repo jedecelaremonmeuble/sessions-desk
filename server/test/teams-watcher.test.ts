@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
+import { READ_MAX_AGE_MS, loginScope, runMarkRead, tokenTenant } from '../src/teams-watcher.ts';
 import { setOwner, defaultConfig, defaultInbound, inboundFollowUp, inboundPrompt, isAck, judgeInbound, runInbound, type InboundDeps, type InboundState } from '../src/teams-watcher.ts';
 import { HOOK_MATCHER, MAIL_TOOLS, GROUP_MS, TOOL, addBusinessHours, applyAction, businessClamp, chatLabel, htmlText, injectionText, installHook, isBusinessDay, judge, loadWaits, nextBusinessDayAt, nextStep, noReplyExpected, parisAt, record, reminderText, saveWait, sentMessageId, summarize, waitFromHook, type GraphMessage, type Wait } from '../src/teams-watcher.ts';
 
@@ -276,6 +277,8 @@ describe('demandes entrantes (lot 3)', () => {
       expect(await runInbound(dir, cfg, ME, new Set(), w.deps, { dryRun: false, now: T0 + 300_000 })).toMatchObject({ seen: 1, opened: 1, errors: [] });
       expect(w.calls.opened).toHaveLength(1);
       expect(w.calls.opened[0]).toMatchObject({ sid: 'sid-1' });
+      // Lot 8 : le fil confié à une session est à marquer lu — pas une rafale en attente, ni une passe à blanc.
+      expect((await runInbound(dir, cfg, ME, new Set(), world(w.messages).deps, { dryRun: false, now: T0 + 420_000 })).read).toEqual([]);
       expect(w.calls.opened[0]!.prompt).toContain('t/111111');
       expect(state().chats[CHAT]).toMatchObject({ sessionId: 'sid-1', handledAt: T0 + 79_000, internal: true, label: 'Camille MARTIN', from: 'Camille' });
       // Même état, passe suivante : rien de neuf.
@@ -285,7 +288,7 @@ describe('demandes entrantes (lot 3)', () => {
       w.sessions.push({ sessionId: 'sid-1', pid: 42, status: 'busy' });
       expect(await runInbound(dir, cfg, ME, new Set(), w.deps, { dryRun: false, now: T0 + 2_700_000 })).toMatchObject({ deferred: 1, followed: 0 });
       w.sessions[0]!.status = 'idle';
-      expect(await runInbound(dir, cfg, ME, new Set(), w.deps, { dryRun: false, now: T0 + 2_820_000 })).toMatchObject({ followed: 1, opened: 0 });
+      expect(await runInbound(dir, cfg, ME, new Set(), w.deps, { dryRun: false, now: T0 + 2_820_000 })).toMatchObject({ followed: 1, opened: 0, read: [CHAT] });
       expect(w.calls.sent[0]).toContain('📥 Suite de Camille MARTIN');
       // Session fermée, nouvelle demande dans l'heure : le plafond horaire retient l'ouverture, sans la perdre.
       w.sessions.length = 0;
@@ -318,5 +321,50 @@ describe('demandes entrantes (lot 3)', () => {
       w.deps.open = open;
       expect(await runInbound(dir, cfg, ME, new Set(), w.deps, { dryRun: false, now: T0 + 420_000 })).toMatchObject({ opened: 1 });
     });
+  });
+});
+
+describe('fils lus (lot 8)', () => {
+  let dir = '';
+  afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); });
+  const jwt = (payload: unknown) => `x.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.y`;
+  const queue = () => { try { return JSON.parse(readFileSync(join(dir, '_read.json'), 'utf8')) as { chats: Record<string, number> }; } catch { return null; } };
+
+  test('portée : Chat.ReadWrite demandé au login seulement si le marquage est allumé', () => {
+    expect(loginScope(defaultConfig)).toBe('Chat.Read User.Read offline_access');
+    expect(loginScope({ ...defaultConfig, markRead: true })).toBe('Chat.Read User.Read offline_access Chat.ReadWrite');
+    expect(loginScope({ ...defaultConfig, mail: true, markRead: true })).toBe('Chat.Read User.Read offline_access Mail.Read Chat.ReadWrite');
+  });
+  test('locataire lu dans le jeton, null sans revendication tid', () => {
+    expect(tokenTenant(jwt({ tid: 'tenant-1', oid: 'x' }))).toBe('tenant-1');
+    expect(tokenTenant(jwt({ oid: 'x' }))).toBeNull();
+    expect(tokenTenant('opaque')).toBeNull();
+  });
+  test('un fil marqué sort de la file ; un échec se rejoue, puis est abandonné après 30 min', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'tw-'));
+    const T = 1795080000000, done: string[] = [];
+    let down = true;
+    const mark = async (c: string) => { if (down && c === '19:b') throw new Error('Graph 403 sur /chats/<chat>/markChatReadForUser'); done.push(c); };
+    // Rien à faire : aucun fichier n'est créé.
+    expect(await runMarkRead(dir, [], T, mark)).toEqual({ marked: 0, errors: [] });
+    expect(queue()).toBeNull();
+    expect(await runMarkRead(dir, ['19:a', '19:b', '19:a'], T, mark)).toEqual({ marked: 1, errors: ['fil lu : Graph 403 sur /chats/<chat>/markChatReadForUser'] });
+    expect(done).toEqual(['19:a']);
+    expect(queue()!.chats).toEqual({ '19:b': T });
+    // Passe suivante : l'échec est rejoué sans qu'on le redemande.
+    down = false;
+    expect(await runMarkRead(dir, [], T + 120_000, mark)).toEqual({ marked: 1, errors: [] });
+    expect(done).toEqual(['19:a', '19:b']);
+    expect(queue()).toBeNull();
+    // Trop vieux : marquer lu maintenant couvrirait des messages que la session n'a pas vus.
+    down = true;
+    await runMarkRead(dir, ['19:b'], T, mark);
+    expect(await runMarkRead(dir, [], T + READ_MAX_AGE_MS + 1, mark)).toEqual({ marked: 0, errors: [] });
+    expect(queue()).toBeNull();
+  });
+  test('jeton refusé : une seule erreur pour tous les fils', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'tw-'));
+    const r = await runMarkRead(dir, ['19:a', '19:b'], 1795080000000, async () => { throw new Error('jeton refusé : invalid_grant'); });
+    expect(r).toEqual({ marked: 0, errors: ['fil lu : jeton refusé : invalid_grant'] });
   });
 });

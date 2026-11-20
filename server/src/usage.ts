@@ -2,6 +2,7 @@
 import type { Config } from './config.ts';
 import { mtimeMs, psString, readJson, stripBom } from './util.ts';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * ConvertTo-LaunchMs. Côté PowerShell, ConvertFrom-Json a déjà converti les chaînes ISO en DateTime ; ici elles
@@ -63,3 +64,22 @@ export function readClaudeUsage(cfg: Config): unknown[] {
 /** Fichier du relevé : celui du module « quota », '' s'il est éteint. */
 export const usageFile = (cfg: Config): string => cfg.modules.quota?.file ?? '';
 export const readUsageRaw = (cfg: Config): unknown => { const f = usageFile(cfg); return f ? readJson(f) : undefined; };
+
+/**
+ * Proposition de prompt FORCÉE malgré le quota ? Claude Code (2.1.329) cesse d'en générer dès que le quota n'est plus
+ * « allowed » (alerte) et après 8 tours sans personne, SAUF si `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` vaut vrai — dans
+ * l'environnement ou dans le bloc `env` de ~/.claude/settings.json (relu quand il change). La page s'en sert pour dire
+ * si le mode dégradé coupe les propositions. Lue au démarrage de chaque session : une session plus ancienne que le
+ * réglage n'en profite pas (`since` = date du fichier, approximation).
+ */
+let sugCache: { stamp: number; value: { forced: boolean; since: number | null } } = { stamp: -1, value: { forced: false, since: null } };
+const truthy = (v: unknown): boolean => /^(1|true|yes|on)$/i.test(String(v ?? '').trim());
+export function promptSuggestionSetting(cfg: Config, env: NodeJS.ProcessEnv = process.env): { forced: boolean; since: number | null } {
+  if (truthy(env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION)) return { forced: true, since: null };
+  const f = join(cfg.claude, 'settings.json'); const stamp = mtimeMs(f);
+  if (stamp === sugCache.stamp) return sugCache.value;
+  let forced = false;
+  try { const j = JSON.parse(stripBom(readFileSync(f, 'utf8'))) as { env?: Record<string, unknown> }; forced = truthy(j.env?.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION); } catch { /* illisible : non forcé */ }
+  sugCache = { stamp, value: { forced, since: forced && stamp ? Math.trunc(stamp) : null } };
+  return sugCache.value;
+}

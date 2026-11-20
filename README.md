@@ -95,8 +95,20 @@ server never fails to start because of this file.
 | `quota` | An account usage banner | `file`: a usage file written by a collector of your own |
 
 The `launcher` module is published as an example of plugging an orchestrator in; it expects that orchestrator's
-own folder layout and is unlikely to fit yours unchanged. Tags are read from `~/.claude/state/session-tags/` when
-something writes them there; the program that produces them is not part of this repository.
+own folder layout and is unlikely to fit yours unchanged.
+
+### Tags
+
+Tags are read from `~/.claude/state/session-tags/`. They are written by `server/src/tagger.ts`, a standalone
+program meant to run as a scheduled task (`node server/src/tagger.ts`). It is published as-is: its rules
+(`server/src/tagger-config.json`) and some of its code describe the original team's repository, so you will have
+to adapt them to yours.
+
+### Running it at logon
+
+`server/watchdog/Install-NodeWatchdog.ps1 -Port 8765 -Primary` copies the current commit to a run folder and
+registers a scheduled task that starts the server at logon and restarts it if it stops answering.
+`server/scripts/restart-idle-sessions.ps1` is an optional helper that restarts idle sessions.
 
 ## Keyboard shortcuts
 
