@@ -2916,6 +2916,7 @@ async function loadConv(it, mode) {
   if (!$('convlist') || !it || !it.sessionId) return;
   if (!conv || conv.key !== it.key || conv.id !== it.sessionId) conv = { key: it.key, id: it.sessionId, items: [], start: null, end: null, more: false, busy: false, err: null };
   const c = conv;
+  c.phase = it.kind === 'run' && it.run ? it.run.phase : null;     // conversation d'un run : ses messages ont un auteur précis
   if (mode === 'init' && c.end != null) { drawConv(true); return; }      // déjà chargée : on revient dessus
   if (mode === 'more' && c.end == null) mode = 'init';
   if (c.busy) return; c.busy = true;
@@ -3048,6 +3049,27 @@ function mdRender(m) {
   catch (e) { console.log('[sessions] markdown :', e); root.className = 'tx'; root.textContent = m.t; }
   return root;
 }
+// ── Provenance des messages ──
+// Tout ce qui porte le rôle « user » n'est pas tapé par la personne, et « assistant » n'est pas toujours la session
+// qu'on pilote : la consigne d'un run vient de l'orchestrateur, sa réponse de l'agent de cette étape (diagnostic,
+// développement, relecture…), une fin de tâche de fond de Claude Code lui-même. Chaque provenance a son libellé et sa
+// couleur. PURE (testée) : m = élément de /api/transcript (m.o = provenance lue par le serveur), phase = étape du run
+// dont on lit la conversation (null pour une session ordinaire).
+const AGENT_FR = { diagnostic:'Agent de diagnostic', suite:'Agent de diagnostic · suite', relance:'Agent de diagnostic · relance', reveil:'Agent de diagnostic · réveil',
+  dev:'Agent de développement', reprise:'Agent de développement · reprise', relecture:'Agent de relecture', recette:'Agent de recette' };
+const AGENT_KIND = { diagnostic:'diag', suite:'diag', relance:'diag', reveil:'diag', dev:'dev', reprise:'dev', relecture:'review', recette:'recette' };
+function convOrigin(m, phase) {
+  if (m.r === 'assistant') return phase ? { cls: 'agent ag-' + (AGENT_KIND[phase] || 'other'), who: '🤖 ' + (AGENT_FR[phase] || 'Agent du lanceur · ' + phase) } : { cls: '', who: 'Claude' };
+  const t = String(m.t == null ? '' : m.t).trim(); let x;
+  if (m.o === 'task' || /^<task-notification>[\s\S]*<\/task-notification>$/.test(t)) {
+    const unesc = v => v.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+    const st = /<status>([^<]*)<\/status>/.exec(t); x = /<summary>([\s\S]*?)<\/summary>/.exec(t);
+    return { cls: 'task', who: '⚙ Tâche de fond', text: x ? unesc(x[1]).trim() : t, err: !!st && st[1].trim() !== 'completed' };
+  }
+  if (m.o === 'sdk') return { cls: 'auto', who: phase ? '🤖 Lanceur · consigne du run' : '🤖 Automate · consigne de lancement' };
+  if ((x = /^<pasted_content[^>]*>\n?([\s\S]*?)\n?<\/pasted_content>$/.exec(t)) && !x[1].includes('<pasted_content')) return { cls: 'paste', who: '📋 Collé dans la session', text: x[1] };
+  return { cls: '', who: 'Toi' };
+}
 function convItem(m) {
   if (m.r === 'tool') {
     const d = el('div', 'cm tool'); const lines = m.t.split('\n');
@@ -3060,8 +3082,14 @@ function convItem(m) {
     d.append(el('summary', null, (m.r === 'summary' ? '📋 Résumé de compactage — ' : (m.e ? '✗ ' : '↳ ')) + (first.length > 160 ? first.slice(0, 160) + '…' : first)), el('pre', null, m.t));
     return d;
   }
-  const d = el('div', 'cm ' + m.r);
-  d.append(el('div', 'who', (m.r === 'user' ? 'Toi' : 'Claude') + (m.at ? ' · ' + convWhen(m.at) : '')), m.r === 'assistant' ? mdRender(m) : el('div', 'tx', m.t));
+  const og = convOrigin(m, conv ? conv.phase : null), when = m.at ? ' · ' + convWhen(m.at) : '';
+  if (og.cls === 'task') {     // une ligne repliée, comme un résultat d'outil : le détail brut reste à un clic
+    const d = el('details', 'cm res task' + (og.err ? ' err' : ''));
+    d.append(el('summary', null, og.who + when + ' — ' + (og.text.length > 160 ? og.text.slice(0, 160) + '…' : og.text)), el('pre', null, m.t));
+    return d;
+  }
+  const d = el('div', 'cm ' + m.r + (og.cls ? ' ' + og.cls : ''));
+  d.append(el('div', 'who', og.who + when), m.r === 'assistant' ? mdRender(m) : el('div', 'tx', og.text != null ? og.text : m.t));
   return d;
 }
 function drawConv(toBottom, keepTop) {
