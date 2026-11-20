@@ -21,6 +21,12 @@ h1 { font-size:16px; margin:0; } h2 { font-size:13px; margin:22px 0 8px; color:v
 #q { flex:1; min-width:0; padding:7px 10px; font:inherit; color:var(--ink); background:var(--card); border:1px solid var(--line); border-radius:6px; }
 #q:focus { outline:2px solid var(--shell); outline-offset:-1px; }
 #list { overflow-y:auto; flex:1; padding:0 6px 16px; }
+/* Survol d'une ligne : dernier message de Claude (carte hors de la liste, jamais cliquable : elle ne vole pas le survol) */
+#hovercard { position:fixed; z-index:40; width:min(460px, calc(100vw - 40px)); pointer-events:none; background:var(--card); border:1px solid var(--line); border-left:4px solid var(--c, var(--line)); border-radius:8px; padding:10px 14px; box-shadow:0 6px 24px rgba(0,0,0,.22); font-size:13px; }
+#hovercard[hidden] { display:none; }
+#hovercard .hh { color:var(--mute); font-size:11px; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
+#hovercard .hb { white-space:pre-wrap; overflow-wrap:anywhere; max-height:46vh; overflow:hidden; }
+#hovercard .hs { margin-top:8px; padding-top:6px; border-top:1px dashed var(--line); font-style:italic; overflow-wrap:anywhere; }
 .grp { display:flex; align-items:center; gap:6px; padding:12px 8px 4px; font-size:11px; font-weight:600; color:var(--mute); text-transform:uppercase; letter-spacing:.05em; cursor:pointer; user-select:none; }
 .grp a { margin-left:auto; } .grp a + .n { margin-left:8px; } .grp .n { margin-left:auto; font-variant-numeric:tabular-nums; } .grp .car { width:10px; display:inline-block; }
 .row-s { display:grid; grid-template-columns:14px minmax(0, 1fr) auto; column-gap:6px; padding:6px 8px; border-radius:6px; cursor:pointer; }

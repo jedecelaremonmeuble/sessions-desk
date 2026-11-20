@@ -1394,7 +1394,49 @@ function renderList() {
   const unread = data.notifs.filter(nf => nf.at > Number(localStorage.getItem('cc.notifSeen') || 0)).length; $('belln').textContent = unread ? unread : '';
   const todo = allItems().filter(it => TODO.includes(it.state)).length;
   document.title = (todo ? '(' + todo + ') ' : '') + 'Sessions Claude Code';
+  refreshHoverCard();
 }
+
+// Survol d'une ligne de la liste : le dernier message de Claude (et sa proposition 💡), sans ouvrir la session.
+// La ligne ne montre que TON dernier prompt et le bouton ▶ : pour savoir si la proposition vaut d'être lancée, il
+// faut lire ce que Claude vient de dire. La liste est reconstruite à chaque rendu (toutes les 2 s) : la carte vit
+// hors de la liste, l'écoute est déléguée à #list et renderList la rafraîchit. Pas de carte sur écran tactile ou
+// étroit (pas de survol), ni pour la session déjà ouverte à droite (son message y est affiché).
+const HOVER_DELAY = 350, CAN_HOVER = matchMedia('(hover: hover)');
+let hoverKey = null, hoverShown = false, hoverTimer = null, hoverMuted = null;
+function hoverCardEl() {
+  let c = $('hovercard');
+  if (!c) { c = el('div'); c.id = 'hovercard'; c.hidden = true; document.body.append(c); }
+  return c;
+}
+function hideHoverCard() { clearTimeout(hoverTimer); hoverTimer = null; hoverShown = false; const c = $('hovercard'); if (c) c.hidden = true; }
+function refreshHoverCard() {
+  if (!hoverShown) return;
+  const it = hoverKey && byKey(hoverKey), row = it && [...$('list').querySelectorAll('.row-s')].find(r => r.dataset.key === hoverKey);
+  const reply = it && it.reply ? String(it.reply).trim() : '';
+  if (!row || !reply || !CAN_HOVER.matches || NARROW.matches || hoverKey === selected) { const c = $('hovercard'); if (c) c.hidden = true; return; }
+  const c = hoverCardEl(); c.className = it.look || it.state || '';
+  const sig = hoverKey + '\n' + reply + '\n' + (it.suggestion || '');
+  if (c.dataset.sig !== sig) {                     // même contenu : on ne touche pas au DOM (pas de saut de défilement)
+    c.dataset.sig = sig; c.replaceChildren(el('div', 'hh', 'Dernier message de Claude'), el('div', 'hb', reply));
+    if (it.suggestion) c.append(el('div', 'hs', '💡 ' + it.suggestion));
+  }
+  c.hidden = false;
+  const a = $('list').getBoundingClientRect(), r = row.getBoundingClientRect();
+  c.style.left = Math.round(a.right + 8) + 'px';
+  c.style.top = Math.round(Math.max(8, Math.min(r.top, innerHeight - c.offsetHeight - 8))) + 'px';
+  const hb = c.querySelector('.hb'); hb.scrollTop = hb.scrollHeight;   // message long : c'est sa fin qui dit où on en est
+}
+function hoverRow(key) {
+  if (key === hoverKey) return;
+  hideHoverCard(); hoverKey = key; if (key !== hoverMuted) hoverMuted = null;
+  if (!key || key === hoverMuted) return;
+  hoverTimer = setTimeout(() => { hoverShown = true; refreshHoverCard(); }, HOVER_DELAY);
+}
+$('list').addEventListener('mouseover', e => { const r = e.target.closest ? e.target.closest('.row-s') : null; hoverRow(r && r.dataset.key ? r.dataset.key : null); });
+$('list').addEventListener('mouseleave', () => hoverRow(null));
+$('list').addEventListener('scroll', () => { if (hoverShown) refreshHoverCard(); }, { passive: true });
+$('list').addEventListener('click', () => { hoverMuted = hoverKey; hideHoverCard(); });   // on ouvre la session : la carte ne masque pas le détail
 
 // Sessions consultées : une session compte comme « vue » si elle reste sélectionnée 1,5 s (parcourir la
 // liste au clavier ne pollue pas l'historique), ou aussitôt qu'on agit dessus (onglet, réouverture, réponse).
