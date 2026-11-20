@@ -8,14 +8,18 @@
      ce qui tourne sur le poste doit pouvoir être retrouvé ;
   2. copie vers -Target (~/.claude/scripts) l'étiqueteur (session-tagger/), le surveillant Teams (teams-watcher/) et
      restart-idle-sessions.ps1, et pose leurs tâches planifiées si elles n'existent pas encore ;
-  3. réinstalle le serveur Node de production par Install-NodeWatchdog.ps1 -Port 8765 -Primary.
+  3. réinstalle le serveur Node de production par Install-NodeWatchdog.ps1 -Port 8765 -Primary — SAUF si, depuis le
+     commit en service (DEPLOYED.txt de sa copie), seule la page a changé : la page est alors remplacée dans la copie,
+     le serveur continue de tourner (aucune coupure) et les pages ouvertes se rechargent seules. Décision :
+     Deploy-Plan.ps1.
 
   -SkipServer : les étapes 1 et 2 seulement (le serveur n'est ni arrêté ni relancé).
+  -Restart    : redémarre le serveur même si seule la page a changé.
 
 .EXAMPLE
   pwsh -NoProfile -File server/watchdog/Deploy.ps1
 #>
-param([string]$Target = (Join-Path $env:USERPROFILE '.claude\scripts'), [switch]$SkipServer)
+param([string]$Target = (Join-Path $env:USERPROFILE '.claude\scripts'), [switch]$SkipServer, [switch]$Restart)
 $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -61,6 +65,34 @@ Copy-Item (Join-Path $scripts 'restart-idle-sessions.ps1') (Join-Path $Target 'r
 Write-Host "Étiqueteur, surveillant Teams et scripts copiés vers $Target (commit $($head.Substring(0, 10)), $branch)." -ForegroundColor Green
 
 if ($SkipServer) { return }
+
+# Page seule changée depuis le commit en service : on la remplace dans la copie, sans arrêter le serveur.
+. (Join-Path $PSScriptRoot 'Deploy-Plan.ps1')
+$runDir = Join-Path $env:LOCALAPPDATA 'sessions-desk\node-8765'
+$plan = 'restart'; $why = '-Restart demandé'; $running = $null
+if (-not $Restart) {
+    $running = Get-DeployedCommit $runDir
+    $alive = try { $null = Invoke-RestMethod 'http://localhost:8765/api/ping' -TimeoutSec 3; $true } catch { $false }
+    if (-not $running) { $why = 'commit de la copie en service inconnu' }
+    elseif (-not $alive) { $why = 'le serveur ne répond pas' }
+    else {
+        git -C $repo cat-file -e "$running^{commit}" 2>$null
+        if ($LASTEXITCODE) { $why = "commit en service $($running.Substring(0, 10)) absent du clone" }
+        else {
+            $changed = @(git -C $repo diff --name-only $running $head)
+            if ($LASTEXITCODE) { throw 'git diff en échec' }
+            $plan = Get-DeployPlan $changed
+            $why = 'le serveur a changé'
+        }
+    }
+}
+if ($plan -ne 'restart') {
+    Update-RunCopy -Repo $repo -Head $head -RunDir $runDir -Plan $plan -Running $running
+    $msg = if ($plan -eq 'page') { 'page remplacée à chaud, serveur NON redémarré (les pages ouvertes se rechargent seules)' } else { 'rien qui concerne le serveur ni la page, serveur NON redémarré' }
+    Write-Host "Production (8765) sur le commit $($head.Substring(0, 10)) ($branch) : $msg." -ForegroundColor Green
+    return
+}
+Write-Host "redémarrage du serveur : $why." -ForegroundColor Yellow
 & (Join-Path $PSScriptRoot 'Install-NodeWatchdog.ps1') -Port 8765 -Primary
 if (-not $?) { throw 'réinstallation du serveur Node en échec — voir ci-dessus.' }
 Write-Host "Production (8765) redéployée sur le commit $($head.Substring(0, 10)) ($branch)." -ForegroundColor Green
