@@ -7,6 +7,7 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "start": "node src/main.ts",
+    "demo": "node scripts/demo.ts",
     "build:driver": "dotnet build ../driver/SessionsDesk.Driver.csproj -c Release -o ../.build/driver",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

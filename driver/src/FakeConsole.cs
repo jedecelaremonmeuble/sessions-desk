@@ -56,8 +56,12 @@ static class FakeConsole
         Console.OutputEncoding = new UTF8Encoding(false);
         Console.Title = title;
         Console.Clear();
-        Console.WriteLine("Console de test du pilote sessions-desk — à ne pas utiliser.");
-        Console.WriteLine("Ligne accentuée : é à ç ✓ « guillemets »");
+        // --no-banner : écran de démonstration (npm run demo), sans les deux lignes de test.
+        if (!args.Contains("--no-banner"))
+        {
+            Console.WriteLine("Console de test du pilote sessions-desk — à ne pas utiliser.");
+            Console.WriteLine("Ligne accentuée : é à ç ✓ « guillemets »");
+        }
         // --text-file : lignes affichées avant l'invite (dialogue à choix, indicateur « ✻ Verbe… (12s · esc to interrupt) »).
         string? textFile = Opt(args, "--text-file");
         if (textFile != null) foreach (var l in File.ReadAllLines(textFile)) Console.WriteLine(l);

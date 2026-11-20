@@ -15,7 +15,7 @@ export const DRIVER_EXE = process.env.SD_DRIVER_EXE ?? join(REPO, '.build', 'dri
 export interface KeyEvent { at: number; vk: number; ch: string; ctrl: number }
 export type Mode = 'empty' | 'suggestion' | 'draft';
 /** exe : autre exe que le pilote (ex. sa copie nommée claude.exe, pour passer pour une session) ; text : lignes affichées avant l'invite. */
-export interface ConsoleOpts { suggestion?: string; ttl?: number; exe?: string; text?: string; title?: string }
+export interface ConsoleOpts { suggestion?: string; ttl?: number; exe?: string; text?: string; title?: string; noBanner?: boolean }
 
 /**
  * Console de test : le pilote lui-même en mode --fake-console, dans SA console (conhost, pas un onglet Windows
@@ -31,6 +31,7 @@ export class TestConsole {
     const args = ['--fake-console', '--mode', mode, '--log', join(dir, 'keys.jsonl'), '--pidfile', join(dir, 'pid'),
       '--title', title, '--ttl', String(opts.ttl ?? 90)];
     if (opts.suggestion) args.push('--suggestion', opts.suggestion);
+    if (opts.noBanner) args.push('--no-banner');
     if (opts.text) { writeFileSync(join(dir, 'screen.txt'), opts.text, 'utf8'); args.push('--text-file', join(dir, 'screen.txt')); }
     return { dir, title, args, line: [opts.exe ?? DRIVER_EXE, ...args].map(quote).join(' ') };
   }
