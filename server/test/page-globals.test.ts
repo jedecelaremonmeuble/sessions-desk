@@ -16,7 +16,7 @@ test('toute constante en MAJUSCULES lue par la page y est déclarée', () => {
   // Lues sur le source brut : le retrait des chaînes peut avaler une déclaration (une regex contenant un `).
   const declared = new Set([...js.matchAll(/(?:\b(?:const|let|var|function)\s+|,\s*)([A-Z][A-Z0-9_]+)\b(?=\s*[=(])/g)].map(m => m[1]!));
   for (const m of code.matchAll(/\b(?:const|let|var)\s*\{([^}]*)\}/g)) for (const n of m[1]!.split(',')) declared.add(n.split(':').pop()!.trim());
-  const used = new Set([...code.matchAll(/(?<![.\w$])([A-Z][A-Z0-9_]{2,})\b(?!\s*:)/g)].map(m => m[1]));
+  const used = new Set([...code.matchAll(/(?<![.\w$])([A-Z][A-Z0-9_]{2,})\b(?!\s*:)/g)].map(m => m[1]!));
   const builtins = new Set(['JSON', 'URL', 'NaN', 'DOMParser', 'CSS']);
   const missing = [...used].filter(n => !declared.has(n) && !builtins.has(n) && !(n in globalThis));
   expect(missing).toEqual([]);
