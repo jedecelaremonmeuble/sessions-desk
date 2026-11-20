@@ -57,20 +57,40 @@ describe('à partir d’un message, avec une consigne', () => {
     // Une fois la première remise faite, le message de référence ne joue plus.
     expect(linkBurst({ upTo: T0 + 8 * MIN, n: 1, anchor: '105' }, t).map((m) => m.id)).toEqual(['109']);
   });
+  test('plusieurs messages de référence : du contexte avant le premier jusqu’au bout, sans couper avant le dernier choisi', () => {
+    const t = Array.from({ length: 20 }, (_, i) => msg(String(100 + i), T0 + i * MIN));
+    expect(linkBurst({ upTo: 0, n: 0, anchors: ['104', '106'] }, t).map((m) => m.id)).toEqual(['101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111', '112']);
+    // Le dernier choisi est loin : la remise va jusqu'à lui.
+    const far = linkBurst({ upTo: 0, n: 0, anchors: ['118', '101'] }, t).map((m) => m.id);
+    expect([far[0], far.at(-1), far.length]).toEqual(['100', '118', 19]);
+  });
+  test('textes : plusieurs messages marqués ; s’ils ne tiennent pas avec le contexte, eux seuls sont gardés', () => {
+    setOwner('Alex Durand');
+    const burst = [msg('1', T0, { text: 'contexte ' + 'x'.repeat(3000) }), msg('2', T0 + MIN, { text: 'premier choisi' }), msg('3', T0 + 2 * MIN, { text: 'entre les deux' }), msg('4', T0 + 3 * MIN, { text: 'second choisi' })];
+    const p = linkPrompt('c', 'Projet', 'group', burst, undefined, { anchors: ['2', '4'] });
+    expect(p).toContain('Les 2 messages marqués ➤ sont ceux que Alex Durand a choisis');
+    expect(p.match(/➤ \[/g)).toHaveLength(2);
+    expect(p).toContain('entre les deux');
+    const f = linkFollowUp('c', 'Projet', 'group', burst, true, undefined, { anchors: ['2', '4'] });
+    expect(f).toContain('« premier choisi »');
+    expect(f).toContain('« second choisi »');
+    expect(f).not.toContain('entre les deux');
+    expect(f).not.toContain('xxxx');
+  });
   test('textes : le message choisi est marqué, la consigne est la seule consigne, la remise unique est dite', () => {
     setOwner('Alex Durand');
     const burst = [msg('1', T0), msg('2', T0 + MIN, { text: 'la demande' })];
-    const p = linkPrompt('c', 'Projet', 'group', burst, undefined, { anchor: '2', note: 'prépare un plan', once: true });
+    const p = linkPrompt('c', 'Projet', 'group', burst, undefined, { anchors: ['2'], note: 'prépare un plan', once: true });
     expect(p).toContain('➤ [');
     expect(p).toContain('« la demande »');
     expect(p).toContain('Consigne de Alex Durand (elle, c\'est une consigne) : « prépare un plan »');
     expect(p).toContain('ne te sera PAS remise');
     expect(p).not.toContain('remis automatiquement');
-    const f = linkFollowUp('c', 'Projet', 'group', burst, true, undefined, { anchor: '2', note: 'prépare un plan' });
+    const f = linkFollowUp('c', 'Projet', 'group', burst, true, undefined, { anchors: ['2'], note: 'prépare un plan' });
     expect(f).toContain('➤ [');
     expect(f).toContain('« prépare un plan »');
     expect(f).toContain('remis automatiquement');
-    expect(linkFollowUp('c', 'Projet', 'group', burst, false, undefined, { anchor: '2', note: 'prépare un plan' })).not.toContain('prépare un plan');
+    expect(linkFollowUp('c', 'Projet', 'group', burst, false, undefined, { anchors: ['2'], note: 'prépare un plan' })).not.toContain('prépare un plan');
   });
 });
 
@@ -189,10 +209,10 @@ describe('lien, vue et passe', () => {
 
   test('remise unique à partir d’un message : la session reçoit message, contexte et consigne, puis le lien tombe', async () => {
     put({ c1: chatOf([msg('1', T0 - 2 * MIN), msg('2', T0 - MIN, { text: 'la demande' }), msg('3', T0)]) });
-    expect(linkConversation(dir, 'c1', SID, NOW, { anchor: 'pas-un-id' })).toBe('message de référence invalide');
+    expect(linkConversation(dir, 'c1', SID, NOW, { anchors: ['1000001', 'pas-un-id'] })).toBe('message de référence invalide');
     expect(linkConversation(dir, 'c1', SID, NOW, { note: 'x'.repeat(1501) })).toMatch(/trop longue/);
-    expect(linkConversation(dir, 'c1', SID, NOW, { fresh: true, anchor: '1000002', note: '  cadre\n ce sujet ', once: true })).toBeNull();
-    expect(links().chats.c1).toMatchObject({ anchor: '1000002', note: 'cadre ce sujet', once: true, fresh: true });
+    expect(linkConversation(dir, 'c1', SID, NOW, { fresh: true, anchors: ['1000002', '1000003', '1000002'], note: '  cadre\n ce sujet ', once: true })).toBeNull();
+    expect(links().chats.c1).toMatchObject({ anchors: ['1000002', '1000003'], note: 'cadre ce sujet', once: true, fresh: true });
     const w = world([]);
     expect(await pass(w, NOW)).toMatchObject({ delivered: 1 });
     expect(w.opened[0]!.prompt).toContain('Consigne de Alex Durand');

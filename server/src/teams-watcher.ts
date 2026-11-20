@@ -46,7 +46,8 @@
 // « follow ») pose un lien chat → session ; la passe remet à la session les messages à traiter, puis TOUS les suivants du
 // fil, jusqu'au détachement. Les messages sont des DONNÉES : la session propose, rien ne part sans le go de l'utilisateur.
 // Une nouvelle session s'ouvre dans inbound.cwd. Tant qu'un fil est confié, les demandes entrantes n'ouvrent rien pour lui.
-// On peut partir d'UN message (« → session » sur un message : il devient la référence, avec ce qui l'entoure), joindre une
+// On peut partir d'UN OU PLUSIEURS messages (« → session » sur chaque message voulu : ils deviennent la référence, avec ce
+// qui les entoure), joindre une
 // consigne de l'utilisateur, et ne pas suivre la suite (remise unique : le lien tombe après la première remise).
 //
 // Fichiers : ~/.claude/state/teams-waits/
@@ -609,7 +610,9 @@ export interface ConvLink {
   fresh?: boolean;
   /** Remises faites ; dernière erreur de remise (session occupée, fermée…). */
   n?: number; lastError?: string | null; reopenedAt?: number;
-  /** Message de référence choisi par l'utilisateur : la première remise part de lui (avec ce qui l'entoure). */
+  /** Messages de référence choisis par l'utilisateur (un ou plusieurs) : la première remise part d'eux, avec ce qui les entoure. */
+  anchors?: string[];
+  /** Ancienne forme (un seul message), encore lue. */
   anchor?: string;
   /** Consigne de l'utilisateur jointe à la première remise — la SEULE partie qui soit une consigne. */
   note?: string;
@@ -863,15 +866,16 @@ export async function sendChatReply(dir: string, cfg: Pick<WatcherConfig, 'conve
 const linksFile = (dir: string) => join(dir, '_links.json');
 /** Confie un fil à une session (bouton « Confier » de la page, ou la session elle-même). `fresh` : session à ouvrir à la
  *  première remise. `fromNow` : la session connaît déjà le fil, seuls les messages à venir lui seront remis. */
-export function linkConversation(dir: string, chatId: string, sessionId: string, now: number, o: { fresh?: boolean; fromNow?: boolean; anchor?: string; note?: string; once?: boolean } = {}): string | null {
+export function linkConversation(dir: string, chatId: string, sessionId: string, now: number, o: { fresh?: boolean; fromNow?: boolean; anchors?: string[]; note?: string; once?: boolean } = {}): string | null {
   const c = readJson<ConvState>(join(dir, '_conversations.json'))?.chats[chatId];
   if (!c) return 'conversation introuvable (elle doit figurer dans la vue par conversation)';
   if (!safeSid(sessionId)) return 'identifiant de session invalide';
   const st: LinkState = readJson<LinkState>(linksFile(dir)) ?? { v: 1, chats: {} };
   const note = (o.note ?? '').replace(/\s+/g, ' ').trim();
   if (note.length > 1500) return 'consigne trop longue (1 500 caractères au plus)';
-  if (o.anchor && !/^\d{6,24}$/.test(o.anchor)) return 'message de référence invalide';
-  st.chats[chatId] = { sessionId, at: now, upTo: o.fromNow ? c.lastAt : 0, n: o.fromNow ? 1 : 0, ...(o.fresh ? { fresh: true } : {}), ...(o.anchor ? { anchor: o.anchor } : {}), ...(note ? { note } : {}), ...(o.once ? { once: true } : {}) };
+  const anchors = [...new Set(o.anchors ?? [])];
+  if (anchors.length > 20 || anchors.some((a) => !/^\d{6,24}$/.test(a))) return 'message de référence invalide';
+  st.chats[chatId] = { sessionId, at: now, upTo: o.fromNow ? c.lastAt : 0, n: o.fromNow ? 1 : 0, ...(o.fresh ? { fresh: true } : {}), ...(anchors.length ? { anchors } : {}), ...(note ? { note } : {}), ...(o.once ? { once: true } : {}) };
   writeAtomic(linksFile(dir), JSON.stringify(st));
   writeSummary(dir, now);
   return null;
@@ -884,11 +888,21 @@ export function unlinkConversation(dir: string, chatId: string, now: number): st
   writeSummary(dir, now);
   return null;
 }
-const linkLines = (burst: ConvMsg[], max: number, anchor?: string) => clip(burst.map((m) => `${m.id === anchor ? '➤ ' : ''}[${hhmm(m.at)}] ${m.who === 'me' ? OWNER : m.from ?? 'quelqu\'un'} : « ${m.text.replace(/\s+/g, ' ')} »`).join(' '), max);
+/** Messages de référence d'un lien (forme actuelle, ou l'ancienne à un seul message). */
+export const linkAnchors = (l: Pick<ConvLink, 'anchors' | 'anchor'>): string[] => l.anchors ?? (l.anchor ? [l.anchor] : []);
+const linkLine = (m: ConvMsg, marked: boolean) => `${marked ? '➤ ' : ''}[${hhmm(m.at)}] ${m.who === 'me' ? OWNER : m.from ?? 'quelqu\'un'} : « ${m.text.replace(/\s+/g, ' ')} »`;
+/** Les messages d'une remise, en une ligne. Si tout ne tient pas, les messages CHOISIS passent avant le contexte : on ne
+ *  garde qu'eux plutôt que de couper la fin. */
+function linkLines(burst: ConvMsg[], max: number, anchors: string[] = []): string {
+  const all = burst.map((m) => linkLine(m, anchors.includes(m.id))).join(' ');
+  if (all.length <= max || !burst.some((m) => anchors.includes(m.id))) return clip(all, max);
+  return clip(burst.filter((m) => anchors.includes(m.id)).map((m) => linkLine(m, true)).join(' '), max);
+}
 /** Ce que l'utilisateur a précisé en confiant le fil : le message de référence (marqué ➤) et sa consigne — la seule consigne du texte. */
-export interface LinkAsk { anchor?: string | undefined; note?: string | undefined; once?: boolean | undefined }
+export interface LinkAsk { anchors?: string[] | undefined; note?: string | undefined; once?: boolean | undefined }
 const askLines = (burst: ConvMsg[], ask: LinkAsk): string[] => [
-  ...(ask.anchor && burst.some((m) => m.id === ask.anchor) ? [`Le message marqué ➤ est celui que ${OWNER} a choisi comme point de départ : c'est de lui qu'il s'agit, le reste est du contexte.`] : []),
+  ...((n) => (n === 1 ? [`Le message marqué ➤ est celui que ${OWNER} a choisi comme point de départ : c'est de lui qu'il s'agit, le reste est du contexte.`]
+    : n > 1 ? [`Les ${n} messages marqués ➤ sont ceux que ${OWNER} a choisis : c'est d'eux qu'il s'agit, le reste est du contexte.`] : []))(burst.filter((m) => (ask.anchors ?? []).includes(m.id)).length),
   ...(ask.note ? [`Consigne de ${OWNER} (elle, c'est une consigne) : « ${ask.note} »`] : []),
 ];
 const chatKind = (t: ConvKind) => (t === 'oneOnOne' ? 'chat 1:1' : t === 'meeting' ? 'chat de réunion' : 'chat de groupe');
@@ -899,7 +913,7 @@ export function linkPrompt(chatId: string, label: string | null, type: ConvKind,
   return [
     `🔗 Fil Teams confié par ${OWNER} — « ${label ?? 'sans nom'} » (${chatKind(type)}, chatId ${chatId}).`,
     '',
-    `Les derniers messages : ${linkLines(burst, 6000, ask.anchor)}`,
+    `Les derniers messages : ${linkLines(burst, 6000, ask.anchors)}`,
     '',
     LINK_RULE(),
     ...askLines(burst, ask),
@@ -924,17 +938,19 @@ export function linkFollowUp(chatId: string, label: string | null, type: ConvKin
   const tail = ` ${LINK_RULE()}${asked}` + (first
     ? ` Tiens-en compte dans ton travail et, si une réponse est attendue, propose un brouillon.` + (ask.once ? ' La suite de ce fil ne te sera pas remise.' : ` Les prochains messages de ce fil te seront remis automatiquement${cmd ? ` (pour arrêter : ${cmd} unfollow ${chatId})` : ''}.`)
     : ' Mets à jour ton analyse et ton brouillon de réponse.');
-  return `${head} ${linkLines(burst, MAX_INJECT - head.length - tail.length - 2, first ? ask.anchor : undefined)}${tail}`;
+  return `${head} ${linkLines(burst, MAX_INJECT - head.length - tail.length - 2, first ? ask.anchors : undefined)}${tail}`;
 }
 /** Ce qu'il reste à remettre à la session d'un fil confié. Première remise : ce qui attend une réponse (ce que les autres
  *  ont écrit depuis le dernier message de l'utilisateur), à défaut les six derniers messages pour le contexte. Ensuite :
  *  tout ce qui suit le dernier message remis, dès qu'un AUTRE que l'utilisateur a écrit. */
-export function linkBurst(link: Pick<ConvLink, 'upTo' | 'n' | 'anchor'>, thread: ConvMsg[], handledUpTo = 0): ConvMsg[] {
+export function linkBurst(link: Pick<ConvLink, 'upTo' | 'n' | 'anchor' | 'anchors'>, thread: ConvMsg[], handledUpTo = 0): ConvMsg[] {
   const real = thread.filter((m) => m.who !== 'app');
   if (!(link.n ?? 0) && !link.upTo) {
-    // Message de référence : lui, les trois qui le précèdent (contexte) et ce qui le suit — douze au plus, lui toujours compris.
-    const i = link.anchor ? real.findIndex((m) => m.id === link.anchor) : -1;
-    if (i >= 0) { const from = Math.max(0, i - 3); return real.slice(from, Math.max(from + 12, i + 1)); }
+    // Messages de référence : les trois qui précèdent le premier (contexte), puis tout jusqu'au dernier choisi et ce qui
+    // le suit — douze au plus après le début, sans jamais couper avant le dernier message choisi.
+    const picked = linkAnchors(link);
+    const idx = real.map((m, i) => (picked.includes(m.id) ? i : -1)).filter((i) => i >= 0);
+    if (idx.length) { const from = Math.max(0, idx[0]! - 3); return real.slice(from, Math.max(from + 12, idx.at(-1)! + 1)); }
     const lastMine = real.filter((m) => m.who === 'me').at(-1)?.at ?? 0;
     const waiting = real.filter((m) => m.at > lastMine);
     return waiting.length ? waiting.slice(-12) : real.slice(-6);
@@ -973,7 +989,7 @@ export async function runLinks(dir: string, cfg: Pick<WatcherConfig, 'inbound'>,
     if (opts.dryRun) continue;
     const fail = (e: string, extra: Partial<ConvLink> = {}) => { done[chatId] = { lastError: e, ...extra }; res.deferred++; };
     const ok = () => { done[chatId] = { upTo: burst.at(-1)!.at, n: (link.n ?? 0) + 1, lastError: null, fresh: false }; res.delivered++; res.read.push(chatId); };
-    const ask: LinkAsk = { anchor: link.anchor, note: link.note, once: link.once };
+    const ask: LinkAsk = { anchors: linkAnchors(link), note: link.note, once: link.once };
     const evidence = () => saveEvidence(validationsDir(dir), link.sessionId, 'inbound', chatId, burst.filter((m) => m.who === 'other').map((m) => ({ id: m.id, at: m.at, from: m.from ?? 'quelqu\'un', text: m.text, files: [] })));
     try {
       if (link.fresh) {
