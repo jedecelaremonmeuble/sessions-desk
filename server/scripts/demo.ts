@@ -116,7 +116,15 @@ writeFileSync(join(claude, 'history.jsonl'), jl(...history));
 writeFileSync(join(claude, 'state', 'sessions-dashboard-pr.json'), JSON.stringify(prState));
 writeFileSync(join(claude, 'state', 'sessions-dashboard-favs.json'), JSON.stringify([demos[1]!.id]));
 writeFileSync(join(claude, 'state', 'sessions-dashboard-seen.json'), JSON.stringify({ [demos[4]!.id]: t0 }));
-writeFileSync(join(root, 'config.json'), JSON.stringify({ modules: {} }));
+// Bandeau d'usage : un relevé au format de la sonde (usage-probe.ts), pour le compte « connecté » de la démo.
+const reset = new Date(t0 + 4.2 * 86_400_000).toISOString();
+writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'demo-account', emailAddress: 'you@example.com', planDisplayName: 'Max' } }));
+writeFileSync(join(root, 'usage.json'), JSON.stringify({ 'demo-account': { alias: 'you@example.com', plan: 'Max', status: 'ok',
+  weeklyPct: 41, weeklyResetsAt: reset, weeklyProjectedPct: 78, weeklyFullAt: null, fiveHourPct: 18, fiveHourResetsAt: new Date(t0 + 2 * 3_600_000).toISOString(),
+  measuredAt: new Date(t0 - 5 * 60_000).toISOString(), limitsJson: JSON.stringify([
+    { kind: 'weekly_all', percent: 41, resets_at: reset, is_active: true, severity: 'normal' },
+    { kind: 'weekly_scoped', percent: 63, resets_at: reset, scope: { model: { display_name: 'Opus' } }, is_active: true, severity: 'normal' }]) } }));
+writeFileSync(join(root, 'config.json'), JSON.stringify({ modules: { quota: { file: join(root, 'usage.json') } } }));
 
 const env = { ...process.env, USERPROFILE: home, LOCALAPPDATA: lad };
 const server = spawn(process.execPath, [join(REPO, 'server', 'src', 'main.ts'), '--port', String(PORT), '--no-background', '--allow-write',

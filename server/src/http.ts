@@ -6,6 +6,7 @@
 // entre deux calculs d'état — jamais en même temps qu'eux. Mêmes en-têtes, mêmes codes, mêmes refus d'accès.
 // En plus du .ps1 : --allow-write absent ⇒ toute action est refusée (serveur À CÔTÉ en lecture seule).
 import { langOf, T, withLang } from './i18n.ts';
+import { UsageProbe } from './usage-probe.ts';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { createServer as createTcpServer, connect, type Server as TcpServer, type Socket } from 'node:net';
 import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -128,6 +129,8 @@ export class Server {
   readonly search: Search;
   readonly actions: Actions;
   readonly watch: Watch;
+  /** Sonde d'usage (module quota, source usage-probe) : serveur principal, tâches de fond permises. */
+  readonly usageProbe: UsageProbe | null;
   remoteOwner: string | null = null;
   remoteOrigin: string | null = null;
   uploadDir: string | null;
@@ -147,6 +150,7 @@ export class Server {
   constructor(d: Dashboard) {
     this.d = d; this.cfg = d.cfg;
     this.launcher = new Launcher(d); this.automations = new Automations(d); this.search = new Search(d); this.actions = new Actions(d); this.watch = new Watch(d, this.launcher, this.automations);
+    this.usageProbe = this.cfg.modules.quota?.probe && this.cfg.primary && !this.cfg.noBackground ? new UsageProbe(this.cfg) : null;
     this.uploadDir = join(this.cfg.claude, `uploads${this.cfg.suffix}`);
   }
 
@@ -359,6 +363,7 @@ export class Server {
             try { await this.watch.tick(st as never); } catch { /* idem */ }
             try { this.#kickTeams(st as { sessions?: KickSession[]; teams?: unknown }, now); } catch { /* idem */ }
             if (this.cfg.primary) this.search.maybeIndex();
+            this.usageProbe?.maybeRun(now);
           }
         } catch (e) { this.logError(`état : ${(e as Error).message}`); }
       }
