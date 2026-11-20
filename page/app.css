@@ -63,8 +63,17 @@ body.ro .twaits .twb { display:none; }
 .chip:hover { background:var(--sel); }
 .chip.domaine { color:var(--done); } .chip.outil { color:var(--shell); } .chip.fonction { color:var(--busy); } .chip.origine { color:var(--ask); } .chip.hd { color:var(--mute); }
 .dot { width:9px; height:9px; border-radius:50%; background:var(--c); align-self:center; display:inline-block; }
-.busy .dot { animation:pulse 1.2s ease-in-out infinite; } @keyframes pulse { 50% { opacity:.3; } }
-@media (prefers-reduced-motion: reduce) { .busy .dot { animation:none; } }
+/* Au travail : le glyphe qui tourne du terminal Claude Code (· ✢ ✳ ✶ ✻ ✽, aller-retour) et le verbe en reflet.
+   --sd-ph (posée à chaque rendu, d'après l'horloge) garde la phase : la liste se reconstruit toutes les 2 s sans à-coup. */
+.busy .dot { background:none; border-radius:0; width:1em; height:auto; font-size:12px; line-height:1; text-align:center; color:var(--c); font-weight:normal; }
+.busy .dot::before { content:'✻'; animation:sd-spin 1.2s linear infinite; animation-delay:var(--sd-ph, 0ms); }
+@keyframes sd-spin { 0% { content:'·'; } 10% { content:'✢'; } 20% { content:'✳'; } 30% { content:'✶'; } 40% { content:'✻'; } 50% { content:'✽'; } 60% { content:'✻'; } 70% { content:'✶'; } 80% { content:'✳'; } 90% { content:'✢'; } }
+.spinv { color:var(--c); background:linear-gradient(90deg, var(--c) 0 40%, color-mix(in srgb, var(--c) 30%, #fff) 50%, var(--c) 60% 100%);
+         background-size:250% 100%; -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+         animation:sd-shimmer 2.4s linear infinite; animation-delay:var(--sd-ph, 0ms); }
+@keyframes sd-shimmer { from { background-position:100% 0; } to { background-position:0 0; } }
+.spinm { color:var(--mute); font-variant-numeric:tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .busy .dot::before, .spinv { animation:none; } .spinv { -webkit-text-fill-color:currentColor; background:none; } }
 .idle { --c:var(--idle); } .busy { --c:var(--busy); } .waiting { --c:var(--waiting); } .ask { --c:var(--ask); } .done { --c:var(--done); } .shell { --c:var(--shell); } .teams { --c:var(--idle); } .closed { --c:var(--closed); }
 .waiting .t, .ask .t, .done .t { font-weight:600; }
 .row-s.run.done .t { font-weight:400; }   /* run du lanceur réussi : rien à relire en urgence (échec et PR à valider restent en gras) */

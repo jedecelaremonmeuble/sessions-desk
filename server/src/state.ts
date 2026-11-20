@@ -32,6 +32,7 @@ export interface Meta {
   createdAt: number | null;
 }
 export interface Prompt { at: unknown; text: string }
+export type Spin = { verb: string; tokens: string | null };
 export type Session = Record<string, unknown> & {
   pid: number; sessionId: string; title: string | null; status: string; headless: boolean; gitDir: string;
   git: GitInfo | null; prInfo: PrInfo | null; statusSince: number; reply: string | null; name: unknown; cwd: unknown;
@@ -143,7 +144,7 @@ export class Dashboard {
   notifs: Record<string, unknown>[] = [];
   prState: Record<string, PrInfo> = {};
   gitState: Record<string, GitInfo> = {};
-  screenChk = new Map<string, { mark: number; at: number; idleSince: number; logged: boolean; hookRead: boolean }>();
+  screenChk = new Map<string, { mark: number; at: number; idleSince: number; logged: boolean; hookRead: boolean; spin?: Spin | null }>();
   sugCache = new Map<string, { mark: number; at: number; text: string | null }>();
   openSeen = new Map<string, number>();
   openSaved = 0;
@@ -427,6 +428,24 @@ export class Dashboard {
     const tail = l.slice(-20).join('\n');
     return !(/esc to interrupt/i.test(foot) || /^\s*\S\s+\S+…\s*\(\d/im.test(tail));
   }
+  /** Ligne d'activité de Claude Code (« ✻ Pondering… (12s · ↓ 1.2k tokens · esc to interrupt) ») : le verbe et les
+   *  tokens du tour, pour que la page anime « au travail » comme le terminal. Null si l'écran n'en montre pas. */
+  static screenSpin(text: string | null): Spin | null {
+    if (!text) return null;
+    const l = text.split('\n').filter((x) => netTrim(x)).slice(-20);
+    for (let i = l.length - 1; i >= 0; i--) {
+      const m = /^\s*[·✢✳✶✻✽✺*]\s+([^\s(…][^(…]{0,60}?)…\s*(?:\((.*?)\)?)?\s*$/.exec(l[i]!);
+      if (!m) continue;
+      const tk = /([↑↓])\s*([\d.,]+\s*[kKmM]?)\s*tokens?/.exec(m[2] ?? '');
+      return { verb: netTrim(m[1]!), tokens: tk ? tk[1]! + ' ' + tk[2]!.replace(/\s+/g, '') : null };
+    }
+    return null;
+  }
+  /** Verbe du tour lu sur l'écran, tant que la session est au travail (lecture faite par busyFix, aucun appel de plus). */
+  spinOf(s: Record<string, unknown>): Spin | null {
+    const c = this.screenChk.get(String(s.pid));
+    return c && c.mark === (Number(s.statusUpdatedAt) || 0) ? c.spin ?? null : null;
+  }
   /** Get-BusyFix */
   async busyFix(s: Record<string, unknown>, now: number): Promise<{ since: number; via: string } | null> {
     const key = String(s.pid); const mark = Number(s.statusUpdatedAt) || 0;
@@ -441,6 +460,7 @@ export class Dashboard {
       let t: string | null = null;
       try { t = await this.driver.call('read', { pid: Number(s.pid) }); } catch { /* console illisible */ }
       const idle = !t ? hooked : Dashboard.screenIdle(t);
+      c.spin = idle ? null : Dashboard.screenSpin(t);
       if (!idle) c.idleSince = 0; else if (!c.idleSince) c.idleSince = now;
     }
     if (!c.idleSince || (!hooked && now - c.idleSince < 3000)) return null;
@@ -496,7 +516,7 @@ export class Dashboard {
       out.push({
         pid: s.pid as number, name: s.name ?? null, title: m.title, pr: m.pr, prUrl: m.prUrl, prInfo: this.prInfo(m.prUrl), reply: m.reply, tokens: m.tokens, model: m.model,
         wt: m.wt, recette: m.recette, tags: this.sessionTags(sid), gitDir: gd, git: this.gitState[gd.toLowerCase()] ?? null,
-        status, stale, bg: null, headless, entrypoint: s.entrypoint ?? null, hookStop: this.stops.get(sid) ?? 0, waitingFor: s.waitingFor ?? null,
+        status, stale, spin: ieq(status, 'busy') ? this.spinOf(s) : null, bg: null, headless, entrypoint: s.entrypoint ?? null, hookStop: this.stops.get(sid) ?? 0, waitingFor: s.waitingFor ?? null,
         // « À relire » : fin de tour après le dernier « vu » — sauf tour sans nouveauté (réveil programmé à réponse
         // identique, relance du veilleur), où c'est la fin du dernier tour qui comptait qui fait foi.
         done: ieq(status, 'idle') && (m.quiet ? m.quiet.at : since) > (this.seen.get(sid) ?? 0),

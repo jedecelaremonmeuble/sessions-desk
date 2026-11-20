@@ -27,7 +27,7 @@ function normalize(route: string, j: any): any {
   const c = JSON.parse(JSON.stringify(j));
   if (route === 'state') {
     delete c.now; delete c.modules; delete c.ui; delete c.promptSuggestion; delete c.server;   // modules, ui : réglages du poste, que chaque serveur tient de son côté ; promptSuggestion, server : Node seul, le .ps1 ne bouge plus
-    for (const s of c.sessions) { if (s.stale) s.statusSince = '<corrigé>'; delete s.createdAt; }   // createdAt : Node seul (tri par création)
+    for (const s of c.sessions) { if (s.stale) s.statusSince = '<corrigé>'; delete s.createdAt; delete s.spin; }   // createdAt, spin : Node seul (tri par création)
     for (const q of c.quota ?? []) delete q.active;                           // compte connecté : Node seul
   }
   if (route === 'closed') for (const s of c.closed) delete s.createdAt;

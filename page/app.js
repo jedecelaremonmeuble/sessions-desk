@@ -83,6 +83,17 @@ if (!localStorage.getItem('cc.autoGroup')) { collapsed.add('auto'); localStorage
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const ago = ms => { const s = Math.max(0, Math.round(ms/1000)); if (s < 60) return s + ' s'; const m = Math.floor(s/60); if (m < 60) return m + ' min'; const h = Math.floor(m/60); return h < 48 ? h + ' h ' + String(m%60).padStart(2,'0') : Math.floor(h/24) + T(' j', ' d'); };
+// « Au travail » comme dans le terminal Claude Code : « ✻ Pondering… (1m 5s · ↓ 1.2k tokens) ». Le verbe et les tokens
+// viennent de l'écran de la session (état : spin) ; le chrono avance seul, à la seconde (minuteur en bas du fichier).
+const spinDur = ms => { const s = Math.max(0, Math.floor(ms/1000)); if (s < 60) return s + 's'; const m = Math.floor(s/60); return m < 60 ? m + 'm ' + (s%60) + 's' : Math.floor(m/60) + 'h ' + (m%60) + 'm'; };
+let skew = 0;   // horloge de la page - horloge du serveur (data.now)
+const spinPhase = () => document.documentElement.style.setProperty('--sd-ph', -Math.round(performance.now() % 12000) + 'ms');
+const spinVerb = it => el('span', 'spinv', (it.spin && it.spin.verb || T('Travaille', 'Working')) + '…');
+const spinMeta = m => '(' + spinDur(Date.now() - skew - Number(m.dataset.since)) + (m.dataset.tk ? ' · ' + m.dataset.tk + ' tokens' : '') + ')';
+function spinLabel(it) {
+  const m = el('span', 'spinm'); m.dataset.since = it.since; m.dataset.tk = it.spin && it.spin.tokens || ''; m.textContent = spinMeta(m);
+  const f = document.createDocumentFragment(); f.append(spinVerb(it), ' ', m); return f;
+}
 const ktok = n => n == null ? '' : n < 1000 ? String(n) : Math.round(n / 1000) + ' k';
 // « claude-opus-5-5 » → « Opus 5.5 », « claude-fable-5-2[1m] » → « Fable 5.2 1M » ; un id inconnu s'affiche tel quel.
 const modelName = m => { if (!m) return ''; const x = /^claude-([a-z]+)-(\d{1,2})-(\d{1,2})(?!\d)/.exec(m); return x ? x[1][0].toUpperCase() + x[1].slice(1) + ' ' + x[2] + '.' + x[3] + (m.includes('[1m]') ? ' 1M' : '') : m.replace(/^claude-/, ''); };
@@ -1985,6 +1996,7 @@ function prLink(it) {
 }
 
 function renderList() {
+  spinPhase();
   const tokens = norm($('q').value).split(/\s+/).filter(Boolean);
   // Les fermées masquées ne réapparaissent que dans une recherche (étiquetées « masquée »).
   const items = allItems().filter(it => (!favOnly || it.fav) && (!it.hidden || tokens.some(t => !isStateToken(t))) && tokens.every(t => tagMatch(it, t) ?? it.hay.includes(t)));
@@ -2066,6 +2078,7 @@ function renderList() {
       const age = el('span', 'age'); if (it.model) age.append(modelBadge(it.model, true)); r.append(el('span', 'dot'), tt, age); age.append((it.tokens ? ktok(it.tokens) + ' · ' : '') + (sortMode === 'created' ? T('créée il y a ' + ago(data.now - createdOf(it)), 'created ' + ago(data.now - createdOf(it)) + ' ago') : ago(data.now - it.since)));
       const merged = (closable(it) ? T('✓ peut se fermer · ', '✓ can be closed · ') : it.prInfo && it.prInfo.state === 'MERGED' ? T('PR mergée · ', 'PR merged · ') : '') + (it.status === 'shell' && it.state !== 'shell' ? T('commande en arrière-plan · ', 'background command · ') : '');
       const sub = el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : it.kind === 'open' ? merged + (it.state === 'idle' ? (it.lastPrompt || it.name) : LABEL[it.state] + (it.lastPrompt ? ' · ' + it.lastPrompt : '')) : T('fermée · ', 'closed · ') + merged + (it.lastPrompt || short(it.cwd)));
+      if (it.kind === 'open' && it.state === 'busy') sub.replaceChildren(merged, spinVerb(it), it.lastPrompt ? ' · ' + it.lastPrompt : '');
       r.append(sub);
       const chips = tagChips(it, 'tags'); if (chips) r.append(chips);
       const inb = teamsInboundOf(it);
@@ -2801,6 +2814,7 @@ function promptResizer(split) {
 // Un run (hd:, run:) ou une passe (pass:) vient d'une lecture à part : tant qu'elle n'a pas eu lieu, la clé n'est pas « disparue ».
 const sourcePending = key => (/^(hd|run):/.test(key) && !runsRead && !launcherOff()) || (/^pass:/.test(key) && !autoData && !automationsOff());
 function renderDetail(force) {
+  spinPhase();
   keepDraft();   // avant tout re-rendu : la zone de réponse peut être recréée (ou quittée)
   syncRoute();
   $('newbtn').classList.toggle('on', newMode); $('bcbtn').classList.toggle('on', bcMode); $('boardbtn').classList.toggle('on', boardMode);
@@ -2862,7 +2876,8 @@ function renderDetail(force) {
   }
   const head = $('head'); head.replaceChildren(); head.className = it.state;
   { const dt = el('div', 'dtitle', label(it)), d = driftTag(it); if (d) dt.append(d); head.append(dt); }
-  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), T(LABEL[it.state] + ' · depuis ' + ago(data.now - it.since), LABEL[it.state] + ' · for ' + ago(data.now - it.since)) + (it.waitingFor ? ' · ' + it.waitingFor : ''));
+  const chip = el('span', 'chip'); chip.append(el('span', 'dot'));
+  if (it.state === 'busy') chip.append(spinLabel(it)); else chip.append(T(LABEL[it.state] + ' · depuis ' + ago(data.now - it.since), LABEL[it.state] + ' · for ' + ago(data.now - it.since)) + (it.waitingFor ? ' · ' + it.waitingFor : ''));
   if (it.status === 'shell' && it.state !== 'shell') { const t = el('span', 'tag cl', T('commande en arrière-plan', 'background command')); t.title = T('Tour terminé ; une commande lancée en arrière-plan tourne encore dans cette session', 'Turn finished; a command started in the background is still running in this session'); chip.append(t); }
   if (it.stale) { const t = el('span', 'tag cl', T('statut corrigé d\'après l\'écran', 'status corrected from the screen')); t.title = T('Claude Code la déclare encore « au travail », mais ' + (it.stale === 'hook' ? 'elle a signalé la fin de son tour (hook Stop)' : 'son écran montre un tour terminé'), 'Claude Code still reports it as "working", but ' + (it.stale === 'hook' ? 'it signalled the end of its turn (Stop hook)' : 'its screen shows a finished turn')); chip.append(t); }
   head.append(chip);
@@ -3465,7 +3480,7 @@ async function tick() {
     ticking = false; return;
   }
   try {
-    data = srv; adoptPostLanguage(data.ui && data.ui.language); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
+    data = srv; skew = data.now ? Date.now() - data.now : 0; adoptPostLanguage(data.ui && data.ui.language); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
     if (linkUp(data.server)) return;
     renderList(); renderDetail(); refreshScreen(); refreshConv(); try { renderQuota(); } catch (e) { console.log('[sessions] quota :', e); }
     renderRelay(data.server && data.server.relay);
@@ -3584,4 +3599,5 @@ $('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 
   if (r.view) pendingRoute = r;                                                   // un écran se dessine sur l'état (modules, liste) : au 1er tick
   else if (selected && r.sel) setPane(true); }                                    // lien direct : on arrive sur la session
 tick(); loadClosed(); loadRuns(); setInterval(() => { if (!ticking) tick(); else if (link.down) drawLink(); }, 2000); setInterval(loadClosed, 30000); runTimer = setInterval(loadRuns, 30000); setInterval(loadAutomations, 30000);
+setInterval(() => { for (const m of document.querySelectorAll('.spinm[data-since]')) m.textContent = spinMeta(m); }, 1000);   // chrono « au travail »
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (!ticking) tick(); loadRuns(); loadAutomations(); } });
