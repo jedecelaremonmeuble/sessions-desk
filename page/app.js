@@ -970,14 +970,15 @@ function pickRun(it) {
   const dir = runPick.get(it.key), sub = dir && it.runs.find(r => r.run.dir === dir);
   return sub && sub.run.dir !== it.run.dir ? { ...sub, key: it.key, runs: it.runs, runCount: it.runCount, phases: it.phases, costTotal: it.costTotal, picked: true } : it;
 }
-let runData = null, runTimer = null;
+let runData = null, runTimer = null, runsRead = false;   // runsRead : 1re lecture faite (une adresse ?sel=hd:… attend jusque-là)
 const midnight = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
 // Module « launcher » éteint (le serveur le dit dans data.modules ; le .ps1 ne dit rien : il l'a toujours).
 const launcherOff = () => !!(data && data.modules && !data.modules.launcher);
 async function loadRuns() {
   if (launcherOff()) { runData = null; return; }
   if (document.visibilityState === 'hidden' && runData) return;
-  try { const r = await (await fetch('/api/launcher?hours=24', { cache:'no-store' })).json(); runData = r && r.present ? r : null; if (data) { renderList(); renderDetail(); } } catch {}
+  try { const r = await (await fetch('/api/launcher?hours=24', { cache:'no-store' })).json(); runData = r && r.present ? r : null; runsRead = true; if (data) { renderList(); renderDetail(); } } catch {}
+  runsRead = true;
   if (pendingRun && data && runData) { const hd = pendingRun; pendingRun = null; openRun(hd); }
 }
 // Notification « HD-x t'attend » (cloche ou notification Windows ?run=x) : le DERNIER run de la demande, dans la liste ;
@@ -2024,17 +2025,81 @@ function back() {                                  // revenir à la session cons
 }
 
 // Écran étroit (téléphone) : liste OU détail, pas les deux. Ouvrir une session (ou le tableau, le lanceur…)
-// passe au détail plein écran ; « ← Sessions », Échap ou le bouton retour du téléphone reviennent à la liste.
+// passe au détail plein écran ; « ← Sessions », Échap ou le bouton retour du téléphone reviennent à la liste — le retour
+// passe par l'historique de la page (voir « Navigation » plus bas), commun à tous les écrans.
 // Sur grand écran la classe est posée aussi mais sans effet (la CSS ne s'en sert que sous 820 px).
-const NARROW = matchMedia('(max-width: 820px)');
 function setPane(detail) {
   if (detail === document.body.classList.contains('mdetail')) return;
-  if (detail) { document.body.classList.add('mdetail'); if (NARROW.matches) history.pushState({ pane:'detail' }, ''); $('main').scrollTop = 0; }
-  else if (history.state && history.state.pane === 'detail') history.back();   // le popstate retire la classe
-  else document.body.classList.remove('mdetail');
+  document.body.classList.toggle('mdetail', detail); if (detail) $('main').scrollTop = 0;
 }
-addEventListener('popstate', e => document.body.classList.toggle('mdetail', !!(e.state && e.state.pane === 'detail')));
-function setMobileTitle(text, state) { const t = $('mtitle'); t.className = 'chip ' + (state || ''); t.replaceChildren(); if (state) t.append(el('span', 'dot')); t.append(el('span', 't', text)); }
+function setMobileTitle(text, state) {
+  const t = $('mtitle'); t.className = 'chip ' + (state || ''); t.replaceChildren(); if (state) t.append(el('span', 'dot')); t.append(el('span', 't', text));
+  document.title = (text.length > 60 ? text.slice(0, 59) + '…' : text) + ' — Sessions Claude Code';   // le menu de Précédent / Suivant liste les écrans par leur nom
+}
+
+// ── Navigation : l'adresse dit l'écran ouvert ──────────────────────────────────────────────────────────────────────
+// Chaque écran a son adresse : ?sel=<clé> (session, run, passe), ?view=board|launcher|chats|new|bc, ?view=find&q=…,
+// rien pour la vue d'ensemble. Changer d'écran ajoute une entrée d'historique : Précédent / Suivant (bouton, souris,
+// Alt+←, téléphone) parcourent les écrans, F5 rouvre le même, l'adresse se copie. Un seul point d'écriture, syncRoute,
+// appelé par renderDetail : les open*/close*/select n'ont rien à faire. Revenir à l'écran juste d'avant (Échap, Fermer,
+// « ← Sessions ») RECULE dans l'historique au lieu d'empiler un doublon ; affiner une recherche remplace l'entrée.
+// ?run= et ?pass= (notifications) restent des points d'entrée : une fois ouverts, l'adresse devient ?sel=.
+function routeUrl(r) {
+  const p = new URLSearchParams();
+  if (r.view) p.set('view', r.view);
+  if (r.view === 'find' && r.q) p.set('q', r.q);
+  if (!r.view && r.sel) p.set('sel', r.sel);
+  const s = p.toString(); return s ? '?' + s : '';
+}
+function routeParse(search) {
+  const p = new URLSearchParams(search), v = p.get('view');
+  if (v && ['board', 'launcher', 'chats', 'new', 'bc', 'find'].includes(v)) return v === 'find' ? { view: v, q: p.get('q') || '' } : { view: v };
+  return p.get('sel') ? { sel: p.get('sel') } : {};
+}
+// Que faire de l'historique pour aller à url, l'entrée courante étant st (history.state) et stack l'adresse de chaque
+// entrée de la page par rang : rien, remplacer (1re entrée, recherche affinée, écran corrigé), reculer (l'écran demandé
+// est celui juste d'avant) ou empiler.
+function navStep(st, stack, url, replace) {
+  if (!st || !st.sd) return { op: 'replace', idx: 0 };
+  if (st.url === url) return { op: 'none', idx: st.idx };
+  const find = u => /[?&]view=find(&|$)/.test(u);
+  if (replace || (find(st.url) && find(url))) return { op: 'replace', idx: st.idx };
+  if (st.idx > 0 && stack[st.idx - 1] === url) return { op: 'back', idx: st.idx - 1 };
+  return { op: 'push', idx: st.idx + 1 };
+}
+let navStack = (() => { try { return JSON.parse(sessionStorage.getItem('sd.nav') || '[]'); } catch { return []; } })();
+let navApplying = false, navReplace = false, navBacking = false, pendingRoute = null;
+function routeNow() {
+  const v = launchMode ? 'launcher' : chatsMode ? 'chats' : boardMode ? 'board' : newMode ? 'new' : bcMode ? 'bc' : findMode ? 'find' : null;
+  return v ? { view: v, q: v === 'find' ? findQ : '' } : { sel: selected || '' };
+}
+function syncRoute() {
+  if (navApplying || navBacking || pendingRoute) return;   // écran en cours d'ouverture / recul en vol / adresse d'arrivée pas encore appliquée
+  const url = routeUrl(routeNow()), s = navStep(history.state, navStack, url, navReplace); navReplace = false;
+  if (s.op === 'none') return;
+  if (s.op === 'back') { navBacking = true; history.back(); return; }   // le popstate trouve l'écran déjà affiché
+  if (s.op === 'push') navStack.length = s.idx;
+  navStack[s.idx] = url; try { sessionStorage.setItem('sd.nav', JSON.stringify(navStack)); } catch {}
+  history[s.op === 'push' ? 'pushState' : 'replaceState']({ sd: 1, idx: s.idx, url }, '', location.pathname + url);
+}
+function applyRoute(r) {
+  navApplying = true;
+  try {
+    if (r.view === 'launcher') openLauncher(); else if (r.view === 'chats') openChats(); else if (r.view === 'board') openBoard();
+    else if (r.view === 'new') openNew(); else if (r.view === 'bc') openBc();
+    else if (r.view === 'find') { $('q').value = r.q; renderList(); if (r.q) runFind(r.q); }
+    else select(r.sel || null);
+  } finally { navApplying = false; }
+  navReplace = true; syncRoute();   // écran indisponible (module coupé) : l'adresse reprend celui réellement affiché
+}
+addEventListener('popstate', e => {
+  const ours = navBacking; navBacking = false;
+  // Recul demandé par la page (retour à l'écran d'avant) : l'écran affiché fait foi — il a pu changer entre-temps
+  // (openRun ferme le lanceur PUIS ouvre le run) ; on ne le défait pas, on corrige l'adresse.
+  if (ours) { navReplace = true; syncRoute(); return; }
+  const r = e.state && e.state.sd ? routeParse(e.state.url) : routeParse(location.search);
+  if (routeUrl(routeNow()) !== routeUrl(r)) applyRoute(r);
+});
 
 function select(key, scroll) {
   clearTimeout(recentTimer);
@@ -2590,8 +2655,11 @@ function promptResizer(split) {
   return rz;
 }
 
+// Un run (hd:, run:) ou une passe (pass:) vient d'une lecture à part : tant qu'elle n'a pas eu lieu, la clé n'est pas « disparue ».
+const sourcePending = key => (/^(hd|run):/.test(key) && !runsRead && !launcherOff()) || (/^pass:/.test(key) && !autoData && !automationsOff());
 function renderDetail(force) {
   keepDraft();   // avant tout re-rendu : la zone de réponse peut être recréée (ou quittée)
+  syncRoute();
   $('newbtn').classList.toggle('on', newMode); $('bcbtn').classList.toggle('on', bcMode); $('boardbtn').classList.toggle('on', boardMode);
   $('launchbtn').classList.toggle('on', launchMode); $('chatsbtn').classList.toggle('on', chatsMode);
   document.body.classList.toggle('finding', findMode);
@@ -2605,7 +2673,7 @@ function renderDetail(force) {
   if (findMode) { if (detailKey !== '__find__' || force) renderFind(); return; }
   const main = $('main'); const it = selected && byKey(selected);
   if (!it) {
-    if (selected && data && closedData.days && !awaitingRelaunch(selected)) { selected = null; sessionStorage.removeItem('cc.sel'); }
+    if (selected && data && closedData.days && !awaitingRelaunch(selected) && !sourcePending(selected)) { selected = null; sessionStorage.removeItem('cc.sel'); navReplace = true; syncRoute(); }   // session disparue : adresse corrigée, sans entrée
     if (detailKey !== '' || force) { detailKey = ''; main.replaceChildren(el('div', null), el('div', null)); main.firstChild.id = 'head'; main.lastChild.id = 'body'; }
     renderOverview(); return;
   }
@@ -3242,6 +3310,7 @@ async function tick() {
     data = await r.json(); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
     if (linkUp(data.server)) return;
     renderList(); renderDetail(); refreshScreen(); refreshConv(); try { renderQuota(); } catch (e) { console.log('[sessions] quota :', e); }
+    if (pendingRoute) { const r = pendingRoute; pendingRoute = null; applyRoute(r); }      // ?view= : écran d'arrivée, une fois l'état connu
     if (pendingRun && runData) { const hd = pendingRun; pendingRun = null; openRun(hd); }   // ?run= : runs arrivés avant l'état
     if (!autoAsked && !automationsOff()) loadAutomations();                               // module annoncé par l'état : première lecture
     live.className = ''; if (!notice) live.textContent = 'à jour · ' + new Date().toLocaleTimeString('fr-FR');
@@ -3352,7 +3421,8 @@ $('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 
   rz.addEventListener('dblclick', () => { apply(0); localStorage.removeItem('cc.sidew'); });
   addEventListener('resize', () => { const w = +localStorage.getItem('cc.sidew'); if (w) apply(w); });
 })();
-if (selected && new URLSearchParams(location.search).get('sel')) setPane(true);   // lien direct : on arrive sur la session
+{ const r = routeParse(location.search);                                          // adresse d'arrivée (lien, F5, notification)
+  if (r.view) pendingRoute = r;                                                   // un écran se dessine sur l'état (modules, liste) : au 1er tick
+  else if (selected && r.sel) setPane(true); }                                    // lien direct : on arrive sur la session
 tick(); loadClosed(); loadRuns(); setInterval(() => { if (!ticking) tick(); else if (link.down) drawLink(); }, 2000); setInterval(loadClosed, 30000); runTimer = setInterval(loadRuns, 30000); setInterval(loadAutomations, 30000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (!ticking) tick(); loadRuns(); loadAutomations(); } });
-if (new URLSearchParams(location.search).get('view') === 'launcher') openLauncher();    // clic sur une alerte du lanceur (notification Windows)
