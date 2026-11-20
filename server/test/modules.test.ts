@@ -18,7 +18,7 @@ describe('fichier de configuration', () => {
     const bad = join(dir, 'bad.json'); writeFileSync(bad, '{ pas du json');
     expect(loadModules(bad, env)).toEqual(NO_MODULES);
     for (const raw of [null, 3, [], {}, { modules: null }, { modules: [] }, { modules: {} }]) expect(parseModules(raw, env)).toEqual(NO_MODULES);
-    expect(modulesView(NO_MODULES)).toEqual({ launcher: false, teams: false, tickets: false, quota: false });
+    expect(modulesView(NO_MODULES)).toEqual({ launcher: false, teams: false, tickets: false, quota: false, automations: false });
   });
 
   test('un module complet s\'allume, avec ses chemins développés (BOM admis)', () => {
@@ -27,13 +27,13 @@ describe('fichier de configuration', () => {
       tickets: { pattern: 'ABC-\\d{4}' }, quota: { file: '%localappdata%\\orchestrateur\\usage.json' } } }));
     const m = loadModules(f, env);
     expect(m).toEqual({ launcher: { root: 'C:\\Users\\moi\\AppData\\Local\\orchestrateur', cli: 'C:\\Users\\moi\\outils\\cli.py', python: 'python', ticketApi: '' }, teams: true,
-      tickets: { pattern: 'ABC-\\d{4}' }, quota: { file: 'C:\\Users\\moi\\AppData\\Local\\orchestrateur\\usage.json' } });
-    expect(modulesView(m)).toEqual({ launcher: true, teams: true, tickets: true, quota: true });
+      tickets: { pattern: 'ABC-\\d{4}' }, quota: { file: 'C:\\Users\\moi\\AppData\\Local\\orchestrateur\\usage.json' }, automations: [] });
+    expect(modulesView(m)).toEqual({ launcher: true, teams: true, tickets: true, quota: true, automations: false });
   });
 
   test('un module mal décrit reste éteint, sans éteindre les autres', () => {
     const m = parseModules({ modules: { launcher: { root: 'relatif\\dossier' }, teams: { enabled: 'oui' }, tickets: { pattern: '(' }, quota: { file: 'C:\\q.json' } } }, env);
-    expect(m).toEqual({ launcher: null, teams: false, tickets: null, quota: { file: 'C:\\q.json' } });
+    expect(m).toEqual({ launcher: null, teams: false, tickets: null, quota: { file: 'C:\\q.json' }, automations: [] });
     // Lanceur sans commande : la vue marche, les ordres disent pourquoi ils ne partent pas.
     expect(parseModules({ modules: { launcher: { root: 'C:\\l', python: ' py ' } } }, env).launcher).toEqual({ root: 'C:\\l', cli: '', python: 'py', ticketApi: '' });
   });
