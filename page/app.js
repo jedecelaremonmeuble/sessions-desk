@@ -2689,7 +2689,7 @@ async function launchNew() {
 // largeur par défaut ; retenue d'une visite à l'autre (cc.promptw).
 function promptResizer(split) {
   const w = +localStorage.getItem('cc.promptw'); if (w) split.style.setProperty('--promptw', w + 'px');
-  const rz = el('div', 'vrz'); rz.title = 'Glisser pour élargir ou réduire les derniers prompts — double-clic : largeur par défaut';
+  const rz = el('div', 'vrz'); rz.title = T('Glisser pour élargir ou réduire les derniers prompts — double-clic : largeur par défaut', 'Drag to widen or narrow the recent prompts — double-click: default width');
   const clamp = x => Math.round(Math.max(220, Math.min(x, split.getBoundingClientRect().width - 320)));
   rz.onpointerdown = e => {
     e.preventDefault(); rz.setPointerCapture(e.pointerId); rz.classList.add('drag'); document.body.style.userSelect = 'none';
@@ -2712,8 +2712,8 @@ function renderDetail(force) {
   $('newbtn').classList.toggle('on', newMode); $('bcbtn').classList.toggle('on', bcMode); $('boardbtn').classList.toggle('on', boardMode);
   $('launchbtn').classList.toggle('on', launchMode); $('chatsbtn').classList.toggle('on', chatsMode);
   document.body.classList.toggle('finding', findMode);
-  const mt = launchMode ? 'Lanceur' : chatsMode ? 'Conversations Teams' : boardMode ? 'Tableau par projet' : newMode ? 'Nouvelle session' : bcMode ? 'Message à plusieurs sessions' : findMode ? 'Recherche dans les conversations' : null;
-  if (mt) setMobileTitle(mt); else { const cur = selected && byKey(selected); cur ? setMobileTitle(label(cur), cur.look || cur.state) : setMobileTitle('Vue d’ensemble'); }
+  const mt = launchMode ? T('Lanceur', 'Launcher') : chatsMode ? T('Conversations Teams', 'Teams conversations') : boardMode ? T('Tableau par projet', 'Board by project') : newMode ? T('Nouvelle session', 'New session') : bcMode ? T('Message à plusieurs sessions', 'Message to several sessions') : findMode ? T('Recherche dans les conversations', 'Search in conversations') : null;
+  if (mt) setMobileTitle(mt); else { const cur = selected && byKey(selected); cur ? setMobileTitle(label(cur), cur.look || cur.state) : setMobileTitle(T('Vue d’ensemble', 'Overview')); }
   if (launchMode) { if (detailKey !== '__launch__' || force) renderLauncher(); return; }   // rafraîchie par son propre minuteur (10 s)
   if (chatsMode) { if (detailKey !== '__chats__' || force) renderChats(); return; }   // rafraîchie par son minuteur (30 s) et à chaque nouvelle liste
   if (boardMode) { renderBoard(force); return; }
@@ -2734,57 +2734,57 @@ function renderDetail(force) {
     // Ouverte depuis la recherche dans les conversations : on garde sous les yeux les passages trouvés.
     const fh = findRes && findQ && $('q').value.trim() === findQ && findRes.hits.find(h => h.sessionId === it.sessionId);
     if (fh) {
-      body.append(el('h2', null, 'Passages trouvés — « ' + findQ + ' » · ' + fh.count + ' message' + (fh.count > 1 ? 's' : '')));
+      body.append(el('h2', null, T('Passages trouvés — « ' + findQ + ' » · ' + fh.count + ' message' + (fh.count > 1 ? 's' : ''), 'Matches — "' + findQ + '" · ' + fh.count + ' message' + (fh.count > 1 ? 's' : ''))));
       const box = el('div', 'fhit ' + it.state); for (const s of fh.snippets) box.append(snipEl(s, findQ)); body.append(box);
     }
     const term = it.kind === 'open' && !it.headless;      // automate (claude -p) : pas de terminal
     if (term) { const dg = el('div'); dg.id = 'dialog'; body.append(dg); }
     if (term) {
-      body.append(el('h2', null, 'Répondre'));
+      body.append(el('h2', null, T('Répondre', 'Reply')));
       const sg = el('div', 'suggest'); sg.id = 'suggest'; sg.hidden = true; body.append(sg);
       const box = el('div', 'sendbox'); const inp = promptArea('sendtext'); inp.maxLength = 4000;
       inp.dataset.key = it.key; inp.value = draftLoad(sessionStorage, it.key); inp.addEventListener('input', keepDraft);
-      const btn = el('button', 'primary', 'Envoyer'); btn.id = 'sendbtn'; btn.onclick = () => sendReply();
+      const btn = el('button', 'primary', T('Envoyer', 'Send')); btn.id = 'sendbtn'; btn.onclick = () => sendReply();
       box.append(inp, btn);
-      for (const q of ['go', 'oui', 'non', 'continue']) { const b = el('button', 'quick', q); b.title = 'Pré-remplit la réponse (n\'envoie pas)'; b.onclick = () => { inp.value = q; growArea(inp); inp.focus(); }; box.append(b); }
+      for (const q of ['go', T('oui', 'yes'), T('non', 'no'), 'continue']) { const b = el('button', 'quick', q); b.title = T('Pré-remplit la réponse (n\'envoie pas)', 'Prefills the reply (does not send)'); b.onclick = () => { inp.value = q; growArea(inp); inp.focus(); }; box.append(b); }
       const hint = el('div', 'hint'); hint.id = 'sendhint'; box.append(attachBar('reply:' + it.key), hint); body.append(box);
       if (inp.value) growArea(inp);   // brouillon repris : la zone reprend sa hauteur
     }
     const pr = el('div', 'prompts'); pr.id = 'prompts';
-    if (it.headless && it.reply) { body.append(el('h2', null, 'Dernier message'), el('div', 'reply', it.reply)); }
+    if (it.headless && it.reply) { body.append(el('h2', null, T('Dernier message', 'Last message')), el('div', 'reply', it.reply)); }
     if (term) {
       const split = el('div', 'split'), ct = el('div', 'cterm'), cp = el('div', 'cprompts');
       const pre = el('pre', null, '…'); pre.id = 'screen';
       // Deux vues du même panneau : l'écran (ce que le terminal affiche encore) ou la conversation complète (transcript).
       const vh = el('h2', 'viewtabs');
-      for (const [v, t, h] of [['screen', 'Écran du terminal', 'En direct, lecture seule : seulement ce que le terminal affiche encore'], ['conv', 'Conversation complète', 'Tout l’historique de la session, relu dans son transcript — défile jusqu’au premier message  ( h )']]) {
+      for (const [v, t, h] of [['screen', T('Écran du terminal', 'Terminal screen'), T('En direct, lecture seule : seulement ce que le terminal affiche encore', 'Live, read-only: only what the terminal still shows')], ['conv', T('Conversation complète', 'Full conversation'), T('Tout l’historique de la session, relu dans son transcript — défile jusqu’au premier message  ( h )', 'The whole session history, read from its transcript — scrolls back to the first message  ( h )')]]) {
         const b = el('button', 'vtab', t); b.dataset.view = v; b.title = h; b.onclick = () => setConvView(v); vh.append(b);
       }
-      ct.append(vh, pre, convPane()); cp.append(el('h2', null, 'Derniers prompts'), pr);
+      ct.append(vh, pre, convPane()); cp.append(el('h2', null, T('Derniers prompts', 'Recent prompts')), pr);
       split.append(ct, promptResizer(split), cp); body.append(split);
-    } else body.append(el('h2', null, 'Derniers prompts'), pr);
-    if (!term) body.append(el('h2', null, 'Conversation complète'), convPane());
+    } else body.append(el('h2', null, T('Derniers prompts', 'Recent prompts')), pr);
+    if (!term) body.append(el('h2', null, T('Conversation complète', 'Full conversation')), convPane());
     applyConvView(it);
   }
   const head = $('head'); head.replaceChildren(); head.className = it.state;
   { const dt = el('div', 'dtitle', label(it)), d = driftTag(it); if (d) dt.append(d); head.append(dt); }
-  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), LABEL[it.state] + ' · depuis ' + ago(data.now - it.since) + (it.waitingFor ? ' · ' + it.waitingFor : ''));
-  if (it.status === 'shell' && it.state !== 'shell') { const t = el('span', 'tag cl', 'commande en arrière-plan'); t.title = 'Tour terminé ; une commande lancée en arrière-plan tourne encore dans cette session'; chip.append(t); }
-  if (it.stale) { const t = el('span', 'tag cl', 'statut corrigé d\'après l\'écran'); t.title = 'Claude Code la déclare encore « au travail », mais ' + (it.stale === 'hook' ? 'elle a signalé la fin de son tour (hook Stop)' : 'son écran montre un tour terminé'); chip.append(t); }
+  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), T(LABEL[it.state] + ' · depuis ' + ago(data.now - it.since), LABEL[it.state] + ' · for ' + ago(data.now - it.since)) + (it.waitingFor ? ' · ' + it.waitingFor : ''));
+  if (it.status === 'shell' && it.state !== 'shell') { const t = el('span', 'tag cl', T('commande en arrière-plan', 'background command')); t.title = T('Tour terminé ; une commande lancée en arrière-plan tourne encore dans cette session', 'Turn finished; a command started in the background is still running in this session'); chip.append(t); }
+  if (it.stale) { const t = el('span', 'tag cl', T('statut corrigé d\'après l\'écran', 'status corrected from the screen')); t.title = T('Claude Code la déclare encore « au travail », mais ' + (it.stale === 'hook' ? 'elle a signalé la fin de son tour (hook Stop)' : 'son écran montre un tour terminé'), 'Claude Code still reports it as "working", but ' + (it.stale === 'hook' ? 'it signalled the end of its turn (Stop hook)' : 'its screen shows a finished turn')); chip.append(t); }
   head.append(chip);
-  if (it.model) { const md = el('span', 'tok', '  ·  modèle : ' + modelName(it.model)); md.title = it.model + ' — modèle du dernier message de la session (suit un /model en cours de route)'; head.append(md); }
-  if (it.tokens) { const tk = el('span', 'tok', '  ·  contexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens'); tk.title = 'Taille du dernier appel au modèle : entrée + cache lu + cache écrit'; head.append(tk); }
-  const meta = el('div', 'meta', [it.name, short(it.cwd), it.pid ? 'pid ' + it.pid : null, it.sessionId, it.version ? 'v' + it.version : null, it.startedAt ? 'lancée il y a ' + ago(data.now - it.startedAt) : null].filter(Boolean).join(' · '));
+  if (it.model) { const md = el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)); md.title = it.model + T(' — modèle du dernier message de la session (suit un /model en cours de route)', ' — model of the last message of the session (follows a /model on the way)'); head.append(md); }
+  if (it.tokens) { const tk = el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString('fr-FR') + ' tokens'); tk.title = T('Taille du dernier appel au modèle : entrée + cache lu + cache écrit', 'Size of the last model call: input + cache read + cache written'); head.append(tk); }
+  const meta = el('div', 'meta', [it.name, short(it.cwd), it.pid ? 'pid ' + it.pid : null, it.sessionId, it.version ? 'v' + it.version : null, it.startedAt ? T('lancée il y a ' + ago(data.now - it.startedAt), 'started ' + ago(data.now - it.startedAt) + ' ago') : null].filter(Boolean).join(' · '));
   const a = prLink(it); if (a) { meta.append(' · ', a); prTags(it).forEach(t => meta.append(t)); }
   head.append(meta);
   const dtags = tagChips(it, 'dtags'); if (dtags) head.append(dtags);
   const dinb = teamsInboundOf(it);
   if (dinb) {
     const box = el('div', 'twaits');
-    const l = el('div', 'tw inb', '📥 Demande Teams de ' + (dinb.chatLabel || dinb.from)); l.append(el('span', 'tx', ' — session ouverte automatiquement ; rien n’est envoyé sans ton accord.'));
+    const l = el('div', 'tw inb', T('📥 Demande Teams de ', '📥 Teams request from ') + (dinb.chatLabel || dinb.from)); l.append(el('span', 'tx', T(' — session ouverte automatiquement ; rien n’est envoyé sans ton accord.', ' — session opened automatically; nothing is sent without your approval.')));
     if (it.kind === 'open' && it.status === 'idle') {
-      const bs = el('span', 'twb'); const x = el('button', null, inboundIsArmed(it) ? 'Confirmer l’envoi à ' + (dinb.chatLabel || dinb.from) : 'Envoyer la réponse proposée');
-      x.title = 'Demande à la session de poster sa réponse proposée dans le chat Teams (deux clics). Pour la corriger d’abord, réponds à la session.';
+      const bs = el('span', 'twb'); const x = el('button', null, inboundIsArmed(it) ? T('Confirmer l’envoi à ' + (dinb.chatLabel || dinb.from), 'Confirm sending to ' + (dinb.chatLabel || dinb.from)) : T('Envoyer la réponse proposée', 'Send the proposed reply'));
+      x.title = T('Demande à la session de poster sa réponse proposée dans le chat Teams (deux clics). Pour la corriger d’abord, réponds à la session.', 'Asks the session to post its proposed reply in the Teams chat (two clicks). To correct it first, reply to the session.');
       x.onclick = () => teamsInboundSend(it, dinb); bs.append(x); l.append(bs);
     }
     box.append(l); head.append(box);
@@ -2793,72 +2793,72 @@ function renderDetail(force) {
   if (dtws.length) {
     const box = el('div', 'twaits');
     for (const w of dtws) {
-      const l = el('div', 'tw' + (w.status === 'replied' ? ' rep' : w.alertedAt ? ' alert' : ''), teamsWaitLine(w, data.now, data.teams.reminders)); l.append(el('span', 'tx', ' — « ' + w.excerpt + ' »'));
+      const l = el('div', 'tw' + (w.status === 'replied' ? ' rep' : w.alertedAt ? ' alert' : ''), teamsWaitLine(w, data.now, data.teams.reminders)); l.append(el('span', 'tx', T(' — « ' + w.excerpt + ' »', ' — "' + w.excerpt + '"')));
       const bs = el('span', 'twb');
       const b = (txt, action, tip) => { const x = el('button', null, txt); x.title = tip; x.onclick = () => teamsWaitAction(it, w, action); bs.append(x); };
       if (w.status === 'open') {
-        b('Relancer maintenant', 'remind', 'La session écrit tout de suite une relance courte dans le chat (envoi autonome), même hors calendrier');
-        b('Repousser', 'snooze', 'Pas de relance avant le prochain jour ouvré à 10 h');
+        b(T('Relancer maintenant', 'Remind now'), 'remind', T('La session écrit tout de suite une relance courte dans le chat (envoi autonome), même hors calendrier', 'The session writes a short reminder in the chat right away (sent on its own), even outside the schedule'));
+        b(T('Repousser', 'Snooze'), 'snooze', T('Pas de relance avant le prochain jour ouvré à 10 h', 'No reminder before the next working day at 10 am'));
       }
-      b('Ne plus attendre', 'dismiss', 'Ferme l’attente : plus de relance, et une réponse éventuelle ne sera pas transmise');
+      b(T('Ne plus attendre', 'Stop waiting'), 'dismiss', T('Ferme l’attente : plus de relance, et une réponse éventuelle ne sera pas transmise', 'Closes the wait: no more reminders, and any reply will not be passed on'));
       l.append(bs); box.append(l);
     }
-    if (!data.teams.enabled) box.append(el('div', 'tx', 'Surveillance éteinte : aucune réponse ne sera lue tant que « node teams-watcher.ts login » n’a pas été fait.'));
-    else if (!data.teams.reminders) box.append(el('div', 'tx', 'Relances automatiques éteintes (teams-watcher-config.json) : seul « Relancer maintenant » écrit au collègue.'));
+    if (!data.teams.enabled) box.append(el('div', 'tx', T('Surveillance éteinte : aucune réponse ne sera lue tant que « node teams-watcher.ts login » n’a pas été fait.', 'Watching is off: no reply will be read until "node teams-watcher.ts login" has been run.')));
+    else if (!data.teams.reminders) box.append(el('div', 'tx', T('Relances automatiques éteintes (teams-watcher-config.json) : seul « Relancer maintenant » écrit au collègue.', 'Automatic reminders are off (teams-watcher-config.json): only "Remind now" writes to your colleague.')));
     head.append(box);
   }
   const dvals = validationsOf(it);
   if (dvals && dvals.items.length) {
     const box = el('div', 'twaits vals');
-    box.append(el('div', 'vh', 'Validations métier — ' + (validationBadge(dvals) || 'aucune en cours') + ' · une validation n’est pas un go'));
+    box.append(el('div', 'vh', T('Validations métier — ' + (validationBadge(dvals) || 'aucune en cours') + ' · une validation n’est pas un go', 'Business validations — ' + (validationBadge(dvals) || 'none pending') + ' · a validation is not a go')));
     for (const i of dvals.items) {
       const l = el('div', 'tw val' + (i.withdrawn ? ' wd' : i.decision === 'refuse' || i.state === 'non-qualifiee' ? ' ref' : i.state === 'tranchee' ? '' : ' pre'), validationLine(i, data.now));
       l.append(el('div', 'tx', i.question));
-      if (i.reserve) l.append(el('div', 'tx', 'Réserve : ' + i.reserve));
-      if (i.quote) l.append(el('div', 'tx q', '« ' + i.quote + ' »'));
+      if (i.reserve) l.append(el('div', 'tx', T('Réserve : ', 'Reservation: ') + i.reserve));
+      if (i.quote) l.append(el('div', 'tx q', T('« ' + i.quote + ' »', '"' + i.quote + '"')));
       box.append(l);
     }
     head.append(box);
   }
   if (it.kind === 'open') head.append(gitBlock(it));
   if (it.headless) {
-    head.append(el('div', 'banner', 'Automate sans terminal : ce claude -p a été lancé par un script (' + (it.entrypoint || 'sdk') + '), par exemple le diagnostic automatique. Il n’a ni onglet, ni écran, et ne lit pas de réponse : il se pilote depuis son lanceur. On voit ici son avancement (derniers prompts, dernier message, git).'));
-    const fa = el('div', 'actions'); const bf = el('button', null, it.fav ? '★ Favori' : '☆ Favori'); bf.onclick = () => toggleFav(it); fa.append(bf); head.append(fa);
+    head.append(el('div', 'banner', T('Automate sans terminal : ce claude -p a été lancé par un script (' + (it.entrypoint || 'sdk') + '), par exemple le diagnostic automatique. Il n’a ni onglet, ni écran, et ne lit pas de réponse : il se pilote depuis son lanceur. On voit ici son avancement (derniers prompts, dernier message, git).', 'Automation without a terminal: this claude -p was started by a script (' + (it.entrypoint || 'sdk') + '), for example the automatic diagnosis. It has no tab, no screen, and reads no reply: it is driven from its launcher. Here you see its progress (recent prompts, last message, git).')));
+    const fa = el('div', 'actions'); const bf = el('button', null, it.fav ? T('★ Favori', '★ Favourite') : T('☆ Favori', '☆ Favourite')); bf.onclick = () => toggleFav(it); fa.append(bf); head.append(fa);
     return renderPromptsOnly(it);
   }
   const actions = el('div', 'actions');
-  const b1 = el('button', 'primary' + (it.kind === 'open' ? ' act-focus' : ''), it.kind === 'open' ? 'Afficher l\'onglet' : 'Rouvrir dans un nouvel onglet'); b1.onclick = () => primary(it);
-  const b2 = el('button', null, 'Copier la commande de reprise'); b2.title = resumeCmd(it); b2.onclick = () => copyCmd(it);
-  const bf = el('button', null, it.fav ? '★ Favori' : '☆ Favori'); bf.title = (it.fav ? 'Retirer des favoris' : 'Mettre en favori') + '  ( f )'; if (it.fav) bf.style.color = 'var(--fav)'; bf.onclick = () => toggleFav(it);
+  const b1 = el('button', 'primary' + (it.kind === 'open' ? ' act-focus' : ''), it.kind === 'open' ? T('Afficher l\'onglet', 'Show the tab') : T('Rouvrir dans un nouvel onglet', 'Reopen in a new tab')); b1.onclick = () => primary(it);
+  const b2 = el('button', null, T('Copier la commande de reprise', 'Copy the resume command')); b2.title = resumeCmd(it); b2.onclick = () => copyCmd(it);
+  const bf = el('button', null, it.fav ? T('★ Favori', '★ Favourite') : T('☆ Favori', '☆ Favourite')); bf.title = (it.fav ? T('Retirer des favoris', 'Remove from favourites') : T('Mettre en favori', 'Add to favourites')) + '  ( f )'; if (it.fav) bf.style.color = 'var(--fav)'; bf.onclick = () => toggleFav(it);
   actions.append(b1, b2, bf);
-  const bk = el('button', null, '⑂ Nouvelle session à partir de celle-ci'); bk.title = 'Ouvre une NOUVELLE session qui reprend toute cette conversation (claude --resume … --fork-session) ; celle-ci n’est pas touchée  ( d )';
+  const bk = el('button', null, T('⑂ Nouvelle session à partir de celle-ci', '⑂ New session from this one')); bk.title = T('Ouvre une NOUVELLE session qui reprend toute cette conversation (claude --resume … --fork-session) ; celle-ci n’est pas touchée  ( d )', 'Opens a NEW session that carries over this whole conversation (claude --resume … --fork-session); this one is not touched  ( d )');
   bk.onclick = () => openNew({ sessionId: it.sessionId, title: it.title, cwd: it.cwd, tags: it.tags }); actions.append(bk);
   if (it.kind === 'closed') {
-    const bh = el('button', null, it.hidden ? 'Ré-afficher dans la liste' : 'Masquer');
-    bh.title = it.hidden ? 'La remet dans « Fermées, reprenables »  ( x )' : 'La retire de la liste ; la recherche la retrouve, le transcript est intact  ( x )';
+    const bh = el('button', null, it.hidden ? T('Ré-afficher dans la liste', 'Show in the list again') : T('Masquer', 'Hide'));
+    bh.title = it.hidden ? T('La remet dans « Fermées, reprenables »  ( x )', 'Puts it back in "Closed, reopenable"  ( x )') : T('La retire de la liste ; la recherche la retrouve, le transcript est intact  ( x )', 'Removes it from the list; search still finds it, the transcript is intact  ( x )');
     bh.onclick = () => setHidden([it], !it.hidden); actions.append(bh);
   }
-  if (it.kind === 'open') { const bx = el('button', null, '✕ Fermer la session'); bx.title = 'Quitte la session (/exit) ; la conversation reste reprenable  ( x )'; bx.onclick = () => closeSession(it); actions.append(bx); }
+  if (it.kind === 'open') { const bx = el('button', null, T('✕ Fermer la session', '✕ Close the session')); bx.title = T('Quitte la session (/exit) ; la conversation reste reprenable  ( x )', 'Quits the session (/exit); the conversation can still be reopened  ( x )'); bx.onclick = () => closeSession(it); actions.append(bx); }
   // Toujours proposé (pas seulement quand l'onglet est introuvable) : fermer puis rouvrir en un seul geste.
   if (it.kind === 'open' && !it.headless) {
-    const b3 = el('button', noTab.has(it.key) ? 'primary' : null, '↻ Fermer et rouvrir'); b3.disabled = it.status !== 'idle';
-    b3.title = it.status === 'idle' ? 'Ferme la session (/exit) et la reprend aussitôt dans un nouvel onglet (claude --resume) ; la conversation est conservée' : 'Possible seulement quand la session est inactive';
+    const b3 = el('button', noTab.has(it.key) ? 'primary' : null, T('↻ Fermer et rouvrir', '↻ Close and reopen')); b3.disabled = it.status !== 'idle';
+    b3.title = it.status === 'idle' ? T('Ferme la session (/exit) et la reprend aussitôt dans un nouvel onglet (claude --resume) ; la conversation est conservée', 'Closes the session (/exit) and resumes it right away in a new tab (claude --resume); the conversation is kept') : T('Possible seulement quand la session est inactive', 'Only possible when the session is idle');
     b3.onclick = () => relaunch(it); actions.append(b3);
   }
   head.append(actions);
-  if (it.kind === 'closed') head.append(el('div', 'banner', 'Session fermée : son terminal n’existe plus. Tu peux la rouvrir dans un nouvel onglet (la conversation reprend où elle s’était arrêtée)' + (it.hidden ? ', ou la ré-afficher dans la liste — elle est masquée.' : ', ou la masquer si tu n’en as plus besoin.')));
+  if (it.kind === 'closed') head.append(el('div', 'banner', T('Session fermée : son terminal n’existe plus. Tu peux la rouvrir dans un nouvel onglet (la conversation reprend où elle s’était arrêtée)' + (it.hidden ? ', ou la ré-afficher dans la liste — elle est masquée.' : ', ou la masquer si tu n’en as plus besoin.'), 'Closed session: its terminal no longer exists. You can reopen it in a new tab (the conversation picks up where it left off)' + (it.hidden ? ', or show it in the list again — it is hidden.' : ', or hide it if you no longer need it.'))));
   const inp = $('sendtext');
   if (inp) {
     // Au travail : l'invite de Claude Code reste vide et active — le message y est tapé et Claude Code le met EN FILE,
     // comme s'il avait été tapé dans le terminal pendant le tour.
     const queue = it.status === 'busy', can = it.status === 'idle' || it.status === 'shell' || queue;
     inp.disabled = $('sendbtn').disabled = !can || sending;
-    $('sendbtn').textContent = queue ? 'Mettre en file' : 'Envoyer';
-    inp.placeholder = queue ? 'La session travaille : ton message sera mis en file  ( r )  — Entrée pour l’ajouter · Maj+Entrée : à la ligne'
-      : can ? (suggestKey === it.key && suggestion ? 'Tab : reprendre la proposition ci-dessus · ' : '') + 'Répondre à cette session…  ( r )  — Entrée pour envoyer · Maj+Entrée : à la ligne'
-      : 'Réponse impossible : la session ' + (it.status === 'waiting' ? 'attend la réponse à un dialogue — utilise le panneau « Dialogue en attente » ou son onglet' : 'n’a pas d’invite libre');
-    $('sendhint').textContent = queue ? 'Tapé dans l’invite de la session pendant qu’elle travaille : Claude Code le met en file et le prend dès qu’il peut (comme dans le terminal). Seulement si son invite est vide — les retours à la ligne y deviennent des espaces.'
-      : can ? 'Tapé dans le terminal de la session, seulement si son invite est vide — les retours à la ligne y deviennent des espaces.' : '';
+    $('sendbtn').textContent = queue ? T('Mettre en file', 'Queue') : T('Envoyer', 'Send');
+    inp.placeholder = queue ? T('La session travaille : ton message sera mis en file  ( r )  — Entrée pour l’ajouter · Maj+Entrée : à la ligne', 'The session is working: your message will be queued  ( r )  — Enter to add it · Shift+Enter: new line')
+      : can ? (suggestKey === it.key && suggestion ? T('Tab : reprendre la proposition ci-dessus · ', 'Tab: take the suggestion above · ') : '') + T('Répondre à cette session…  ( r )  — Entrée pour envoyer · Maj+Entrée : à la ligne', 'Reply to this session…  ( r )  — Enter to send · Shift+Enter: new line')
+      : T('Réponse impossible : la session ' + (it.status === 'waiting' ? 'attend la réponse à un dialogue — utilise le panneau « Dialogue en attente » ou son onglet' : 'n’a pas d’invite libre'), 'Cannot reply: the session ' + (it.status === 'waiting' ? 'is waiting for the answer to a dialog — use the "Pending dialog" panel or its tab' : 'has no free prompt'));
+    $('sendhint').textContent = queue ? T('Tapé dans l’invite de la session pendant qu’elle travaille : Claude Code le met en file et le prend dès qu’il peut (comme dans le terminal). Seulement si son invite est vide — les retours à la ligne y deviennent des espaces.', 'Typed into the session prompt while it works: Claude Code queues it and takes it as soon as it can (as in the terminal). Only if its prompt is empty — line breaks become spaces.')
+      : can ? T('Tapé dans le terminal de la session, seulement si son invite est vide — les retours à la ligne y deviennent des espaces.', 'Typed into the session terminal, only if its prompt is empty — line breaks become spaces.') : '';
   }
   renderPromptsOnly(it);
 }
@@ -2869,17 +2869,17 @@ function renderPromptsOnly(it) {
     const ps = (it.prompts || []).slice().reverse();
     // Messages en file (tapés pendant qu'elle travaille) : pas encore dans l'historique, Claude Code les prendra au tour suivant.
     for (const q of (it.queued || []).slice().reverse()) {
-      const d = el('div', 'prompt queued'), w = el('div', 'when'); w.append(el('span', 'tag', 'en file'), ' ' + (q.at ? new Date(q.at).toLocaleString('fr-FR') : ''));
-      d.title = 'Mis en file pendant que la session travaille : Claude Code le prendra dès qu’il peut'; d.append(w, el('div', null, q.text)); pr.append(d);
+      const d = el('div', 'prompt queued'), w = el('div', 'when'); w.append(el('span', 'tag', T('en file', 'queued')), ' ' + (q.at ? new Date(q.at).toLocaleString('fr-FR') : ''));
+      d.title = T('Mis en file pendant que la session travaille : Claude Code le prendra dès qu’il peut', 'Queued while the session works: Claude Code will take it as soon as it can'); d.append(w, el('div', null, q.text)); pr.append(d);
     }
-    if (!ps.length && !(it.queued || []).length) pr.append(el('div', 'empty', it.headless ? 'Un automate reçoit ses consignes par son lanceur : rien dans l’historique des prompts.' : 'Aucun prompt récent dans l\'historique.'));
+    if (!ps.length && !(it.queued || []).length) pr.append(el('div', 'empty', it.headless ? T('Un automate reçoit ses consignes par son lanceur : rien dans l’historique des prompts.', 'An automation gets its instructions from its launcher: nothing in the prompt history.') : T('Aucun prompt récent dans l\'historique.', 'No recent prompt in the history.')));
     for (const p of ps) { const d = el('div', 'prompt'); d.append(el('div', 'when', new Date(p.at).toLocaleString('fr-FR')), el('div', null, p.text)); pr.append(d); }
   }
 }
 
 function renderOverview() {
   const head = $('head'), body = $('body'); const items = allItems().filter(it => !it.hidden);
-  head.className = ''; head.replaceChildren(el('div', 'dtitle', 'Vue d\'ensemble'));
+  head.className = ''; head.replaceChildren(el('div', 'dtitle', T('Vue d\'ensemble', 'Overview')));
   const tiles = el('div', 'tiles');
   for (const st of ['waiting', 'ask', 'done', 'busy', 'shell', 'idle', 'auto', 'closed']) {
     const t = el('div', 'tile ' + st); t.append(el('b', null, items.filter(it => it.state === st).length), el('span', null, LABEL[st])); tiles.append(t);
@@ -2891,47 +2891,47 @@ function renderOverview() {
   if (body.dataset.sig === 'overview' && body.dataset.n === nsig) return;
   body.dataset.sig = 'overview'; body.dataset.n = nsig; body.replaceChildren();
   const rp = rebootPanel(); if (rp) body.append(rp);
-  const qs = quotaSection(); if (qs) body.append(el('h2', null, 'Quota Claude de la semaine'), qs);
+  const qs = quotaSection(); if (qs) body.append(el('h2', null, T('Quota Claude de la semaine', 'Claude quota this week')), qs);
   const sp = restartPanel(); if (sp) body.append(sp);
-  const as = automationSection(); if (as) body.append(el('h2', null, 'Automates du poste'), as);
+  const as = automationSection(); if (as) body.append(el('h2', null, T('Automates du poste', 'Automations on this machine')), as);
   if (cl.length) {
-    body.append(el('h2', null, 'Peuvent se fermer — ' + cl.length));
+    body.append(el('h2', null, T('Peuvent se fermer — ', 'Can be closed — ') + cl.length));
     const act = el('div', 'actions');
-    const bc = el('button', 'primary', 'Fermer la sélection…'); bc.title = 'Ferme les sessions cochées (/exit) ; elles restent reprenables depuis « Fermées »'; bc.onclick = () => closeMany(cl.filter(it => closePick.get(it.key) !== false));
-    const bt = el('button', null, 'Tout cocher / décocher'); bt.onclick = () => { const all = cl.every(it => closePick.get(it.key) !== false); cl.forEach(it => closePick.set(it.key, !all)); renderDetail(true); };
+    const bc = el('button', 'primary', T('Fermer la sélection…', 'Close the selection…')); bc.title = T('Ferme les sessions cochées (/exit) ; elles restent reprenables depuis « Fermées »', 'Closes the checked sessions (/exit); they can still be reopened from "Closed"'); bc.onclick = () => closeMany(cl.filter(it => closePick.get(it.key) !== false));
+    const bt = el('button', null, T('Tout cocher / décocher', 'Check / uncheck all')); bt.onclick = () => { const all = cl.every(it => closePick.get(it.key) !== false); cl.forEach(it => closePick.set(it.key, !all)); renderDetail(true); };
     act.append(bc, bt); body.append(act);
     const box = el('div', 'notifs');
     for (const it of cl) { const d = el('div', 'notif done pick');
       const cb = el('input'); cb.type = 'checkbox'; cb.checked = closePick.get(it.key) !== false; cb.onclick = e => e.stopPropagation(); cb.onchange = () => closePick.set(it.key, cb.checked);
-      d.append(cb, el('span', 'when', it.git.worktree ? it.git.top.split('\\').pop() : 'sans worktree'), el('span', 'nt', label(it)), el('span', 'nx', (prMerged(it) ? 'PR #' + it.pr + ' mergée' : 'branche intégrée à master') + (it.git.worktree ? ', rien à commiter ni à pousser' : ''))); d.title = 'Sélectionner la session'; d.onclick = () => select(it.key, true); box.append(d); }
+      d.append(cb, el('span', 'when', it.git.worktree ? it.git.top.split('\\').pop() : T('sans worktree', 'no worktree')), el('span', 'nt', label(it)), el('span', 'nx', T((prMerged(it) ? 'PR #' + it.pr + ' mergée' : 'branche intégrée à master') + (it.git.worktree ? ', rien à commiter ni à pousser' : ''), (prMerged(it) ? 'PR #' + it.pr + ' merged' : 'branch merged into master') + (it.git.worktree ? ', nothing to commit or push' : '')))); d.title = T('Sélectionner la session', 'Select the session'); d.onclick = () => select(it.key, true); box.append(d); }
     body.append(box);
   }
   const ip = idlePanel(); if (ip) body.append(ip);
-  body.append(el('h2', null, 'Notifications récentes'));
-  if (!data.notifs.length) body.append(el('div', 'empty', 'Aucune notification envoyée pour l\'instant.'));
+  body.append(el('h2', null, T('Notifications récentes', 'Recent notifications')));
+  if (!data.notifs.length) body.append(el('div', 'empty', T('Aucune notification envoyée pour l\'instant.', 'No notification sent yet.')));
   else {
     const box = el('div', 'notifs');
     for (const nf of data.notifs.slice().reverse().slice(0, 30)) {
       const d = el('div', 'notif ' + (nf.kind === 'waiting' || nf.kind === 'automation' ? 'waiting' : nf.kind === 'launcher' ? 'ask' : 'done'));
       d.append(el('span', 'dot'), el('span', 'when', new Date(nf.at).toLocaleString('fr-FR')), el('span', 'nt', (nf.kind === 'launcher' ? '🤖 ' : '') + nf.title), el('span', 'nx', nf.text));
-      d.title = nf.pass ? 'Ouvrir cette passe' : nf.hd ? 'Ouvrir le dernier run de HD-' + nf.hd : nf.kind === 'launcher' ? 'Ouvrir la vue Lanceur' : 'Sélectionner la session';
-      d.onclick = () => { if (nf.pass) openPass(nf.pass); else if (nf.hd) openRun(nf.hd); else if (nf.kind === 'launcher') openLauncher(); else if (byKey(nf.sessionId)) select(nf.sessionId, true); else say('cette session n\'est plus listée'); };
+      d.title = nf.pass ? T('Ouvrir cette passe', 'Open this pass') : nf.hd ? T('Ouvrir le dernier run de HD-', 'Open the last run of HD-') + nf.hd : nf.kind === 'launcher' ? T('Ouvrir la vue Lanceur', 'Open the Launcher view') : T('Sélectionner la session', 'Select the session');
+      d.onclick = () => { if (nf.pass) openPass(nf.pass); else if (nf.hd) openRun(nf.hd); else if (nf.kind === 'launcher') openLauncher(); else if (byKey(nf.sessionId)) select(nf.sessionId, true); else say(T('cette session n\'est plus listée', 'this session is no longer listed')); };
       box.append(d);
     }
     body.append(box);
   }
-  body.append(el('h2', null, 'Raccourcis clavier'));
+  body.append(el('h2', null, T('Raccourcis clavier', 'Keyboard shortcuts')));
   const keys = el('div', 'keys');
-  for (const [k, d] of [['/', 'rechercher (titre, prompt, numéro de PR, dossier, identifiant)'], ['↑ ↓', 'parcourir les sessions'], ['Entrée', 'afficher l\'onglet de la session (ou rouvrir une session fermée)'],
-                        ['n', 'aller à la prochaine session à traiter et afficher son onglet'], ['r', 'répondre à la session sélectionnée (Entrée envoie)'], ['p', 'reprendre la proposition de prompt de Claude Code dans la zone de réponse (Entrée l’envoie) — aussi Tab dans la zone vide'],['f', 'mettre la session en favori, ou la retirer (★ à côté de la recherche : favoris seulement)'], ['c', 'copier la commande de reprise'], ['1 – 9', 'session bloquée sur un dialogue : choisir l’option correspondante (tapée dans son terminal)'], ['+', 'lancer une nouvelle session (dossier, premier message, modèle)'], ['d', 'nouvelle session à partir de la session sélectionnée : elle reprend toute sa conversation (fork), l’originale n’est pas touchée'],['h', 'basculer entre l’écran du terminal et la conversation complète (tout l’historique, relu dans le transcript)'], ['b', 'revenir à la session consultée juste avant (liste « Consultées récemment » en tête)'], ['x', 'fermer la session sélectionnée (avec confirmation ; elle reste reprenable) — sur une session déjà fermée : la masquer / ré-afficher'], ['Échap', 'vider la recherche, puis revenir à cette vue'],
-                        ['sélection', 'tout texte sélectionné à la souris est copié dans le presse-papier au relâchement'], ['Ctrl+K Ctrl+U', 'zone de saisie : couper jusqu’à la fin / au début de la ligne'], ['Ctrl+Y', 'zone de saisie : recoller le dernier texte coupé'], ['Ctrl+E', 'zone de saisie : aller en fin de ligne'], ['Alt+B Alt+F', 'zone de saisie : reculer / avancer d’un mot'], ['Ctrl+_', 'zone de saisie : annuler (comme Ctrl+Z)']]) {
+  for (const [k, d] of [['/', T('rechercher (titre, prompt, numéro de PR, dossier, identifiant)', 'search (title, prompt, PR number, folder, id)')], ['↑ ↓', T('parcourir les sessions', 'move through the sessions')], [T('Entrée', 'Enter'), T('afficher l\'onglet de la session (ou rouvrir une session fermée)', 'show the session tab (or reopen a closed session)')],
+                        ['n', T('aller à la prochaine session à traiter et afficher son onglet', 'go to the next session to handle and show its tab')], ['r', T('répondre à la session sélectionnée (Entrée envoie)', 'reply to the selected session (Enter sends)')], ['p', T('reprendre la proposition de prompt de Claude Code dans la zone de réponse (Entrée l’envoie) — aussi Tab dans la zone vide', 'take the Claude Code prompt suggestion into the reply box (Enter sends it) — also Tab in the empty box')],['f', T('mettre la session en favori, ou la retirer (★ à côté de la recherche : favoris seulement)', 'add the session to favourites, or remove it (★ next to the search: favourites only)')], ['c', T('copier la commande de reprise', 'copy the resume command')], ['1 – 9', T('session bloquée sur un dialogue : choisir l’option correspondante (tapée dans son terminal)', 'session waiting on a dialog: pick the matching option (typed into its terminal)')], ['+', T('lancer une nouvelle session (dossier, premier message, modèle)', 'start a new session (folder, first message, model)')], ['d', T('nouvelle session à partir de la session sélectionnée : elle reprend toute sa conversation (fork), l’originale n’est pas touchée', 'new session from the selected session: it carries over its whole conversation (fork), the original is not touched')],['h', T('basculer entre l’écran du terminal et la conversation complète (tout l’historique, relu dans le transcript)', 'switch between the terminal screen and the full conversation (the whole history, read from the transcript)')], ['b', T('revenir à la session consultée juste avant (liste « Consultées récemment » en tête)', 'go back to the session viewed just before ("Recently viewed" list at the top)')], ['x', T('fermer la session sélectionnée (avec confirmation ; elle reste reprenable) — sur une session déjà fermée : la masquer / ré-afficher', 'close the selected session (with confirmation; it can still be reopened) — on a session already closed: hide / show it again')], [T('Échap', 'Esc'), T('vider la recherche, puis revenir à cette vue', 'clear the search, then come back to this view')],
+                        [T('sélection', 'selection'), T('tout texte sélectionné à la souris est copié dans le presse-papier au relâchement', 'any text selected with the mouse is copied to the clipboard on release')], ['Ctrl+K Ctrl+U', T('zone de saisie : couper jusqu’à la fin / au début de la ligne', 'text box: cut to the end / start of the line')], ['Ctrl+Y', T('zone de saisie : recoller le dernier texte coupé', 'text box: paste back the last cut text')], ['Ctrl+E', T('zone de saisie : aller en fin de ligne', 'text box: go to the end of the line')], ['Alt+B Alt+F', T('zone de saisie : reculer / avancer d’un mot', 'text box: move back / forward one word')], ['Ctrl+_', T('zone de saisie : annuler (comme Ctrl+Z)', 'text box: undo (like Ctrl+Z)')]]) {
     const kk = el('span'); k.split(' ').forEach((x, i) => { if (i) kk.append(' '); kk.append(el('kbd', null, x)); }); keys.append(kk, el('span', null, d));
   }
   body.append(keys);
-  body.append(el('h2', null, 'Dernières relances'));
-  if (!data.restarts.length) body.append(el('div', 'empty', 'Aucune relance enregistrée.'));
+  body.append(el('h2', null, T('Dernières relances', 'Recent restarts')));
+  if (!data.restarts.length) body.append(el('div', 'empty', T('Aucune relance enregistrée.', 'No restart recorded.')));
   else {
-    const w = el('div', 'tablewrap'), t = el('table'), hr = el('tr'); ['Quand', 'Session', 'Résultat'].forEach(h => hr.append(el('th', null, h))); t.append(hr);
+    const w = el('div', 'tablewrap'), t = el('table'), hr = el('tr'); [T('Quand', 'When'), 'Session', T('Résultat', 'Result')].forEach(h => hr.append(el('th', null, h))); t.append(hr);
     for (const r of data.restarts.slice().reverse()) { const tr = el('tr');
       tr.append(el('td', null, new Date(r.at).toLocaleString('fr-FR')), el('td', null, r.name + ' (' + r.sessionId.slice(0, 8) + ')'), el('td', r.code === 0 ? 'ok' : 'ko', r.result)); t.append(tr); }
     w.append(t); body.append(w);
@@ -2976,16 +2976,16 @@ function renderStuckPrompt(it, box, draft) {
   if (sig === lastDialogSig && box.dataset.pid === String(it.pid)) return;
   lastDialogSig = sig; box.dataset.pid = it.pid; box.replaceChildren();
   const expect = draft.split('\n').map(s => s.trim()).find(Boolean) || '';
-  box.append(el('h2', null, 'Invite occupée — un texte y est resté'));
+  box.append(el('h2', null, T('Invite occupée — un texte y est resté', 'Prompt busy — some text was left in it')));
   const c = el('div', 'dlg');
   c.append(el('div', 'q', draft));
   const row = el('div', 'row');
-  const go = el('button', 'primary', 'Envoyer ce texte'); go.title = 'Appuie sur Entrée dans le terminal de la session : le texte resté dans l’invite part tel quel';
-  go.onclick = () => sendKeys(it, [{ k: 'Enter' }], expect, 'texte de l’invite envoyé');
-  const clr = el('button', null, 'Vider l’invite'); clr.title = 'Appuie deux fois sur Échap dans le terminal de la session : le texte est effacé, rien n’est envoyé';
-  clr.onclick = () => sendKeys(it, [{ k: 'Esc' }, { k: 'Esc' }], expect, 'invite vidée');
+  const go = el('button', 'primary', T('Envoyer ce texte', 'Send this text')); go.title = T('Appuie sur Entrée dans le terminal de la session : le texte resté dans l’invite part tel quel', 'Presses Enter in the session terminal: the text left in the prompt is sent as is');
+  go.onclick = () => sendKeys(it, [{ k: 'Enter' }], expect, T('texte de l’invite envoyé', 'prompt text sent'));
+  const clr = el('button', null, T('Vider l’invite', 'Clear the prompt')); clr.title = T('Appuie deux fois sur Échap dans le terminal de la session : le texte est effacé, rien n’est envoyé', 'Presses Esc twice in the session terminal: the text is erased, nothing is sent');
+  clr.onclick = () => sendKeys(it, [{ k: 'Esc' }, { k: 'Esc' }], expect, T('invite vidée', 'prompt cleared'));
   row.append(go, clr); c.append(row);
-  c.append(el('div', 'hint', 'Tant que ce texte est dans l’invite, aucun message ne peut être envoyé à la session. Envoie-le ou vide l’invite ; le texte est revérifié à l’écran juste avant.'));
+  c.append(el('div', 'hint', T('Tant que ce texte est dans l’invite, aucun message ne peut être envoyé à la session. Envoie-le ou vide l’invite ; le texte est revérifié à l’écran juste avant.', 'While this text is in the prompt, no message can be sent to the session. Send it or clear the prompt; the text is checked again on the screen just before.')));
   box.append(c);
 }
 let keying = false, lastDialogSig = null;
@@ -2993,8 +2993,8 @@ async function sendKeys(it, keys, expect, what) {
   if (keying) return; keying = true; document.querySelectorAll('#dialog button').forEach(b => b.disabled = true);
   try {
     const r = await (await fetch('/api/keys?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ keys, expect }) })).json();
-    say(r.error ? 'non envoyé : ' + r.error : (what || 'touche envoyée') + ' — « ' + label(it) + ' »');
-  } catch { say('échec de la demande'); }
+    say(r.error ? T('non envoyé : ', 'not sent: ') + r.error : T((what || 'touche envoyée') + ' — « ' + label(it) + ' »', (what || 'key sent') + ' — "' + label(it) + '"'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   keying = false; lastDialogSig = null; setTimeout(refreshScreen, 350); setTimeout(refreshScreen, 1200);
 }
 // Session INACTIVE : deux blocages se lèvent aussi d'ici. Un DIALOGUE ouvert hors attente (plus d'invite à l'écran,
@@ -3014,7 +3014,7 @@ function renderDialog(it, text, draft) {
   const act = document.activeElement; if (act && (act.tagName === 'INPUT' || act.tagName === 'TEXTAREA') && box.contains(act) && act.value) return;
   lastDialogSig = sig; box.dataset.pid = it.pid; box.replaceChildren();
   if (!d) return;
-  box.append(el('h2', null, 'Dialogue en attente — réponds ici'));
+  box.append(el('h2', null, T('Dialogue en attente — réponds ici', 'Pending dialog — answer here')));
   const c = el('div', 'dlg');
   if (d.tabs) c.append(el('div', 'tabs', d.tabs));
   if (d.q) c.append(el('div', 'q', d.q));
@@ -3022,9 +3022,9 @@ function renderDialog(it, text, draft) {
   for (const o of d.opts) {
     const b = el('button', 'opt' + (o.sel ? ' sel' : '')); b.append(el('span', 'n', o.num + '.'), el('span', null, o.label));
     if (o.desc.length) b.append(el('span', 'd', o.desc.join(' ')));
-    b.title = 'Tape « ' + o.num + ' » dans le terminal  ( touche ' + o.num + ' )';
+    b.title = T('Tape « ' + o.num + ' » dans le terminal  ( touche ' + o.num + ' )', 'Types "' + o.num + '" into the terminal  ( key ' + o.num + ' )');
     if (!d.multi && /^(type something|other|autre)/i.test(o.label)) other = o;
-    b.onclick = () => sendKeys(it, [{ t: String(o.num) }], o.expect, 'option ' + o.num + ' « ' + o.label + ' »');
+    b.onclick = () => sendKeys(it, [{ t: String(o.num) }], o.expect, T('option ' + o.num + ' « ' + o.label + ' »', 'option ' + o.num + ' "' + o.label + '"'));
     os.append(b);
   }
   c.append(os);
@@ -3033,24 +3033,24 @@ function renderDialog(it, text, draft) {
   if (d.multi && d.submit) {
     const cur = Math.max(0, d.opts.findIndex(o => o.sel)), last = d.opts.map(o => /^\[[ ✔xX]\]/.test(o.label)).lastIndexOf(true);
     const keys = d.tabs ? [{ k: 'Right' }] : Array.from({ length: last - cur + 1 }, () => ({ k: 'Down' })).concat([{ k: 'Enter' }]);
-    const row = el('div', 'row'); const b = el('button', 'primary', d.tabs ? 'Valider la sélection → question suivante' : 'Valider la sélection');
-    b.title = 'Le chiffre d’une option la coche ou la décoche ; ce bouton valide les cases cochées';
-    b.onclick = () => sendKeys(it, keys, d.opts[cur].expect, 'sélection validée'); row.append(b); c.append(row);
+    const row = el('div', 'row'); const b = el('button', 'primary', d.tabs ? T('Valider la sélection → question suivante', 'Confirm the selection → next question') : T('Valider la sélection', 'Confirm the selection'));
+    b.title = T('Le chiffre d’une option la coche ou la décoche ; ce bouton valide les cases cochées', 'An option’s number checks or unchecks it; this button confirms the checked boxes');
+    b.onclick = () => sendKeys(it, keys, d.opts[cur].expect, T('sélection validée', 'selection confirmed')); row.append(b); c.append(row);
   }
   if (other) {
-    const row = el('div', 'row'); const inp = promptArea('dlgother'); inp.placeholder = 'Ta réponse libre (option ' + other.num + ')… — Entrée pour envoyer · Maj+Entrée : à la ligne'; inp.maxLength = 4000;
-    const go = el('button', 'primary', 'Envoyer la réponse libre');
-    const fire = () => { const v = inp.value.trim(); if (!v) return; inp.value = ''; growArea(inp); inp.blur(); sendKeys(it, [{ t: String(other.num) }, { t: v }, { k: 'Enter' }], other.expect, 'réponse libre'); };
+    const row = el('div', 'row'); const inp = promptArea('dlgother'); inp.placeholder = T('Ta réponse libre (option ' + other.num + ')… — Entrée pour envoyer · Maj+Entrée : à la ligne', 'Your free answer (option ' + other.num + ')… — Enter to send · Shift+Enter: new line'); inp.maxLength = 4000;
+    const go = el('button', 'primary', T('Envoyer la réponse libre', 'Send the free answer'));
+    const fire = () => { const v = inp.value.trim(); if (!v) return; inp.value = ''; growArea(inp); inp.blur(); sendKeys(it, [{ t: String(other.num) }, { t: v }, { k: 'Enter' }], other.expect, T('réponse libre', 'free answer')); };
     go.onclick = fire; inp.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } else if (e.key === 'Escape') inp.blur(); };
     row.append(inp, go); c.append(row);
   }
   const kr = el('div', 'row keys');
-  for (const [k, t, h] of [['Up', '↑', 'Monter'], ['Down', '↓', 'Descendre'], ['Space', 'Espace', 'Cocher / décocher (choix multiple)'], ['Enter', 'Entrée', 'Valider'], ['Left', '←', 'Question précédente'], ['Right', '→', 'Question suivante / Submit'], ['Tab', 'Tab', 'Champ suivant'], ['Esc', 'Échap', 'Annuler le dialogue']]) {
+  for (const [k, t, h] of [['Up', '↑', T('Monter', 'Up')], ['Down', '↓', T('Descendre', 'Down')], ['Space', T('Espace', 'Space'), T('Cocher / décocher (choix multiple)', 'Check / uncheck (multiple choice)')], ['Enter', T('Entrée', 'Enter'), T('Valider', 'Confirm')], ['Left', '←', T('Question précédente', 'Previous question')], ['Right', '→', T('Question suivante / Submit', 'Next question / Submit')], ['Tab', 'Tab', T('Champ suivant', 'Next field')], ['Esc', T('Échap', 'Esc'), T('Annuler le dialogue', 'Cancel the dialog')]]) {
     // Hors attente, le serveur n'accepte une touche qu'avec un texte à retrouver à l'écran : la première option.
     const b = el('button', null, t); b.title = h; b.onclick = () => sendKeys(it, [{ k }], it.status === 'waiting' ? null : d.opts[0].expect, t); kr.append(b);
   }
   c.append(kr);
-  c.append(el('div', 'hint', (d.foot ? 'Dans le terminal : ' + d.foot + '. ' : '') + 'Chaque clic est tapé dans le terminal de la session ; l’option visée est revérifiée à l’écran juste avant. Touches 1 à 9 : choisir une option.'));
+  c.append(el('div', 'hint', (d.foot ? T('Dans le terminal : ', 'In the terminal: ') + d.foot + '. ' : '') + T('Chaque clic est tapé dans le terminal de la session ; l’option visée est revérifiée à l’écran juste avant. Touches 1 à 9 : choisir une option.', 'Each click is typed into the session terminal; the target option is checked again on the screen just before. Keys 1 to 9: pick an option.')));
   box.append(c);
 }
 
@@ -3068,8 +3068,8 @@ function convPane() {
   const bar = el('div', 'convbar');
   const lb = el('label'), cb = el('input'); cb.type = 'checkbox'; cb.checked = convTools();
   cb.onchange = () => { localStorage.setItem('cc.convtools', cb.checked ? '1' : '0'); drawConv(); };
-  lb.append(cb, ' outils et résultats');
-  const end = el('button', 'quick', '↓ fin'); end.title = 'Aller au dernier message'; end.onclick = () => { const l = $('convlist'); if (l) l.scrollTop = l.scrollHeight; };
+  lb.append(cb, T(' outils et résultats', ' tools and results'));
+  const end = el('button', 'quick', T('↓ fin', '↓ end')); end.title = T('Aller au dernier message', 'Go to the last message'); end.onclick = () => { const l = $('convlist'); if (l) l.scrollTop = l.scrollHeight; };
   const st = el('span', 'meta'); st.id = 'convstat';
   bar.append(lb, end, st);
   const list = el('div', 'convlist', '…'); list.id = 'convlist';
@@ -3099,13 +3099,13 @@ async function loadConv(it, mode) {
     const url = '/api/transcript?id=' + encodeURIComponent(c.id) + (mode === 'older' ? '&before=' + c.start : mode === 'more' ? '&after=' + c.end : '');
     const res = await fetch(url, { cache:'no-store' }); const r = await res.json();
     if (conv !== c) return;
-    if (!res.ok) { c.err = r.error || ('erreur ' + res.status); drawConv(); return; }
+    if (!res.ok) { c.err = r.error || (T('erreur ', 'error ') + res.status); drawConv(); return; }
     c.err = null;
     if (r.reset) { c.items = []; c.start = c.end = null; return; }          // transcript réécrit ou trop de retard : rechargé à la passe suivante
     if (mode === 'older') { c.items = r.items.concat(c.items); c.start = r.start; c.more = r.start > 0; drawConv(false, true); }
     else if (mode === 'more') { c.end = r.end; if (r.items.length) { c.items = c.items.concat(r.items); drawConv(); } }
     else { c.items = r.items; c.start = r.start; c.end = r.end; c.more = r.start > 0; drawConv(true); }
-  } catch { if (conv === c) { c.err = 'transcript illisible (serveur injoignable ?)'; drawConv(); } }
+  } catch { if (conv === c) { c.err = T('transcript illisible (serveur injoignable ?)', 'transcript unreadable (server unreachable?)'); drawConv(); } }
   finally { c.busy = false; }
 }
 const convWhen = at => {
@@ -3230,20 +3230,20 @@ function mdRender(m) {
 // développement, relecture…), une fin de tâche de fond de Claude Code lui-même. Chaque provenance a son libellé et sa
 // couleur. PURE (testée) : m = élément de /api/transcript (m.o = provenance lue par le serveur), phase = étape du run
 // dont on lit la conversation (null pour une session ordinaire).
-const AGENT_FR = { diagnostic:'Agent de diagnostic', suite:'Agent de diagnostic · suite', relance:'Agent de diagnostic · relance', reveil:'Agent de diagnostic · réveil',
-  dev:'Agent de développement', reprise:'Agent de développement · reprise', relecture:'Agent de relecture', recette:'Agent de recette' };
+const AGENT_FR = { diagnostic:T('Agent de diagnostic', 'Diagnosis agent'), suite:T('Agent de diagnostic · suite', 'Diagnosis agent · follow-up'), relance:T('Agent de diagnostic · relance', 'Diagnosis agent · restart'), reveil:T('Agent de diagnostic · réveil', 'Diagnosis agent · wake-up'),
+  dev:T('Agent de développement', 'Development agent'), reprise:T('Agent de développement · reprise', 'Development agent · resume'), relecture:T('Agent de relecture', 'Review agent'), recette:T('Agent de recette', 'Testing agent') };
 const AGENT_KIND = { diagnostic:'diag', suite:'diag', relance:'diag', reveil:'diag', dev:'dev', reprise:'dev', relecture:'review', recette:'recette' };
 function convOrigin(m, phase) {
-  if (m.r === 'assistant') return phase ? { cls: 'agent ag-' + (AGENT_KIND[phase] || 'other'), who: '🤖 ' + (AGENT_FR[phase] || 'Agent du lanceur · ' + phase) } : { cls: '', who: 'Claude' };
+  if (m.r === 'assistant') return phase ? { cls: 'agent ag-' + (AGENT_KIND[phase] || 'other'), who: '🤖 ' + (AGENT_FR[phase] || T('Agent du lanceur · ', 'Launcher agent · ') + phase) } : { cls: '', who: 'Claude' };
   const t = String(m.t == null ? '' : m.t).trim(); let x;
   if (m.o === 'task' || /^<task-notification>[\s\S]*<\/task-notification>$/.test(t)) {
     const unesc = v => v.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
     const st = /<status>([^<]*)<\/status>/.exec(t); x = /<summary>([\s\S]*?)<\/summary>/.exec(t);
-    return { cls: 'task', who: '⚙ Tâche de fond', text: x ? unesc(x[1]).trim() : t, err: !!st && st[1].trim() !== 'completed' };
+    return { cls: 'task', who: T('⚙ Tâche de fond', '⚙ Background task'), text: x ? unesc(x[1]).trim() : t, err: !!st && st[1].trim() !== 'completed' };
   }
-  if (m.o === 'sdk') return { cls: 'auto', who: phase ? '🤖 Lanceur · consigne du run' : '🤖 Automate · consigne de lancement' };
-  if ((x = /^<pasted_content[^>]*>\n?([\s\S]*?)\n?<\/pasted_content>$/.exec(t)) && !x[1].includes('<pasted_content')) return { cls: 'paste', who: '📋 Collé dans la session', text: x[1] };
-  return { cls: '', who: 'Toi' };
+  if (m.o === 'sdk') return { cls: 'auto', who: phase ? T('🤖 Lanceur · consigne du run', '🤖 Launcher · run instructions') : T('🤖 Automate · consigne de lancement', '🤖 Automation · start instructions') };
+  if ((x = /^<pasted_content[^>]*>\n?([\s\S]*?)\n?<\/pasted_content>$/.exec(t)) && !x[1].includes('<pasted_content')) return { cls: 'paste', who: T('📋 Collé dans la session', '📋 Pasted into the session'), text: x[1] };
+  return { cls: '', who: T('Toi', 'You') };
 }
 function convItem(m) {
   if (m.r === 'tool') {
@@ -3253,8 +3253,8 @@ function convItem(m) {
   }
   if (m.r === 'result' || m.r === 'summary') {
     const d = el('details', 'cm ' + (m.r === 'summary' ? 'sum' : 'res') + (m.e ? ' err' : ''));
-    const first = (m.t.split('\n').find(l => l.trim()) || '(vide)').trim();
-    d.append(el('summary', null, (m.r === 'summary' ? '📋 Résumé de compactage — ' : (m.e ? '✗ ' : '↳ ')) + (first.length > 160 ? first.slice(0, 160) + '…' : first)), el('pre', null, m.t));
+    const first = (m.t.split('\n').find(l => l.trim()) || T('(vide)', '(empty)')).trim();
+    d.append(el('summary', null, (m.r === 'summary' ? T('📋 Résumé de compactage — ', '📋 Compaction summary — ') : (m.e ? '✗ ' : '↳ ')) + (first.length > 160 ? first.slice(0, 160) + '…' : first)), el('pre', null, m.t));
     return d;
   }
   const og = convOrigin(m, conv ? conv.phase : null), when = m.at ? ' · ' + convWhen(m.at) : '';
@@ -3273,13 +3273,13 @@ function drawConv(toBottom, keepTop) {
   const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 60, oldH = list.scrollHeight, oldTop = list.scrollTop;
   const tools = convTools(), shown = c.items.filter(m => tools || (m.r !== 'tool' && m.r !== 'result'));
   const frag = document.createDocumentFragment();
-  if (c.more) { const b = el('button', 'quick older', '↑ charger plus ancien'); b.onclick = () => { const it = byKey(c.key); if (it) loadConv(it, 'older'); }; frag.append(b); }
-  else if (c.end != null) frag.append(el('div', 'meta convtop', '— début de la conversation —'));
+  if (c.more) { const b = el('button', 'quick older', T('↑ charger plus ancien', '↑ load older')); b.onclick = () => { const it = byKey(c.key); if (it) loadConv(it, 'older'); }; frag.append(b); }
+  else if (c.end != null) frag.append(el('div', 'meta convtop', T('— début de la conversation —', '— start of the conversation —')));
   if (c.err) frag.append(el('div', 'empty', c.err));
-  else if (c.end != null && !shown.length) frag.append(el('div', 'empty', c.more ? 'Rien à afficher dans ce dernier morceau du transcript : charge plus ancien.' : 'Aucun message.'));
+  else if (c.end != null && !shown.length) frag.append(el('div', 'empty', c.more ? T('Rien à afficher dans ce dernier morceau du transcript : charge plus ancien.', 'Nothing to show in this last part of the transcript: load older.') : T('Aucun message.', 'No message.')));
   for (const m of shown) frag.append(convItem(m));
   list.replaceChildren(frag);
-  const st = $('convstat'); if (st) st.textContent = c.end == null ? '' : plural(shown.length, 'message', 'messages') + (c.more ? ' · transcript lu depuis ' + Math.round((c.end - c.start) / 1024).toLocaleString('fr-FR') + ' Ko de la fin' : ' · conversation entière');
+  const st = $('convstat'); if (st) st.textContent = c.end == null ? '' : plural(shown.length, 'message', 'messages') + (c.more ? T(' · transcript lu depuis ' + Math.round((c.end - c.start) / 1024).toLocaleString('fr-FR') + ' Ko de la fin', ' · transcript read from the last ' + Math.round((c.end - c.start) / 1024).toLocaleString('fr-FR') + ' KB') : T(' · conversation entière', ' · whole conversation'));
   if (toBottom || (atBottom && !keepTop)) list.scrollTop = list.scrollHeight;
   else if (keepTop) list.scrollTop = oldTop + (list.scrollHeight - oldH);
 }
@@ -3294,7 +3294,7 @@ async function refreshScreen() {
   try {
     const r = await (await fetch('/api/screen?pid=' + it.pid, { cache:'no-store' })).json();
     if (selected !== it.key) return;
-    const text = r.text == null ? '(écran illisible : la session n\'est pas dans une console accessible)' : r.text;
+    const text = r.text == null ? T('(écran illisible : la session n\'est pas dans une console accessible)', '(screen unreadable: the session is not in an accessible console)') : r.text;
     if (text !== lastScreen && !String(getSelection())) { lastScreen = text; pre.textContent = screenText(text); pre.scrollTop = pre.scrollHeight; }
     renderDialog(it, r.text || '', r.draft);
     renderSuggest(it, r.suggestion || null);
@@ -3320,14 +3320,14 @@ function drawLink() {
   if (link.down) {
     const s = Math.round((Date.now() - link.down.since) / 1000);
     b.className = 'down'; b.hidden = false;
-    b.replaceChildren(el('b', null, '⟳ Serveur injoignable — reconnexion en cours…'),
-      el('span', null, ' depuis ' + (s < 90 ? s + ' s' : Math.round(s / 60) + ' min') + ' · la page reprend seule dès qu’il répond ; les actions sont suspendues'
-        + (s >= 120 ? ' · toujours rien : le serveur a-t-il été relancé ?' : '') + (link.down.why ? ' (' + link.down.why + ')' : '')));
+    b.replaceChildren(el('b', null, T('⟳ Serveur injoignable — reconnexion en cours…', '⟳ Server unreachable — reconnecting…')),
+      el('span', null, T(' depuis ' + (s < 90 ? s + ' s' : Math.round(s / 60) + ' min') + ' · la page reprend seule dès qu’il répond ; les actions sont suspendues', ' for ' + (s < 90 ? s + ' s' : Math.round(s / 60) + ' min') + ' · the page resumes on its own as soon as it answers; actions are paused')
+        + (s >= 120 ? T(' · toujours rien : le serveur a-t-il été relancé ?', ' · still nothing: has the server been restarted?') : '') + (link.down.why ? ' (' + link.down.why + ')' : '')));
   } else if (link.reload) {
-    const go = el('button', null, 'Recharger');
+    const go = el('button', null, T('Recharger', 'Reload'));
     go.onclick = () => location.reload();
     b.className = 'reload'; b.hidden = false;
-    b.replaceChildren(el('b', null, '↻ Serveur redémarré avec une nouvelle version de la page'), el('span', null, ' — rechargement dès la saisie terminée, ou maintenant : '), go);
+    b.replaceChildren(el('b', null, T('↻ Serveur redémarré avec une nouvelle version de la page', '↻ Server restarted with a new version of the page')), el('span', null, T(' — rechargement dès la saisie terminée, ou maintenant : ', ' — reloading once you finish typing, or now: ')), go);
   } else b.hidden = true;
 }
 /** Une lecture d'état réussie : compare le démarrage et la page à ceux qu'on connaissait. */
@@ -3343,7 +3343,7 @@ function linkUp(srv) {
     link.boot = boot || link.boot;
     tagVocab = null; loadClosed(); loadRuns(); loadAutomations();
     if (REMOTE) whoami();
-    say(restarted ? 'serveur redémarré — page resynchronisée' : 'reconnecté au serveur');
+    say(restarted ? T('serveur redémarré — page resynchronisée', 'server restarted — page resynced') : T('reconnecté au serveur', 'reconnected to the server'));
   }
   drawLink(); return false;
 }
@@ -3362,8 +3362,8 @@ async function tick() {
     if (!r.ok) throw new Error('réponse ' + r.status);
     srv = await r.json();
   } catch (e) {
-    linkDown(e && e.name === 'TimeoutError' ? 'pas de réponse en 25 s' : e && /^réponse /.test(e.message) ? e.message : '');
-    live.className = 'down'; live.textContent = 'reconnexion…';
+    linkDown(e && e.name === 'TimeoutError' ? T('pas de réponse en 25 s', 'no answer within 25 s') : e && /^réponse /.test(e.message) ? e.message : '');
+    live.className = 'down'; live.textContent = T('reconnexion…', 'reconnecting…');
     ticking = false; return;
   }
   try {
@@ -3373,10 +3373,10 @@ async function tick() {
     if (pendingRoute) { const r = pendingRoute; pendingRoute = null; applyRoute(r); }      // ?view= : écran d'arrivée, une fois l'état connu
     if (pendingRun && runData) { const hd = pendingRun; pendingRun = null; openRun(hd); }   // ?run= : runs arrivés avant l'état
     if (!autoAsked && !automationsOff()) loadAutomations();                               // module annoncé par l'état : première lecture
-    live.className = ''; if (!notice) live.textContent = 'à jour · ' + new Date().toLocaleTimeString('fr-FR');
+    live.className = ''; if (!notice) live.textContent = T('à jour · ', 'up to date · ') + new Date().toLocaleTimeString('fr-FR');
   } catch (e) {
     console.error('[sessions] erreur de rendu :', e);
-    live.className = 'down'; live.textContent = 'erreur d’affichage (console) · ' + (e && e.message || e);
+    live.className = 'down'; live.textContent = T('erreur d’affichage (console) · ', 'display error (console) · ') + (e && e.message || e);
   } finally { ticking = false; }
 }
 
@@ -3418,7 +3418,7 @@ document.addEventListener('keydown', e => {
   if (inSearch) return;
   if (e.key === '/') { e.preventDefault(); $('q').focus(); $('q').select(); }
   else if (e.key === 'n') { const todo = allItems().filter(it => TODO.includes(it.state)).sort((a, b) => TODO.indexOf(a.state) - TODO.indexOf(b.state) || a.since - b.since);
-    if (!todo.length) { say('rien à traiter'); return; } const i = todo.findIndex(it => it.key === selected); const it = todo[(i + 1) % todo.length]; select(it.key, true); openTab(it); }
+    if (!todo.length) { say(T('rien à traiter', 'nothing to handle')); return; } const i = todo.findIndex(it => it.key === selected); const it = todo[(i + 1) % todo.length]; select(it.key, true); openTab(it); }
   else if (e.key === 'f') { const it = selected && byKey(selected); if (it && it.kind !== 'run') toggleFav(it); }
   else if (/^[1-9]$/.test(e.key) && $('dialog') && $('dialog').querySelectorAll('button.opt')[+e.key - 1]) { e.preventDefault(); $('dialog').querySelectorAll('button.opt')[+e.key - 1].click(); }
   else if (e.key === 'p' && suggestion && suggestKey === selected) { if (fillSuggestion()) e.preventDefault(); }
@@ -3448,7 +3448,7 @@ document.addEventListener('mouseup', e => {
   setTimeout(() => {                                       // après le double/triple-clic : la sélection est alors complète
     const sel = getSelection(), text = sel && !sel.isCollapsed ? selectionToCopy(sel.toString()) : '';
     if (!text) return;
-    navigator.clipboard.writeText(text).then(() => say('copié : ' + plural(text.split('\n').length, 'ligne', 'lignes') + ' · ' + text.length.toLocaleString('fr-FR') + ' caractères'), () => say('copie refusée par le navigateur'));
+    navigator.clipboard.writeText(text).then(() => say(T('copié : ' + plural(text.split('\n').length, 'ligne', 'lignes') + ' · ' + text.length.toLocaleString('fr-FR') + ' caractères', 'copied: ' + plural(text.split('\n').length, 'line', 'lines') + ' · ' + text.length.toLocaleString('fr-FR') + ' characters')), () => say(T('copie refusée par le navigateur', 'copy refused by the browser')));
   }, 0);
 });
 $('q').addEventListener('input', () => { renderList(); scheduleFind(); });
@@ -3461,7 +3461,7 @@ $('boardbtn').onclick = () => boardMode ? closeBoard() : openBoard();
 $('launchbtn').onclick = () => launchMode ? closeLauncher() : openLauncher();
 $('chatsbtn').onclick = () => chatsMode ? closeChats() : openChats();
 $('favonly').onclick = () => { favOnly = !favOnly; localStorage.setItem('cc.favonly', favOnly ? '1' : '0'); renderList(); };
-$('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 'created'; localStorage.setItem('cc.sort', sortMode); say(sortMode === 'created' ? 'tri par date de création' : 'tri par dernière activité'); renderList(); };
+$('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 'created'; localStorage.setItem('cc.sort', sortMode); say(sortMode === 'created' ? T('tri par date de création', 'sorted by creation date') : T('tri par dernière activité', 'sorted by last activity')); renderList(); };
 // Largeur de la barre latérale : glisser son bord droit, double-clic pour revenir à 360 px ; retenue d'une visite à l'autre.
 (() => {
   const app = $('app'), rz = $('resizer');
