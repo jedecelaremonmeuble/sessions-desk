@@ -616,7 +616,7 @@ function closeChats() { chatsMode = false; setPane(false); clearInterval(chatsTi
 async function loadChats(force) {
   if (!chatsMode) { clearInterval(chatsTimer); return; }
   // Pendant qu'on tape une réponse, la liste n'est pas redessinée sous les doigts (elle l'est à l'envoi, ou à la relecture suivante).
-  try { const r = await fetch('/api/teams-conversations', { cache:'no-store' }); chatsData = r.ok ? await r.json() : null; if (chatsMode && (force === true || !chatTyping())) renderChats(); } catch { say('conversations illisibles'); }
+  try { const r = await fetch('/api/teams-conversations', { cache:'no-store' }); chatsData = r.ok ? await r.json() : null; if (chatsMode && (force === true || !chatBusy())) renderChats(); } catch { say('conversations illisibles'); }
 }
 // chatGroups est PURE (testée par server/test/conversations-page.test.ts) : lignes du serveur → les trois groupes de la vue.
 function chatGroups(rows) {
@@ -638,13 +638,30 @@ async function chatSeen(chatId, action, at) {
   loadChats(true);
 }
 const CHAT_ICON = { oneOnOne:'👤', group:'👥', meeting:'📅' };
-const CHAT_ROLE = { wait:'attend leur réponse', replied:'reçoit leur réponse', inbound:'ouverte pour cette demande', past:'y a écrit' };
+const CHAT_ROLE = { linked:'suit ce fil', wait:'attend leur réponse', replied:'reçoit leur réponse', inbound:'ouverte pour cette demande', past:'y a écrit' };
 const CHAT_WHY = { mention:'tu es mentionné', quote:'on répond à un de tes messages', named:'on t’y nomme', question:'question qui suit ton message' };
 // Lot 10 : messages en entier, fil dépliable (/api/teams-thread), réponse depuis la page (/api/teams-reply — le veilleur
 // poste dans Teams en ton nom, sur ton clic). Brouillons, fils ouverts et boîtes de réponse survivent aux relectures.
 const chatDrafts = new Map(), chatReplying = new Set(), chatThreads = new Map(), chatWide = new Set();
 let chatSending = null;
 const chatTyping = () => !!(document.activeElement && document.activeElement.closest && document.activeElement.closest('.creply'));
+// Lot 11 : confier un fil à une session (/api/teams-link). La session reçoit les messages à traiter puis toute la suite,
+// jusqu'au « Détacher ». Pendant le choix de la session, la liste n'est pas redessinée (comme pendant la frappe).
+let chatPicking = null, chatPickValue = 'new';
+const chatBusy = () => chatTyping() || !!chatPicking;
+// chatTargets est PURE (testée par server/test/conversations-page.test.ts) : les sessions à qui confier un fil — ouvertes,
+// avec terminal, la plus récemment active d'abord.
+function chatTargets(items) {
+  return (items || []).filter(i => i.kind === 'open' && !i.headless && i.sessionId).sort((a, b) => (b.since || 0) - (a.since || 0));
+}
+async function chatLink(chatId, action, sessionId) {
+  if (!canWrite) return;
+  try {
+    const r = await (await fetch('/api/teams-link', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ chatId, action, sessionId }) })).json();
+    if (r.error) say('refusé : ' + r.error); else say(action === 'detach' ? 'fil détaché' : sessionId === 'new' ? 'fil confié : une nouvelle session s’ouvre' : 'fil confié : la session le reçoit dans un instant');
+  } catch { say('échec de la demande'); }
+  chatPicking = null; loadChats(true);
+}
 // chatWho est PURE (testée par server/test/conversations-page.test.ts) : l'auteur d'un message tel qu'on l'affiche.
 function chatWho(m) {
   return m.by === 'me' ? 'toi' : m.by === 'session' ? '🤖 une session, en ton nom' : m.from || 'une application';
@@ -697,6 +714,8 @@ function renderChats() {
       if (r.webUrl) { const l = el('a', null, 'Teams ↗'); l.href = r.webUrl; l.target = '_blank'; l.rel = 'noopener'; l.title = 'Ouvrir la conversation dans Teams'; bs.append(l); }
       { const b = el('button', null, chatThreads.has(r.chatId) ? 'Replier' : 'Fil'); b.title = 'Les derniers messages de la conversation, en entier'; b.onclick = () => chatToggleThread(r.chatId); bs.append(b); }
       if (canSend) { const b = el('button', null, 'Répondre'); b.title = 'Écrire ta réponse ici : elle part dans Teams en ton nom, sans ouvrir Teams'; b.onclick = () => { chatReplying.has(r.chatId) ? chatReplying.delete(r.chatId) : chatReplying.add(r.chatId); renderChats(); const ta = main.querySelector('.creply[data-chat="' + CSS.escape(r.chatId) + '"] textarea'); if (ta) ta.focus(); }; bs.append(b); }
+      if (canWrite && r.link) { const b = el('button', null, 'Détacher'); b.title = 'La session ne recevra plus les messages de ce fil'; b.onclick = () => chatLink(r.chatId, 'detach'); bs.append(b); }
+      else if (canWrite) { const b = el('button', null, 'Confier'); b.title = 'Confier ce fil à une session : elle reçoit les messages à traiter puis toute la suite, jusqu’au détachement. Elle propose, rien ne part sans toi.'; b.onclick = () => { chatPicking = chatPicking === r.chatId ? null : r.chatId; chatPickValue = 'new'; renderChats(); }; bs.append(b); }
       if (g.key === 'reply') { const b = el('button', null, 'Rien à répondre'); b.title = 'Tu as lu, il n’y a rien à répondre : la conversation passe « à jour » jusqu’au prochain message'; b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
       else if (g.key === 'unseen') { const b = el('button', null, 'Vu'); b.title = 'Tu as vu ce qui s’est passé ici : la conversation passe « à jour » jusqu’au prochain message'; b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
       else if (r.by !== 'me' && r.by !== 'app') { const b = el('button', null, '↺'); b.title = 'Remettre à voir'; b.onclick = () => chatSeen(r.chatId, 'unseen', r.lastAt); bs.append(b); }
@@ -722,7 +741,9 @@ function renderChats() {
       }
       const s = el('div', 'cs');
       if (r.ball === 'reply') s.append(el('span', 'tag toreply', 'à toi de répondre' + (r.why ? ' — ' + CHAT_WHY[r.why] : '')));
-      else if (r.ball === 'session') s.append(el('span', 'tag ses', 'une session a reçu ce message'));
+      else if (r.ball === 'session') s.append(el('span', 'tag ses', r.link ? (r.link.pending ? 'confié — remise à la session en cours' : 'confié — la session a reçu ce message') : 'une session a reçu ce message'));
+      if (r.link && r.ball !== 'session') s.append(el('span', 'tag link', '🔗 fil confié'));
+      if (r.link && r.link.lastError) s.append(el('span', 'lerr', 'remise en attente : ' + r.link.lastError));
       else if (r.ball === 'waiting') s.append(el('span', 'tag wait', 'en attente de leur réponse'));
       for (const x of r.sessions) {
         const it = allItems().find(i => i.sessionId === x.sessionId && i.kind !== 'run' && i.kind !== 'pass');
@@ -730,6 +751,16 @@ function renderChats() {
         else { const o = el('span', 'chip gone', 'session fermée — ' + CHAT_ROLE[x.role]); o.title = x.sessionId; s.append(o); }
       }
       if (s.childNodes.length) row.append(s);
+      if (canWrite && chatPicking === r.chatId && !r.link) {
+        const f = el('div', 'cpick'), sel = el('select');
+        const o0 = el('option', null, '➕ Nouvelle session'); o0.value = 'new'; sel.append(o0);
+        for (const it of chatTargets(allItems())) { const o = el('option', null, label(it) + ' — ' + LABEL[it.state]); o.value = it.sessionId; sel.append(o); }
+        sel.value = [...sel.options].some(o => o.value === chatPickValue) ? chatPickValue : 'new'; sel.onchange = () => { chatPickValue = sel.value; };
+        const ok = el('button', null, 'Confier'); ok.onclick = () => chatLink(r.chatId, 'attach', sel.value);
+        const no = el('button', null, 'Annuler'); no.onclick = () => { chatPicking = null; renderChats(); };
+        f.append('Confier ce fil à ', sel, ok, no, el('span', 'tx', 'elle reçoit les messages à traiter puis la suite du fil, jusqu’au détachement'));
+        row.append(f);
+      }
       if (canSend && chatReplying.has(r.chatId)) {
         const f = el('div', 'creply'); f.dataset.chat = r.chatId;
         const ta = el('textarea'); ta.placeholder = 'Ta réponse à ' + (r.label || 'ce chat') + '…'; ta.value = chatDrafts.get(r.chatId) || ''; ta.spellcheck = true;
