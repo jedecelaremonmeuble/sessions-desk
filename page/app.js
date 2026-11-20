@@ -2057,7 +2057,44 @@ const attBusy = key => attList(key).some(a => !a.path);
 function growArea(t) { if (!t) return; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight + 2, 300) + 'px'; }
 function promptArea(id, rows = 4) {
   const t = el('textarea', 'parea'); t.id = id; t.rows = rows; t.autocomplete = 'off'; t.spellcheck = true;
-  t.addEventListener('input', () => growArea(t)); return t;
+  t.addEventListener('input', () => growArea(t)); t.addEventListener('keydown', lineKeys); return t;
+}
+// ── Édition de ligne dans les zones de saisie (comme le terminal de Claude Code) ──
+// Ctrl+K coupe jusqu'à la fin de la ligne, Ctrl+U jusqu'au début, Ctrl+Y recolle le dernier texte coupé,
+// Ctrl+E va en fin de ligne, Alt+B / Alt+F reculent / avancent d'un mot, Ctrl+_ annule.
+// Ctrl+W (couper le mot précédent) n'est pas repris : Chrome le réserve à la fermeture de l'onglet ;
+// Ctrl+Retour arrière fait la même chose. Ctrl+A garde son sens navigateur (tout sélectionner).
+// Calcul PUR (testé) : ce qu'il faut remplacer et où poser le curseur. L'application passe par execCommand
+// pour rester dans l'historique d'annulation du navigateur : Ctrl+Z défait une coupe ou un collage.
+function lineEdit(op, v, s, e, kill) {
+  const W = c => /[\p{L}\p{N}_]/u.test(c);
+  const bol = v.lastIndexOf('\n', s - 1) + 1, eolI = v.indexOf('\n', e), eol = eolI < 0 ? v.length : eolI;
+  if ((op === 'killEnd' || op === 'killStart') && s !== e) return { from: s, to: e, insert: '', kill: v.slice(s, e) };
+  if (op === 'killEnd') { const to = eol === s && s < v.length ? s + 1 : eol; return to > s ? { from: s, to, insert: '', kill: v.slice(s, to) } : null; }
+  if (op === 'killStart') { const from = bol === s && s > 0 ? s - 1 : bol; return from < s ? { from, to: s, insert: '', kill: v.slice(from, s) } : null; }
+  if (op === 'yank') return kill ? { from: s, to: e, insert: kill } : null;
+  if (op === 'end') return { caret: eol };
+  if (op === 'wordBack') { let i = s; while (i > 0 && !W(v[i - 1])) i--; while (i > 0 && W(v[i - 1])) i--; return { caret: i }; }
+  if (op === 'wordFwd') { let i = e; while (i < v.length && !W(v[i])) i++; while (i < v.length && W(v[i])) i++; return { caret: i }; }
+  return null;
+}
+function lineKeyOp(e) {
+  if (e.metaKey || e.shiftKey && e.key !== '_') return null;
+  if (e.ctrlKey && !e.altKey) return { k: 'killEnd', u: 'killStart', y: 'yank', e: 'end', _: 'undo' }[e.key.toLowerCase()] || null;
+  if (e.altKey && !e.ctrlKey) return { b: 'wordBack', f: 'wordFwd' }[e.key.toLowerCase()] || null;
+  return null;
+}
+let killed = '';                                          // dernier texte coupé (Ctrl+K / Ctrl+U), recollé par Ctrl+Y
+function lineKeys(e) {
+  const op = lineKeyOp(e), t = e.currentTarget; if (!op) return;
+  e.preventDefault(); e.stopPropagation();
+  if (op === 'undo') { document.execCommand('undo'); return; }
+  const r = lineEdit(op, t.value, t.selectionStart, t.selectionEnd, killed); if (!r) return;
+  if (r.caret != null) { t.setSelectionRange(r.caret, r.caret); return; }
+  if (r.kill) killed = r.kill;
+  t.setSelectionRange(r.from, r.to);
+  const ok = r.insert ? document.execCommand('insertText', false, r.insert) : document.execCommand('delete');
+  if (!ok) { t.setRangeText(r.insert, r.from, r.to, 'end'); t.dispatchEvent(new Event('input')); }
 }
 function withAttachments(key, text) {
   const refs = attList(key).filter(a => a.path).map(a => (a.img ? 'Capture' : 'Fichier') + ' : "' + a.path + '"');
@@ -2683,7 +2720,8 @@ function renderOverview() {
   body.append(el('h2', null, 'Raccourcis clavier'));
   const keys = el('div', 'keys');
   for (const [k, d] of [['/', 'rechercher (titre, prompt, numéro de PR, dossier, identifiant)'], ['↑ ↓', 'parcourir les sessions'], ['Entrée', 'afficher l\'onglet de la session (ou rouvrir une session fermée)'],
-                        ['n', 'aller à la prochaine session à traiter et afficher son onglet'], ['r', 'répondre à la session sélectionnée (Entrée envoie)'], ['p', 'reprendre la proposition de prompt de Claude Code dans la zone de réponse (Entrée l’envoie) — aussi Tab dans la zone vide'],['f', 'mettre la session en favori, ou la retirer (★ à côté de la recherche : favoris seulement)'], ['c', 'copier la commande de reprise'], ['1 – 9', 'session bloquée sur un dialogue : choisir l’option correspondante (tapée dans son terminal)'], ['+', 'lancer une nouvelle session (dossier, premier message, modèle)'], ['d', 'nouvelle session à partir de la session sélectionnée : elle reprend toute sa conversation (fork), l’originale n’est pas touchée'],['h', 'basculer entre l’écran du terminal et la conversation complète (tout l’historique, relu dans le transcript)'], ['b', 'revenir à la session consultée juste avant (liste « Consultées récemment » en tête)'], ['x', 'fermer la session sélectionnée (avec confirmation ; elle reste reprenable) — sur une session déjà fermée : la masquer / ré-afficher'], ['Échap', 'vider la recherche, puis revenir à cette vue']]) {
+                        ['n', 'aller à la prochaine session à traiter et afficher son onglet'], ['r', 'répondre à la session sélectionnée (Entrée envoie)'], ['p', 'reprendre la proposition de prompt de Claude Code dans la zone de réponse (Entrée l’envoie) — aussi Tab dans la zone vide'],['f', 'mettre la session en favori, ou la retirer (★ à côté de la recherche : favoris seulement)'], ['c', 'copier la commande de reprise'], ['1 – 9', 'session bloquée sur un dialogue : choisir l’option correspondante (tapée dans son terminal)'], ['+', 'lancer une nouvelle session (dossier, premier message, modèle)'], ['d', 'nouvelle session à partir de la session sélectionnée : elle reprend toute sa conversation (fork), l’originale n’est pas touchée'],['h', 'basculer entre l’écran du terminal et la conversation complète (tout l’historique, relu dans le transcript)'], ['b', 'revenir à la session consultée juste avant (liste « Consultées récemment » en tête)'], ['x', 'fermer la session sélectionnée (avec confirmation ; elle reste reprenable) — sur une session déjà fermée : la masquer / ré-afficher'], ['Échap', 'vider la recherche, puis revenir à cette vue'],
+                        ['sélection', 'tout texte sélectionné à la souris est copié dans le presse-papier au relâchement'], ['Ctrl+K Ctrl+U', 'zone de saisie : couper jusqu’à la fin / au début de la ligne'], ['Ctrl+Y', 'zone de saisie : recoller le dernier texte coupé'], ['Ctrl+E', 'zone de saisie : aller en fin de ligne'], ['Alt+B Alt+F', 'zone de saisie : reculer / avancer d’un mot'], ['Ctrl+_', 'zone de saisie : annuler (comme Ctrl+Z)']]) {
     const kk = el('span'); k.split(' ').forEach((x, i) => { if (i) kk.append(' '); kk.append(el('kbd', null, x)); }); keys.append(kk, el('span', null, d));
   }
   body.append(keys);
