@@ -29,6 +29,9 @@ const modelName = m => { if (!m) return ''; const x = /^claude-([a-z]+)-(\d{1,2}
 const ui = () => (data && data.ui) || {};
 const short = p => { const s = p || '', pre = ui().pathPrefix || ''; return (pre && s.toLowerCase().startsWith(pre.toLowerCase()) ? s.slice(pre.length).replace(/^[\\/]+/, '') : s) || s; };
 const norm = t => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+// Lien avec le serveur (voir tick) : déclaré tôt, post() et l'envoi le lisent.
+const link = { boot: null, page: null, down: null, reload: false };   // down : { since, tries, why } pendant une coupure
+let ticking = false;
 const say = t => { notice = t; $('live').textContent = t; setTimeout(() => { if (notice === t) notice = null; }, 5000); };
 const label = it => it.title || it.name || String(it.pid || it.sessionId.slice(0, 8));
 // Une session qui a fini son tour « demande » quelque chose si la fin de son dernier message est une
@@ -1670,11 +1673,15 @@ function select(key, scroll) {
 // En attendant sa réponse — ou s'il refuse — la page reste en lecture seule.
 const REMOTE = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 let canWrite = !REMOTE;
-if (REMOTE) {
-  document.body.classList.add('ro', 'remote');
-  fetch('/api/whoami', { cache:'no-store' }).then(r => r.json()).then(w => { canWrite = !!w.write; document.body.classList.toggle('ro', !canWrite); if (canWrite) say('écriture autorisée à distance (' + w.login + ')'); renderDetail(true); }).catch(() => {});
+function whoami() {
+  fetch('/api/whoami', { cache:'no-store' }).then(r => r.json()).then(w => { const was = canWrite; canWrite = !!w.write; document.body.classList.toggle('ro', !canWrite); if (canWrite && !was) say('écriture autorisée à distance (' + w.login + ')'); renderDetail(true); }).catch(() => {});
 }
-async function post(path) { if (!canWrite) return { error: 'lecture seule à distance', code: 4 }; const r = await fetch(path, { method:'POST' }); return r.json(); }
+if (REMOTE) { document.body.classList.add('ro', 'remote'); whoami(); }
+async function post(path) {
+  if (!canWrite) return { error: 'lecture seule à distance', code: 4 };
+  if (link.down) return { error: 'serveur injoignable — reconnexion en cours', code: 5 };
+  const r = await fetch(path, { method:'POST' }); return r.json();
+}
 async function openTab(it) {
   say('ouverture de « ' + label(it) + ' »…');
   try { const r = await post('/api/focus?pid=' + it.pid);
@@ -1813,6 +1820,7 @@ let sending = false;
 async function sendReply() {
   const it = selected && byKey(selected), inp = $('sendtext');
   if (!it || it.kind !== 'open' || !inp || sending) return;
+  if (link.down) return say('serveur injoignable — le message reste dans la zone, à renvoyer une fois reconnecté');
   const akey = 'reply:' + it.key;
   if (attBusy(akey)) return say('pièce jointe en cours d’envoi — un instant');
   const text = withAttachments(akey, inp.value); if (!text) return;
@@ -2689,15 +2697,67 @@ async function refreshScreen() {
 }
 
 async function loadClosed() { try { closedData = await (await fetch('/api/closed', { cache:'no-store' })).json(); if (data) { renderList(); renderDetail(); } } catch {} }
+// ───── Lien avec le serveur : coupure, reconnexion, redémarrage ─────
+// Le serveur annonce dans /api/state l'identifiant de SON démarrage (boot) et l'empreinte des fichiers de la page
+// (page). Coupure ⇒ bandeau « reconnexion en cours », actions suspendues, la lecture continue toutes les 2 s.
+// Retour ⇒ démarrage différent : resynchronisation complète ; page différente : rechargement (différé si une
+// saisie est en cours, pour ne rien perdre).
+function typing() {
+  const a = document.activeElement, t = $('sendtext');
+  return !!((t && t.value.trim()) || newMode || bcMode || (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'search')) && a.value));
+}
+function drawLink() {
+  const b = $('offline'); if (!b) return;
+  document.body.classList.toggle('offline', !!link.down);
+  if (link.down) {
+    const s = Math.round((Date.now() - link.down.since) / 1000);
+    b.className = 'down'; b.hidden = false;
+    b.replaceChildren(el('b', null, '⟳ Serveur injoignable — reconnexion en cours…'),
+      el('span', null, ' depuis ' + (s < 90 ? s + ' s' : Math.round(s / 60) + ' min') + ' · la page reprend seule dès qu’il répond ; les actions sont suspendues'
+        + (s >= 120 ? ' · toujours rien : le serveur a-t-il été relancé ?' : '') + (link.down.why ? ' (' + link.down.why + ')' : '')));
+  } else if (link.reload) {
+    const go = el('button', null, 'Recharger');
+    go.onclick = () => location.reload();
+    b.className = 'reload'; b.hidden = false;
+    b.replaceChildren(el('b', null, '↻ Serveur redémarré avec une nouvelle version de la page'), el('span', null, ' — rechargement dès la saisie terminée, ou maintenant : '), go);
+  } else b.hidden = true;
+}
+/** Une lecture d'état réussie : compare le démarrage et la page à ceux qu'on connaissait. */
+function linkUp(srv) {
+  const wasDown = link.down; link.down = null;
+  const boot = srv && srv.boot, page = srv && srv.page;
+  const restarted = !!(link.boot && boot && boot !== link.boot), newPage = !!(link.page && page && page !== link.page);
+  if (!link.boot) { link.boot = boot || null; link.page = page || null; }
+  if (newPage || link.reload) {
+    link.reload = true;
+    if (!typing()) { location.reload(); return true; }
+  } else if (restarted || wasDown) {
+    link.boot = boot || link.boot;
+    tagVocab = null; loadClosed(); loadRuns(); loadAutomations();
+    if (REMOTE) whoami();
+    say(restarted ? 'serveur redémarré — page resynchronisée' : 'reconnecté au serveur');
+  }
+  drawLink(); return false;
+}
+function linkDown(why) {
+  if (!link.down) { link.down = { since: Date.now(), tries: 0, why: '' }; console.log('[sessions] serveur injoignable :', why); }
+  link.down.tries++; link.down.why = why; drawLink();
+}
 async function tick() {
-  const live = $('live');
+  const live = $('live'); ticking = true;
   try {
-    data = await (await fetch('/api/state', { cache:'no-store' })).json(); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff();
+    const r = await fetch('/api/state', { cache:'no-store', signal: AbortSignal.timeout(25000) });
+    if (!r.ok) throw new Error('réponse ' + r.status);
+    data = await r.json(); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff();
+    if (linkUp(data.server)) return;
     renderList(); renderDetail(); refreshScreen(); refreshConv(); try { renderQuota(); } catch (e) { console.log('[sessions] quota :', e); }
     if (pendingRun && runData) { const hd = pendingRun; pendingRun = null; openRun(hd); }   // ?run= : runs arrivés avant l'état
     if (!autoAsked && !automationsOff()) loadAutomations();                               // module annoncé par l'état : première lecture
     live.className = ''; if (!notice) live.textContent = 'à jour · ' + new Date().toLocaleTimeString('fr-FR');
-  } catch { live.className = 'down'; live.textContent = 'serveur injoignable — relancer cc-dash'; }
+  } catch (e) {
+    linkDown(e && e.name === 'TimeoutError' ? 'pas de réponse en 25 s' : e && /^réponse /.test(e.message) ? e.message : '');
+    live.className = 'down'; live.textContent = 'reconnexion…';
+  } finally { ticking = false; }
 }
 
 function move(delta) {
@@ -2772,6 +2832,6 @@ $('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 
   addEventListener('resize', () => { const w = +localStorage.getItem('cc.sidew'); if (w) apply(w); });
 })();
 if (selected && new URLSearchParams(location.search).get('sel')) setPane(true);   // lien direct : on arrive sur la session
-tick(); loadClosed(); loadRuns(); setInterval(tick, 2000); setInterval(loadClosed, 30000); runTimer = setInterval(loadRuns, 30000); setInterval(loadAutomations, 30000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { loadRuns(); loadAutomations(); } });
+tick(); loadClosed(); loadRuns(); setInterval(() => { if (!ticking) tick(); else if (link.down) drawLink(); }, 2000); setInterval(loadClosed, 30000); runTimer = setInterval(loadRuns, 30000); setInterval(loadAutomations, 30000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (!ticking) tick(); loadRuns(); loadAutomations(); } });
 if (new URLSearchParams(location.search).get('view') === 'launcher') openLauncher();    // clic sur une alerte du lanceur (notification Windows)
