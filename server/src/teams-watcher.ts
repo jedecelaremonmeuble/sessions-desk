@@ -1038,7 +1038,7 @@ const TEXT_BODY = { prefer: 'IdType="ImmutableId", outlook.body-content-type="te
 
 // ─────────────── passe ───────────────
 
-interface OpenSession { sessionId: string; pid: string | number; status: string; headless?: boolean }
+export interface OpenSession { sessionId: string; pid: string | number; status: string; headless?: boolean }
 async function openSessions(cfg: WatcherConfig): Promise<OpenSession[]> {
   const r = await fetch(`${cfg.serverUrl}/api/state`, { signal: AbortSignal.timeout(10_000) });
   return ((await r.json()) as { sessions?: OpenSession[] }).sessions ?? [];
@@ -1134,6 +1134,46 @@ export async function runInbound(dir: string, cfg: WatcherConfig, meId: string, 
 }
 
 type Deliver = (w: Wait, text: string) => Promise<{ w: Wait; ok: boolean }>;
+/** Ce dont la remise a besoin du serveur : liste des sessions ouvertes (null = injoignable), envoi, réouverture. */
+export interface DeliverIo {
+  sessions(): Promise<OpenSession[] | null>;
+  send(pid: string | number, text: string): Promise<string | null>;
+  reopen(sessionId: string): Promise<string | null>;
+}
+/** Réponse du serveur quand la session est réapparue entre la lecture de la liste et la réouverture : rien à rouvrir. */
+const ALREADY_OPEN = 'session déjà ouverte';
+/** Remet un texte à la session : directement si elle est prête, après réouverture si elle est fermée (D5), plus tard si elle travaille.
+ *  La fenêtre de réouverture vaut pour la SESSION, pas pour l'attente : deux réponses à une même session fermée (deux fils,
+ *  ou un fil et un email) ne rouvrent qu'un onglet — un second `--resume` du même transcript le corromprait.
+ *  Une réouverture refusée garde sa cause (transcript ou dossier disparu) au lieu d'un « sans démarrer » qui la masquerait. */
+export function makeDeliver(io: DeliverIo, all: readonly Wait[], now: number, res: Pick<PassResult, 'reopened'>): Deliver {
+  const reopening = new Map<string, number>();
+  for (const w of all) if (w.reopenedAt && w.reopenedAt > (reopening.get(w.sessionId) ?? 0)) reopening.set(w.sessionId, w.reopenedAt);
+  return async (w, text) => {
+    const list = await io.sessions();
+    if (list === null) return { w: { ...w, lastError: 'serveur 8765 injoignable' }, ok: false };
+    const s = list.find((x) => x.sessionId === w.sessionId);
+    if (s?.headless) return { w: { ...w, lastError: 'automate (claude -p) : exclu' }, ok: false };
+    if (!s) {
+      const last = reopening.get(w.sessionId);
+      if (last && now - last < REOPEN_MS) return { w: { ...w, lastError: 'réouverture en cours' }, ok: false };
+      if ((w.reopens ?? 0) >= MAX_REOPENS) {
+        const why = w.lastError?.startsWith('réouverture impossible') ? w.lastError : 'session fermée (rouverte deux fois sans démarrer)';
+        return { w: { ...w, lastError: why }, ok: false };
+      }
+      const err = await io.reopen(w.sessionId).catch((e: Error) => e.message);
+      reopening.set(w.sessionId, now);
+      if (err === ALREADY_OPEN) return { w: { ...w, reopenedAt: now, lastError: 'réouverture en cours' }, ok: false };
+      if (!err) res.reopened++;
+      return { w: { ...w, reopenedAt: now, reopens: (w.reopens ?? 0) + 1, lastError: err ? `réouverture impossible : ${err}` : 'réouverture en cours' }, ok: false };
+    }
+    if (s.status !== 'idle' && s.status !== 'shell') return { w: { ...w, lastError: `session ${s.status}` }, ok: false };
+    const err = await io.send(s.pid, text).catch((e: Error) => e.message);
+    if (err) return { w: { ...w, lastError: err }, ok: false };
+    s.status = 'busy';
+    return { w: { ...w, lastError: null, reopens: 0, reopenedAt: undefined }, ok: true };
+  };
+}
 interface GraphMailFull extends GraphMail {
   conversationId?: string; createdDateTime?: string | null; toRecipients?: { emailAddress?: { name?: string | null; address?: string | null } | null }[] | null;
 }
@@ -1278,25 +1318,7 @@ export async function runPass(dir: string, cfg: WatcherConfig, opts: PassOptions
   // null = serveur 8765 injoignable : on ne rouvre RIEN sur une liste vide qui ne veut rien dire.
   let sessions: OpenSession[] | null | undefined;
   const getSessions = async (): Promise<OpenSession[] | null> => (sessions === undefined ? (sessions = await openSessions(cfg).catch(() => null)) : sessions);
-  /** Remet un texte à la session : directement si elle est prête, après réouverture si elle est fermée (D5), plus tard si elle travaille. */
-  const deliver = async (w: Wait, text: string): Promise<{ w: Wait; ok: boolean }> => {
-    const list = await getSessions();
-    if (list === null) return { w: { ...w, lastError: 'serveur 8765 injoignable' }, ok: false };
-    const s = list.find((x) => x.sessionId === w.sessionId);
-    if (s?.headless) return { w: { ...w, lastError: 'automate (claude -p) : exclu' }, ok: false };
-    if (!s) {
-      if (w.reopenedAt && now - w.reopenedAt < REOPEN_MS) return { w: { ...w, lastError: 'réouverture en cours' }, ok: false };
-      if ((w.reopens ?? 0) >= MAX_REOPENS) return { w: { ...w, lastError: 'session fermée (rouverte deux fois sans démarrer)' }, ok: false };
-      const err = await reopen(cfg, w.sessionId).catch((e: Error) => e.message);
-      if (!err) res.reopened++;
-      return { w: { ...w, reopenedAt: now, reopens: (w.reopens ?? 0) + 1, lastError: err ? `réouverture impossible : ${err}` : 'réouverture en cours' }, ok: false };
-    }
-    if (s.status !== 'idle' && s.status !== 'shell') return { w: { ...w, lastError: `session ${s.status}` }, ok: false };
-    const err = await send(cfg, s.pid, text).catch((e: Error) => e.message);
-    if (err) return { w: { ...w, lastError: err }, ok: false };
-    s.status = 'busy';
-    return { w: { ...w, lastError: null, reopens: 0, reopenedAt: undefined }, ok: true };
-  };
+  const deliver = makeDeliver({ sessions: getSessions, send: (pid, text) => send(cfg, pid, text), reopen: (sid) => reopen(cfg, sid) }, all, now, res);
   const byChat = new Map<string, Wait[]>();
   /** Fils qu'une session a lus ou auxquels elle vient d'écrire pendant cette passe (lot 8). */
   const toRead = new Set<string>();
