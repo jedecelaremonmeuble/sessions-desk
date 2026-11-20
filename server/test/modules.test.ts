@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 import { parseArgs } from '../src/config.ts';
 import { runLauncherOrder } from '../src/launcher.ts';
-import { DEFAULT_MODELS, DEFAULT_QUOTA, expandPath, loadModules, loadSettings, modulesView, NO_MODULES, NO_UI, parseDelays, parseModels, parseModules, parseQuotaLevels, parseTailscale, parseUi, ticketPattern } from '../src/modules.ts';
+import { DEFAULT_MODELS, DEFAULT_QUOTA, expandPath, loadModules, loadSettings, modulesView, NO_MODULES, NO_UI, parseDelays, parseModels, parseModules, parseQuotaLevels, parseTagVocab, parseTailscale, parseUi, ticketPattern } from '../src/modules.ts';
 import { readClaudeUsage, readUsageRaw } from '../src/usage.ts';
 
 const env = { home: 'C:\\Users\\moi', localAppData: 'C:\\Users\\moi\\AppData\\Local', temp: 'C:\\Temp' };
@@ -56,7 +56,7 @@ describe('réglages d\'affichage du poste (ui)', () => {
   test('absents ou mal décrits : rien n\'est affiché de plus', () => {
     expect(parseUi({}, env)).toEqual(NO_UI);
     expect(parseUi({ ui: { pathPrefix: 'relatif', prUrl: 'javascript:alert(1)', ticketUrl: 'ftp://x', ticketLabel: 3 } }, env)).toEqual(NO_UI);
-    expect(loadSettings(join(dir, 'absent.json'), env)).toEqual({ modules: NO_MODULES, ui: NO_UI, claudeArgs: '', delays: {} });
+    expect(loadSettings(join(dir, 'absent.json'), env)).toEqual({ modules: NO_MODULES, ui: NO_UI, claudeArgs: '', delays: {}, tagVocab: { domaines: [], outils: [] }, error: null });
   });
   test('seules des adresses http(s) et un chemin absolu sont gardés', () => {
     expect(parseUi({ ui: { pathPrefix: '%USERPROFILE%\\code', prUrl: 'https://github.com/o/r/pull/', ticketUrl: 'http://tickets.example.com/t/', ticketLabel: '  Ticket  ' } }, env))
@@ -73,6 +73,19 @@ describe('réglages d\'affichage du poste (ui)', () => {
     expect(parseModels([{ match: 'x', cost: 'abc' }, { match: 'ok', cost: 0.5 }])).toEqual([{ match: 'ok', label: 'ok', cost: 0.5, note: '', offer: true }]);
     expect(parseModels([{ match: 'mythos', cost: 2, offer: false }])[0]!.offer).toBe(false);
     expect(parseModels('opus')).toEqual([...DEFAULT_MODELS]);
+  });
+});
+
+describe('fichier illisible, vocabulaire des tags', () => {
+  test('JSON invalide : tout éteint, et l’erreur est dite avec le fichier', () => {
+    const f = join(dir, 'casse.json'); writeFileSync(f, '{ "modules": { "teams": { "enabled": true } }, }');
+    const s = loadSettings(f, env);
+    expect(s.modules).toEqual(NO_MODULES); expect(s.error).toContain(f);
+    expect(parseArgs(['--config', f], { USERPROFILE: dir, LOCALAPPDATA: join(dir, 'lad'), TEMP: dir }).configError).toContain(f);
+  });
+  test('vocabulaire : domaines (sans « Autre ») et outils de la section tagger', () => {
+    expect(parseTagVocab({ tagger: { domains: ['Compta', 'Autre', 3], tools: [{ v: 'infra', re: [] }, { re: [] }] } })).toEqual({ domaines: ['Compta'], outils: ['infra'] });
+    expect(parseTagVocab({})).toEqual({ domaines: [], outils: [] });
   });
 });
 

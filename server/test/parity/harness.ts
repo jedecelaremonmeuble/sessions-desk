@@ -17,9 +17,6 @@ export type Kind = 'ps' | 'node';
 /** Dossier de données du lanceur dans le profil factice. Le serveur historique en lit un en dur : son nom vient de
  *  son propre dossier (legacy/parity-env.json) ; sans lui, n'importe quel nom convient. */
 const LAUNCH_DIR = ((): string => { try { return String(JSON.parse(readFileSync(join(REPO, 'legacy', 'parity-env.json'), 'utf8')).launchDir); } catch { return 'orchestrateur'; } })();
-/** Vocabulaire des tags : le fichier de règles de l'étiqueteur s'il est là (les deux serveurs le lisent), sinon publié
- *  dans le profil factice comme le ferait un étiqueteur. */
-const HAS_TAG_RULES = existsSync(join(REPO, 'server', 'src', 'tagger-config.json'));
 export const KINDS: Kind[] = (process.env.SD_PARITY_SERVERS ?? (HAS_LEGACY ? 'ps,node' : 'node')).split(',').map((s) => s.trim()).filter(Boolean) as Kind[];
 /** Ports des serveurs de test (port, et port+1 pour le relais) : PS sur BASE, Node sur BASE+2. Jamais 8765-8768. */
 export const PORT_BASE = Number(process.env.SD_PARITY_PORT ?? 8831);
@@ -156,7 +153,8 @@ export async function buildFixture(): Promise<Fixture> {
   // (axe inconnu, valeur vide, trop longue, non texte) ; H (fermée) un seul tag ; B un fichier illisible ; C un `tags`
   // qui n'est pas un tableau ; D un tableau dont rien ne reste. Les deux serveurs doivent rendre la même chose.
   const tagDir = join(claude, 'state', 'session-tags'); mkdirSync(tagDir, { recursive: true });
-  if (!HAS_TAG_RULES) writeFileSync(join(tagDir, '_vocab.json'), JSON.stringify({ domaines: ['Téléphonie', 'Compta', 'Tickets'], outils: ['infra', 'mcp', 'page'] }));
+  // Vocabulaire des tags, publié dans le profil factice comme le ferait l'étiqueteur.
+  writeFileSync(join(tagDir, '_vocab.json'), JSON.stringify({ domaines: ['Téléphonie', 'Compta', 'Tickets'], outils: ['infra', 'mcp', 'page'] }));
   writeFileSync(join(tagDir, `${ids.A}.json`), JSON.stringify({ sessionId: ids.A, tags: [
     { axis: 'origine', v: 'interactive', src: 'entrypoint' }, { axis: 'domaine', v: 'Téléphonie', src: 'hd' }, { axis: 'outil', v: 'infra' },
     { axis: 'inconnu', v: 'x', src: 'y' }, { axis: 'outil', v: '' }, { axis: 'fonction', v: 'f'.repeat(61) }, { axis: 'hd', v: 12 }, 'texte', null,

@@ -9,7 +9,7 @@ import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { claudeArgsOk, loadSettings, type Modules, type UiConfig } from './modules.ts';
+import { claudeArgsOk, loadSettings, type Modules, type TagVocab, type UiConfig } from './modules.ts';
 
 export interface Config {
   port: number;
@@ -37,6 +37,10 @@ export interface Config {
   modules: Modules;
   /** Réglages d'affichage propres au poste (modules.ts, UiConfig). */
   ui: UiConfig;
+  /** Vocabulaire des tags, à défaut de celui que publie l'étiqueteur (modules.ts, parseTagVocab). */
+  tagVocab: TagVocab;
+  /** config.json illisible : le message (affiché par la page). */
+  configError: string | null;
 }
 
 const REPO = resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -80,5 +84,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     tailscaleExe: opt('--tailscale') ?? settings.tailscaleExe ?? join(env.ProgramFiles ?? 'C:\\Program Files', 'Tailscale', 'tailscale.exe'),
     modules: settings.modules,
     ui: settings.ui,
+    tagVocab: settings.tagVocab,
+    configError: settings.error,
   };
 }

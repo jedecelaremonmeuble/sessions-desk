@@ -145,9 +145,23 @@ claude -p /usage --output-format json --setting-sources project --strict-mcp-con
 ### Tags
 
 Tags are read from `~/.claude/state/session-tags/`. They are written by `server/src/tagger.ts`, a standalone
-program meant to run as a scheduled task (`node server/src/tagger.ts`). It is published as-is: its rules
-(`server/src/tagger-config.json`) and some of its code describe the original team's repository, so you will have
-to adapt them to yours.
+program meant to run as a scheduled task (`node server/src/tagger.ts`). Its rules are the `tagger` section of the
+same `config.json` (see `server/config.example.json`):
+
+| Key | What it does |
+|---|---|
+| `tagger.tools`, `tagger.topics` | `[{ "v": "<tag>", "re": ["<regex on the repo-relative path, lowercase, '/'>"] }]` — a file written or read by the session gives these tags (first matching tool only) |
+| `tagger.domains` | Closed list of business domains (also the ones a ticket can carry) |
+| `tagger.toolsWithoutTopic` | Tools whose files never give a domain (tooling) |
+| `tagger.docs` | `docs/claude/<name>.md` → domain |
+| `tagger.roots` | `[{ "re": "<regex whose group 1 is the repo-relative path>", "prefix": "" }]`, tried in order; default: Claude Code worktrees only |
+| `tagger.worktrees` | Regexes whose group 1 is a worktree name (the "function" tag) |
+| `tagger.deepDirs`, `tagger.genericWords`, `tagger.context` | Prefixes summarised 4 levels deep, words that never name a feature, one line describing the project for the small model |
+| `tagger.llmModel`, `llmBatch`, `maxLlmBatchesPerPass`, `llmQuotaMaxPct`, `llmIdleMinutes` | Small model that suggests the function tag |
+
+Ticket references use `modules.tickets.pattern`; the ticket domain comes from `modules.launcher.ticketApi`
+(`python <script> ticket <id>`). Changing the section recomputes every tag (its fingerprint is the rules version).
+An unreadable `config.json` stops the tagger with the reason, and the page shows it.
 
 ### Running it at logon
 

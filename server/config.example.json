@@ -6,9 +6,15 @@
       "cardsApi": "C:\\path\\to\\cards.py",
       "python": "python"
     },
-    "teams": { "enabled": true },
-    "tickets": { "pattern": "ABC-\\d{4}" },
-    "quota": { "source": "usage-probe" },
+    "teams": {
+      "enabled": true
+    },
+    "tickets": {
+      "pattern": "ABC-\\d{4}"
+    },
+    "quota": {
+      "source": "usage-probe"
+    },
     "automations": [
       {
         "id": "cleanup",
@@ -20,11 +26,85 @@
         "cli": "C:\\path\\to\\cleanup.py",
         "python": "python",
         "orders": [
-          { "id": "dry", "label": "Dry run", "args": ["run", "--dry-run"] },
-          { "id": "real", "label": "Real run", "args": ["run"], "confirm": "Run a real cleanup now?" }
+          {
+            "id": "dry",
+            "label": "Dry run",
+            "args": [
+              "run",
+              "--dry-run"
+            ]
+          },
+          {
+            "id": "real",
+            "label": "Real run",
+            "args": [
+              "run"
+            ],
+            "confirm": "Run a real cleanup now?"
+          }
         ]
       }
     ]
   },
-  "claudeArgs": ""
+  "claudeArgs": "",
+  "tagger": {
+    "domains": [
+      "Billing",
+      "Calls",
+      "Reporting"
+    ],
+    "tools": [
+      {
+        "v": "webapp",
+        "re": [
+          "^my-app/frontend/",
+          "^my-app/backend/"
+        ]
+      },
+      {
+        "v": "infra",
+        "re": [
+          "^\\.github/",
+          "^devops/"
+        ]
+      }
+    ],
+    "topics": [
+      {
+        "v": "Billing",
+        "re": [
+          "/billing/",
+          "/invoices?/"
+        ]
+      },
+      {
+        "v": "Calls",
+        "re": [
+          "/calls?/",
+          "/telephony/"
+        ]
+      }
+    ],
+    "toolsWithoutTopic": [
+      "infra"
+    ],
+    "docs": {},
+    "roots": [
+      {
+        "re": "^.*(?:/code/my-repo|/\\.claude/worktrees/[^/]+)/(.+)$"
+      }
+    ],
+    "worktrees": [
+      "/\\.claude/worktrees/([^/]+)"
+    ],
+    "deepDirs": [
+      "my-app/"
+    ],
+    "genericWords": [
+      "my-app"
+    ],
+    "context": "my-app, an invoicing tool",
+    "llmModel": "claude-haiku-5-5",
+    "llmQuotaMaxPct": 90
+  }
 }
