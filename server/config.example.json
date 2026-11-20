@@ -7,7 +7,23 @@
     },
     "teams": { "enabled": true },
     "tickets": { "pattern": "ABC-\\d{4}" },
-    "quota": { "file": "%LOCALAPPDATA%\\my-orchestrator\\claude-usage.json" }
+    "quota": { "file": "%LOCALAPPDATA%\\my-orchestrator\\claude-usage.json" },
+    "automations": [
+      {
+        "id": "cleanup",
+        "label": "Cleanup",
+        "icon": "🧹",
+        "everyMinutes": 60,
+        "history": "%LOCALAPPDATA%\\my-cleanup\\history.jsonl",
+        "runs": "%LOCALAPPDATA%\\my-cleanup\\runs",
+        "cli": "C:\\path\\to\\cleanup.py",
+        "python": "python",
+        "orders": [
+          { "id": "dry", "label": "Dry run", "args": ["run", "--dry-run"] },
+          { "id": "real", "label": "Real run", "args": ["run"], "confirm": "Run a real cleanup now?" }
+        ]
+      }
+    ]
   },
   "claudeArgs": ""
 }

@@ -5,6 +5,7 @@
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { refreshPrs, startGitRefresh } from './gitpr.ts';
+import type { Automations } from './automations.ts';
 import type { Launcher } from './launcher.ts';
 import type { Dashboard, Session } from './state.ts';
 import { addContent, ieq, netTrim, nowMs, psString } from './util.ts';
@@ -13,6 +14,7 @@ import { roundHalfEven } from './usage.ts';
 export class Watch {
   readonly d: Dashboard;
   readonly launcher: Launcher;
+  readonly automations: Automations | null;
   #workStart = new Map<string, number>();
   #notified = new Map<string, number>();
   #seeded = false;
@@ -22,14 +24,15 @@ export class Watch {
   #gitAsked = 0;
   #teamsAlerted = new Set<string>();
 
-  constructor(d: Dashboard, launcher: Launcher) { this.d = d; this.launcher = launcher; }
+  constructor(d: Dashboard, launcher: Launcher, automations: Automations | null = null) { this.d = d; this.launcher = launcher; this.automations = automations; }
 
   /** Send-Notif : gardée (mémoire + fichier) pour la page, puis toast par le pilote. */
-  notify(kind: string, session: { sessionId: string | null; pid: number }, title: string, text: string, hd?: string): void {
-    const e = { at: nowMs(), kind, sessionId: session.sessionId, title, text, ...(hd ? { hd } : {}) };   // hd : le clic ouvre le dernier run
+  notify(kind: string, session: { sessionId: string | null; pid: number }, title: string, text: string, hd?: string, pass?: string): void {
+    // hd : le clic ouvre le dernier run ; pass (« automate:passe ») : le clic ouvre la passe d'un automate
+    const e = { at: nowMs(), kind, sessionId: session.sessionId, title, text, ...(hd ? { hd } : {}), ...(pass ? { pass } : {}) };
     this.d.notifs.push(e); while (this.d.notifs.length > 200) this.d.notifs.shift();
     try { addContent(this.d.sf('sessions-dashboard-notifs.jsonl'), JSON.stringify(e)); } catch { /* idem */ }
-    const launch = hd ? `${this.d.cfg.url}?run=${hd}` : kind === 'launcher' ? `${this.d.cfg.url}?view=launcher` : `cc-focus://${session.pid}`;
+    const launch = pass ? `${this.d.cfg.url}?pass=${encodeURIComponent(pass)}` : hd ? `${this.d.cfg.url}?run=${hd}` : kind === 'launcher' ? `${this.d.cfg.url}?view=launcher` : `cc-focus://${session.pid}`;
     this.d.driver.call('toast', { title, text, launch }).catch(() => undefined);
   }
 
@@ -69,6 +72,12 @@ export class Watch {
     try { this.#updateGitState(st.sessions); } catch { /* idem */ }
     if (!cfg.primary) return;
     if (this.launcher.enabled) try { await this.launcher.runAlerts((t, x, hd) => this.notify('launcher', { sessionId: null, pid: 0 }, t, x, hd)); } catch { /* idem */ }
+    if (this.automations?.enabled) try {          // échecs des automates du poste seulement (passAlerts)
+      for (const { def, pass } of this.automations.alerts()) {
+        const what = pass.level === 'error' ? 'échec' : 'alerte répétée';
+        this.notify('automation', { sessionId: pass.sessionId, pid: 0 }, `${def.icon ? def.icon + ' ' : ''}${def.label} : ${what}`, pass.summary, undefined, `${def.id}:${pass.run}`);
+      }
+    } catch { /* idem */ }
     if (cfg.modules.teams) try { for (const a of teamsAlertsDue(this.d.teamsWaits(), this.#teamsAlerted, st)) this.notify('waiting', a.session, a.title, a.text); } catch { /* idem */ }
     try { await this.#seenFromForeground(st.sessions); } catch { /* idem */ }
     for (const s of st.sessions) {
