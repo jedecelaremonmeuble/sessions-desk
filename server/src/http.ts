@@ -425,8 +425,8 @@ export class Server {
     }
   }
 
-  /** Le veilleur INSTALLÉ sur le poste (~/.claude/scripts/teams-watcher : c'est lui qui a la configuration et le jeton) ;
-   *  à défaut la copie du serveur, sans configuration (elle refuse d'envoyer et ne remet rien). */
+  /** Le veilleur INSTALLÉ sur le poste (~/.claude/scripts/teams-watcher : c'est lui qui a le jeton) ; à défaut la copie
+   *  du serveur. Ses réglages : `modules.teams` du même fichier de configuration (SD_CONFIG). */
   #watcherScript(): string {
     const installed = join(this.cfg.claude, 'scripts', 'teams-watcher', 'teams-watcher.ts');
     return exists(installed) ? installed : fileURLToPath(new URL('./teams-watcher.ts', import.meta.url));
@@ -438,7 +438,7 @@ export class Server {
     const dir = this.d.sf('teams-waits');
     const linked = (): Set<string> => { try { return linkedPending(JSON.parse(readFileSync(join(dir, '_links.json'), 'utf8'))); } catch { return new Set(); } };
     if (!this.#kick.check(st.sessions, (st.teams ?? null) as KickSummary | null, linked, now)) return;
-    spawn(process.execPath, [this.#watcherScript()], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_TEAMS_WAITS_DIR: dir } }).unref();
+    spawn(process.execPath, [this.#watcherScript()], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_CONFIG: this.cfg.configFile, SD_TEAMS_WAITS_DIR: dir } }).unref();
   }
   /** Envoi d'une réponse Teams par le veilleur. Texte sur stdin. */
   #teamsSend(chatId: string, text: string): Promise<string | null> {
@@ -446,7 +446,7 @@ export class Server {
     return new Promise((done) => {
       let err = '', over = false;
       const end = (v: string | null) => { if (!over) { over = true; clearTimeout(timer); done(v); } };
-      const p = spawn(process.execPath, [script, 'send', chatId], { windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'], env: { ...process.env, SD_TEAMS_WAITS_DIR: this.d.sf('teams-waits') } });
+      const p = spawn(process.execPath, [script, 'send', chatId], { windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'], env: { ...process.env, SD_CONFIG: this.cfg.configFile, SD_TEAMS_WAITS_DIR: this.d.sf('teams-waits') } });
       const timer = setTimeout(() => { try { p.kill(); } catch { /* déjà fini */ } end(T('délai dépassé (45 s) : vérifier dans Teams avant de renvoyer', 'timed out (45 s): check in Teams before sending again')); }, 45_000);
       p.stderr.on('data', (b: Buffer) => { if (err.length < 2000) err += b.toString('utf8'); });
       p.on('error', (e) => end(T(`veilleur injoignable : ${e.message}`, `watcher unreachable: ${e.message}`)));
@@ -552,7 +552,7 @@ export class Server {
           const action = psString(pget(j, 'action')), sid = psString(pget(j, 'sessionId')), mid = psString(pget(j, 'messageId'));
           const err = ['dismiss', 'remind', 'snooze'].includes(action) && /^[\w-]+$/.test(sid) && /^\d+$/.test(mid)
             ? applyAction(this.d.sf('teams-waits'), sid, mid, action, nowMs()) : T('demande invalide', 'invalid request');
-          if (!err && action === 'remind') spawn(process.execPath, [fileURLToPath(new URL('./teams-watcher.ts', import.meta.url))], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_TEAMS_WAITS_DIR: this.d.sf('teams-waits') } }).unref();
+          if (!err && action === 'remind') spawn(process.execPath, [fileURLToPath(new URL('./teams-watcher.ts', import.meta.url))], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_CONFIG: this.cfg.configFile, SD_TEAMS_WAITS_DIR: this.d.sf('teams-waits') } }).unref();
           this.d.teamsCache = { k: '', value: null };
           body = JSON.stringify({ error: err });
           break;
@@ -593,7 +593,7 @@ export class Server {
             else if (action === 'attach' && /^[\w-]{1,80}$/.test(sid)) err = linkConversation(dir, chatId, sid, nowMs(), more);
           }
           // Une passe tout de suite, détachée : la session reçoit le fil sans attendre les 2 min (si une passe tourne déjà, à la suivante).
-          if (!err && action === 'attach') spawn(process.execPath, [this.#watcherScript()], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_TEAMS_WAITS_DIR: dir } }).unref();
+          if (!err && action === 'attach') spawn(process.execPath, [this.#watcherScript()], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_CONFIG: this.cfg.configFile, SD_TEAMS_WAITS_DIR: dir } }).unref();
           this.d.teamsCache = { k: '', value: null };
           body = JSON.stringify({ error: err });
           break;

@@ -7,7 +7,23 @@
       "python": "python"
     },
     "teams": {
-      "enabled": true
+      "enabled": true,
+      "reminders": false,
+      "ownerName": "Alex",
+      "mail": false,
+      "markRead": false,
+      "inbound": {
+        "enabled": false,
+        "cwd": "C:\\code\\my-repo",
+        "domains": [
+          "example.com"
+        ]
+      },
+      "conversations": {
+        "enabled": true,
+        "reply": false,
+        "mute": []
+      }
     },
     "tickets": {
       "pattern": "ABC-\\d{4}"

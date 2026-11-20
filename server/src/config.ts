@@ -41,6 +41,8 @@ export interface Config {
   tagVocab: TagVocab;
   /** config.json illisible : le message (affiché par la page). */
   configError: string | null;
+  /** Chemin du fichier de configuration lu (passé au surveillant Teams lancé par le serveur : SD_CONFIG). */
+  configFile: string;
 }
 
 const REPO = resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -56,7 +58,8 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   // sinon server/scripts/ et page/ (arbre publié).
   const legacyDir = resolve(opt('--legacy-dir') ?? (existsSync(join(REPO, 'legacy')) ? join(REPO, 'legacy') : join(REPO, 'server', 'scripts')));
   const localAppData = env.LOCALAPPDATA ?? join(home, 'AppData', 'Local'); const temp = env.TEMP ?? tmpdir();
-  const settings = loadSettings(resolve(opt('--config') ?? env.SD_CONFIG ?? join(home, '.claude', 'sessions-desk', 'config.json')), { home, localAppData, temp });
+  const configFile = resolve(opt('--config') ?? env.SD_CONFIG ?? join(home, '.claude', 'sessions-desk', 'config.json'));
+  const settings = loadSettings(configFile, { home, localAppData, temp });
   // Options de `claude` : aucune par défaut ; le fichier de configuration du poste, puis --claude-args (prioritaire).
   const cliArgs = opt('--claude-args');
   const claudeArgs = cliArgs === undefined ? settings.claudeArgs : claudeArgsOk(cliArgs);
@@ -86,5 +89,6 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
     ui: settings.ui,
     tagVocab: settings.tagVocab,
     configError: settings.error,
+    configFile,
   };
 }
