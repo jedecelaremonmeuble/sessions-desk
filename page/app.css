@@ -443,3 +443,12 @@ body.ro .crow .cb button { display:none; }
 #newform .nf-seg button.pricey.sel { background:var(--ask); color:#fff; }
 #newform .nf-cost { margin-top:6px; font-size:12px; color:var(--ask); }
 .cfgerr { margin:6px 0; padding:6px 10px; border:1px solid var(--waiting); border-radius:6px; color:var(--waiting); font-size:12px; word-break:break-word; }
+/* Commandes « / » : menu sous la zone de saisie, notes d'avertissement, boutons de raccourci. */
+.slashmenu { flex-basis:100%; width:100%; max-height:260px; overflow:auto; background:var(--card); border:1px solid var(--line); border-radius:6px; padding:4px; font-size:13px; }
+.slashmenu .srow { display:flex; gap:10px; align-items:baseline; padding:3px 8px; border-radius:4px; cursor:pointer; }
+.slashmenu .srow.sel, .slashmenu .srow:hover { background:var(--line); } .slashmenu .srow.info { cursor:default; background:none; }
+.slashmenu .sn { font-family:ui-monospace, Consolas, monospace; white-space:nowrap; } .slashmenu .sa { color:var(--mute); font-family:ui-monospace, Consolas, monospace; font-size:12px; white-space:nowrap; }
+.slashmenu .sd { flex:1; min-width:0; color:var(--mute); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .slashmenu .st { color:var(--mute); font-size:11px; white-space:nowrap; }
+.slashmenu .snote { padding:3px 8px; color:var(--mute); font-size:12px; } .slashmenu .quick { margin:3px 8px; font-size:12px; padding:3px 10px; font-family:ui-monospace, Consolas, monospace; }
+.shortcuts { display:inline-flex; gap:8px; flex-wrap:wrap; } .shortcuts:empty { display:none; }
+@media (max-width:820px) { .slashmenu .sa, .slashmenu .st { display:none; } }

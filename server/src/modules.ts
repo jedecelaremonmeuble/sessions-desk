@@ -34,6 +34,10 @@
 //   l'emporte), `cost` = multiplicateur par rapport au modèle de référence (celui à 1), `note` = précision affichée
 //   au survol (tarif…). Absente : la table publique ci-dessous (DEFAULT_MODELS). Présente, elle la REMPLACE.
 //
+// - ui.shortcuts : boutons de la page qui envoient une commande « / » toute faite à une session —
+//   [{ "label": "Reconnecter", "command": "/mcp reconnect all", "confirm": "" }], 8 au plus. Absente : deux
+//   raccourcis par défaut (reconnecter les serveurs MCP, compacter). Liste vide : aucun bouton.
+//
 // - claudeArgs : options passées à `claude` quand la page ouvre, rouvre ou relance une session. Aucune par défaut ;
 //   l'option --claude-args de la ligne de commande passe avant.
 //
@@ -51,10 +55,13 @@
 // Fichier absent, illisible ou module mal décrit ⇒ module éteint : jamais une erreur au démarrage.
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
+import { parseShortcuts, type Shortcut } from './commands.ts';
 
 export interface LauncherModule { root: string; cli: string; python: string; ticketApi: string; cardsApi: string }
 /** Ce que la page affiche et qui dépend du poste : préfixe de chemin à ne pas répéter, adresses des PR et des tickets. */
-export interface UiConfig { pathPrefix: string; prUrl: string; ticketUrl: string; ticketLabel: string; language: '' | 'en' | 'fr'; models: ModelCost[]; quota: QuotaLevels }
+export interface UiConfig { pathPrefix: string; prUrl: string; ticketUrl: string; ticketLabel: string; language: '' | 'en' | 'fr'; models: ModelCost[]; quota: QuotaLevels;
+  /** Boutons qui envoient une commande « / » toute faite. null : ceux par défaut (commands.ts) ; [] : aucun. */
+  shortcuts: Shortcut[] | null }
 /** Seuils du quota hebdomadaire (en %) : `warn` = orange, `alert` = rouge + alerte du lanceur. */
 export interface QuotaLevels { warn: number; alert: number }
 export const DEFAULT_QUOTA: QuotaLevels = Object.freeze({ warn: 75, alert: 90 });
@@ -70,7 +77,7 @@ export const DEFAULT_MODELS: readonly ModelCost[] = Object.freeze([
   { match: 'fable', label: 'Fable', cost: 2, note: '8 $ / 40 $', offer: true },
   { match: 'mythos', label: 'Mythos', cost: 2, note: '8 $ / 40 $', offer: false },
 ]);
-export const NO_UI: UiConfig = { pathPrefix: '', prUrl: '', ticketUrl: '', ticketLabel: '', language: '', models: [...DEFAULT_MODELS], quota: { ...DEFAULT_QUOTA } };
+export const NO_UI: UiConfig = { pathPrefix: '', prUrl: '', ticketUrl: '', ticketLabel: '', language: '', models: [...DEFAULT_MODELS], quota: { ...DEFAULT_QUOTA }, shortcuts: null };
 /** Ordre « Lancer maintenant » d'un automate : `python <cli> <args…>`. `confirm` non vide ⇒ la page demande avant. */
 export interface AutomationOrder { id: string; label: string; args: string[]; confirm: string }
 export interface AutomationDef {
@@ -166,7 +173,7 @@ export function parseUi(raw: unknown, env: PathEnv): UiConfig {
   const label = typeof u.ticketLabel === 'string' ? u.ticketLabel.trim().slice(0, 30) : '';
   // language : langue de la page sur ce poste ('en' ou 'fr') ; vide = celle du navigateur. Un choix fait dans la page l'emporte.
   const language = u.language === 'en' || u.language === 'fr' ? u.language : '';
-  return { pathPrefix: absPath(u.pathPrefix, env), prUrl: httpUrl(u.prUrl), ticketUrl: httpUrl(u.ticketUrl), ticketLabel: label, language, models: parseModels(u.models), quota: parseQuotaLevels(u.quota) };
+  return { pathPrefix: absPath(u.pathPrefix, env), prUrl: httpUrl(u.prUrl), ticketUrl: httpUrl(u.ticketUrl), ticketLabel: label, language, models: parseModels(u.models), quota: parseQuotaLevels(u.quota), shortcuts: parseShortcuts(u.shortcuts) };
 }
 
 /** `ui.models` : 30 entrées au plus ; une entrée sans `match` ou sans coût positif est ignorée. Liste absente,

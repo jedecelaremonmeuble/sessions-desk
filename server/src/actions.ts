@@ -10,6 +10,7 @@ import { isRelance } from './quiet.ts';
 import { checkTag, type Dashboard, type Session } from './state.ts';
 import { addContent, GUID, ieq, isDir, netTrim, nowMs, psArray, psIntZero, psString, sleep } from './util.ts';
 import { T } from './i18n.ts';
+import { commandOf, Commands } from './commands.ts';
 
 const KEY_NAMES = ['Enter', 'Esc', 'Up', 'Down', 'Left', 'Right', 'Tab', 'ShiftTab', 'Space', 'Backspace'];
 const NOT_EMPTY = "l'invite de la session n'est pas vide (brouillon, menu ou dialogue ouvert)";
@@ -46,7 +47,8 @@ function kill(pid: number): void { try { process.kill(pid, 'SIGKILL'); } catch {
 
 export class Actions {
   readonly d: Dashboard;
-  constructor(d: Dashboard) { this.d = d; }
+  readonly commands: Commands;
+  constructor(d: Dashboard) { this.d = d; this.commands = new Commands(d.cfg?.claude ?? ''); }
   get sentLog(): string { return this.d.sf('sessions-dashboard-sent.jsonl'); }
   async session(pid: number): Promise<Session | undefined> { return (await this.d.openSessions()).find((s) => Number(s.pid) === pid); }
 
@@ -82,7 +84,7 @@ export class Actions {
     const cut = suggested && line.endsWith('…');
     let code = 2;
     try { code = cut ? await this.d.driver.call('sendKeys', { pid, items: ['\u0001Tab', '\u0001Enter'] }) : await this.d.driver.call('send', { pid, line }); } catch { /* inaccessible */ }
-    addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, code, text: line, suggested, queued, ...(cut ? { cut: true } : {}) }));
+    addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, code, text: line, suggested, queued, ...(cut ? { cut: true } : {}), ...(commandOf(line) ? { command: commandOf(line) } : {}) }));
     // Une relance du veilleur n'est pas toi : elle ne marque pas « vue » une réponse que tu n'as pas encore lue.
     if (code === 0) {
       // « Envoyé » se vérifie : si le texte est encore dans l'invite, il n'est pas parti (Entrée lue comme un collage,
@@ -319,14 +321,26 @@ export class Actions {
   }
 
   /** Invoke-SendMany */
-  async sendMany(pids: unknown, text: string): Promise<Record<string, unknown>> {
+  async sendMany(pids: unknown, text: string, force = false): Promise<Record<string, unknown>> {
     const results: unknown[] = [];
     for (const p of psArray(pids).slice(0, 40)) {
       const id = psIntZero(p); if (!id) continue;
-      const t = (await this.session(id))?.title ?? null;
-      results.push({ pid: id, title: t, error: await this.send(id, text) });
+      const s = await this.session(id);
+      const bad = this.commands.check(submitLine(text), psString(s?.cwd), force, true);
+      results.push({ pid: id, title: s?.title ?? null, error: bad ? bad.error : await this.send(id, text), ...(bad?.unknownCommand ? { unknownCommand: bad.unknownCommand } : {}) });
     }
     return { results };
+  }
+
+  /** Envoi tapé dans la page : la garde des commandes « / » d'abord (commands.ts), puis l'envoi ordinaire.
+   *  Les envois internes (relances, fermeture) passent par `send` sans garde. */
+  async sendFromPage(pid: number, text: string, suggested: boolean, force: boolean): Promise<{ error: string | null; unknownCommand?: string }> {
+    if (!suggested) {
+      const s = await this.session(pid);
+      const bad = s ? this.commands.check(submitLine(text), psString(s.cwd), force, false) : null;
+      if (bad) return bad;
+    }
+    return { error: await this.send(pid, text, suggested, true) };
   }
 
   /** Invoke-New : nouvelle session (dossier proposé, premier message, modèle, worktree neuf facultatif,

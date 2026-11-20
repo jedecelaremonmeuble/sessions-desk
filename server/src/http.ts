@@ -13,6 +13,7 @@ import { createServer as createTcpServer, connect, type Server as TcpServer, typ
 import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Actions } from './actions.ts';
+import { defaultShortcuts } from './commands.ts';
 import { Automations } from './automations.ts';
 import type { Config } from './config.ts';
 import { startGitRefresh } from './gitpr.ts';
@@ -39,7 +40,7 @@ const PAGE: Record<string, [string, string]> = {
   '/app.css': ['app.css', 'text/css; charset=utf-8'],
 };
 const JSON_TYPE = 'application/json; charset=utf-8';
-const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/teams-conversations', '/api/teams-thread', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards']);
+const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/teams-conversations', '/api/teams-thread', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/commands', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards']);
 const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy', '/api/relay/restart']);
 const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/teams-reply', '/api/teams-link', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer', '/api/relay/restart']);
 const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/close', '/api/relaunch']);
@@ -484,7 +485,7 @@ export class Server {
           if (knownPid) body = JSON.stringify({ code: await this.actions.focus(target) }); else { status = 400; body = '{}'; }
           break;
         case '/api/send':
-          if (knownPid) { const j = await payload(); body = JSON.stringify({ error: await this.actions.send(target, psString(pget(j, 'text')), psTruthy(pget(j, 'suggestion')), true) }); }
+          if (knownPid) { const j = await payload(); body = JSON.stringify(await this.actions.sendFromPage(target, psString(pget(j, 'text')), psTruthy(pget(j, 'suggestion')), psTruthy(pget(j, 'force')))); }
           else { status = 400; body = '{}'; }
           break;
         case '/api/keys':
@@ -536,12 +537,17 @@ export class Server {
           status = r.status; body = JSON.stringify(r.body);
           break;
         }
-        case '/api/send-many': { const j = await payload(); if (!isObjBody(j)) { status = 400; body = '{}'; } else body = JSON.stringify(await this.actions.sendMany(arr(pget(j, 'pids')), psString(pget(j, 'text')))); break; }
+        case '/api/send-many': { const j = await payload(); if (!isObjBody(j)) { status = 400; body = '{}'; } else body = JSON.stringify(await this.actions.sendMany(arr(pget(j, 'pids')), psString(pget(j, 'text')), psTruthy(pget(j, 'force')))); break; }
         case '/api/close-many': { const j = await payload(); if (!isObjBody(j)) { status = 400; body = '{}'; } else body = JSON.stringify(await this.actions.closeMany(arr(pget(j, 'pids')), String(pget(j, 'rule') ?? ''))); break; }
         case '/api/relaunch-many': { const j = await payload(); if (!isObjBody(j)) { status = 400; body = '{}'; } else body = JSON.stringify(await this.actions.relaunchMany(arr(pget(j, 'pids')))); break; }
         case '/api/git-refresh': {
           const s1 = knownPid ? (await this.d.openSessions()).find((s) => Number(s.pid) === target) : undefined;
           if (s1) { startGitRefresh(this.d, [s1.gitDir]).catch(() => undefined); body = '{"ok":true}'; } else { status = 400; body = '{}'; }
+          break;
+        }
+        case '/api/commands': {                           // menu « / » de la zone de réponse : commandes de la session (ou du poste, sans pid) + raccourcis
+          const s = knownPid ? (await this.d.openSessions()).find((x) => Number(x.pid) === target) : undefined;
+          body = JSON.stringify({ commands: this.actions.commands.list(psString(s?.cwd)), shortcuts: this.cfg.ui.shortcuts ?? defaultShortcuts() });
           break;
         }
         case '/api/folders': body = JSON.stringify({ folders: await this.d.newFolders() }); break;
