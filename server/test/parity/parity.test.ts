@@ -323,12 +323,13 @@ describe.each(KINDS)('serveur %s', (kind) => {
 
   describe('envoi (consoles de test)', () => {
     test('send : texte nettoyé (sauts de ligne, tabulations, contrôles), Entrée à part, journalisé, « vu »', async () => {
-      const a = fx.consoles.A!; const before = a.keys().length;
+      const a = fx.consoles.A!; const before = a.keys().length; const t0 = Date.now();
       const r = (await post(s, `/api/send?pid=${fx.pids.A}`, { text: `  ${kind} ligne\r\nsuite\tfin\u0007  ` })).json();
+      const took = Date.now() - t0;
       expect(r).toEqual({ error: null });
       await sleep(300);
       const k = a.keys().slice(before); expect(k.map((x) => x.ch).join('')).toBe(`${kind} ligne suite fin\r`);
-      expect(k.at(-1)!.at - k.at(-2)!.at).toBeGreaterThanOrEqual(200);   // horodaté à la lecture par la console de test (voir driver-console)
+      expect(took).toBeGreaterThanOrEqual(450);   // la pause avant l'Entrée, mesurée du côté de l'envoi (voir driver-console)
       const e = sentLog().at(-1); expect(e).toMatchObject({ pid: fx.pids.A, sessionId: fx.ids.A, code: 0, text: `${kind} ligne suite fin`, suggested: false });
       const st = await waitState(s, (x) => x.sessions.find((y: any) => y.sessionId === fx.ids.A && !y.done));
       expect(st.done).toBe(false);
@@ -634,11 +635,17 @@ describe.each(KINDS)('serveur %s', (kind) => {
     const TOO_BIG = { error: 'corps de requête trop gros (1 Mo au plus)' };
     test('plus de 1 Mo annoncé ⇒ 413 sans rien exécuter ; juste en dessous ⇒ traité', async () => {
       const big = JSON.stringify({ ids: [fx.ids.H], on: true, pad: 'x'.repeat(1024 * 1024) });
-      const r = await post(s, '/api/hide', big); expect(r.code).toBe(413); expect(r.json()).toEqual(TOO_BIG);
-      expect((await call(s, '/api/hook', { method: 'POST', body: big })).code).toBe(413);
-      expect((await post(s, '/api/new', big)).code).toBe(413);
+      // Le serveur répond 413 puis coupe sans attendre la fin du corps : selon l'instant, le client lit le 413 ou voit
+      // la coupure pendant qu'il écrit encore — jamais un 200.
+      const refused = async (path: string): Promise<void> => {
+        let r: Awaited<ReturnType<typeof call>> | null = null;
+        try { r = await call(s, path, { method: 'POST', body: big, origin: s.base }); } catch { /* coupé pendant l'écriture */ }
+        if (r) { expect(r.code).toBe(413); expect(r.json()).toEqual(TOO_BIG); }
+      };
+      await refused('/api/hide'); await refused('/api/hook'); await refused('/api/new');
       const ok = await post(s, '/api/hide', JSON.stringify({ ids: [], on: true, pad: 'x'.repeat(1024 * 1024 - 200) })); expect(ok.code).toBe(200);
       expect(ok.json()).toEqual({ changed: 0 });
+      expect(JSON.parse(readFileSync(join(fx.claude, 'state', 'sessions-dashboard-hidden.json'), 'utf8').replace(/^﻿/, ''))).not.toContain(fx.ids.H);
     });
     test('sans longueur annoncée (chunked) : lu en flux, coupé au-delà de 1 Mo', async () => {
       const chunked = (path: string, body: Buffer): Promise<{ code: number | 'coupé'; body: string }> => new Promise((ok) => {
