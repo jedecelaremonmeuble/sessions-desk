@@ -518,11 +518,14 @@ export class Server {
           if (!isObjBody(j)) { status = 400; body = '{}'; break; }
           const action = psString(pget(j, 'action')), chatId = psString(pget(j, 'chatId')), sid = psString(pget(j, 'sessionId'));
           const dir = this.d.sf('teams-waits');
+          // Facultatifs : message de référence, consigne de l'utilisateur, remise unique (sans suivre la suite du fil).
+          const anchor = psString(pget(j, 'anchor')), note = psString(pget(j, 'note'));
+          const more = { ...(/^\d{6,24}$/.test(anchor) ? { anchor } : {}), ...(note.trim() ? { note } : {}), ...(psTruthy(pget(j, 'once')) ? { once: true } : {}) };
           let err: string | null = 'demande invalide';
           if (chatId.length <= 240 && /^[\w:@.-]+$/.test(chatId)) {
             if (action === 'detach') err = unlinkConversation(dir, chatId, nowMs());
-            else if (action === 'attach' && sid === 'new') err = linkConversation(dir, chatId, randomUUID(), nowMs(), { fresh: true });
-            else if (action === 'attach' && /^[\w-]{1,80}$/.test(sid)) err = linkConversation(dir, chatId, sid, nowMs());
+            else if (action === 'attach' && sid === 'new') err = linkConversation(dir, chatId, randomUUID(), nowMs(), { fresh: true, ...more });
+            else if (action === 'attach' && /^[\w-]{1,80}$/.test(sid)) err = linkConversation(dir, chatId, sid, nowMs(), more);
           }
           // Une passe tout de suite, détachée : la session reçoit le fil sans attendre les 2 min (si une passe tourne déjà, à la suivante).
           if (!err && action === 'attach') spawn(process.execPath, [this.#watcherScript()], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_TEAMS_WAITS_DIR: dir } }).unref();

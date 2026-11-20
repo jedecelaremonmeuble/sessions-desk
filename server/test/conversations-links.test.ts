@@ -48,6 +48,32 @@ describe('ce qui est remis à la session', () => {
   });
 });
 
+describe('à partir d’un message, avec une consigne', () => {
+  test('message de référence : lui, les trois qui le précèdent et ce qui le suit ; introuvable : la remise habituelle', () => {
+    const t = Array.from({ length: 10 }, (_, i) => msg(String(100 + i), T0 + i * MIN));
+    expect(linkBurst({ upTo: 0, n: 0, anchor: '105' }, t).map((m) => m.id)).toEqual(['102', '103', '104', '105', '106', '107', '108', '109']);
+    expect(linkBurst({ upTo: 0, n: 0, anchor: '100' }, t).map((m) => m.id)).toHaveLength(10);
+    expect(linkBurst({ upTo: 0, n: 0, anchor: '999' }, t).map((m) => m.id)).toHaveLength(10);
+    // Une fois la première remise faite, le message de référence ne joue plus.
+    expect(linkBurst({ upTo: T0 + 8 * MIN, n: 1, anchor: '105' }, t).map((m) => m.id)).toEqual(['109']);
+  });
+  test('textes : le message choisi est marqué, la consigne est la seule consigne, la remise unique est dite', () => {
+    setOwner('Alex Durand');
+    const burst = [msg('1', T0), msg('2', T0 + MIN, { text: 'la demande' })];
+    const p = linkPrompt('c', 'Projet', 'group', burst, undefined, { anchor: '2', note: 'prépare un plan', once: true });
+    expect(p).toContain('➤ [');
+    expect(p).toContain('« la demande »');
+    expect(p).toContain('Consigne de Alex Durand (elle, c\'est une consigne) : « prépare un plan »');
+    expect(p).toContain('ne te sera PAS remise');
+    expect(p).not.toContain('remis automatiquement');
+    const f = linkFollowUp('c', 'Projet', 'group', burst, true, undefined, { anchor: '2', note: 'prépare un plan' });
+    expect(f).toContain('➤ [');
+    expect(f).toContain('« prépare un plan »');
+    expect(f).toContain('remis automatiquement');
+    expect(linkFollowUp('c', 'Projet', 'group', burst, false, undefined, { anchor: '2', note: 'prépare un plan' })).not.toContain('prépare un plan');
+  });
+});
+
 describe('lien, vue et passe', () => {
   let dir = '';
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'tl-')); setOwner('Alex Durand'); });
@@ -159,6 +185,20 @@ describe('lien, vue et passe', () => {
     put({ c1: chatOf([msg('1', T0), msg('2', NOW)], { lastId: '3', lastAt: NOW + MIN }) });   // dernier message plus récent que le fil lu
     expect(await pass(w, NOW + 5 * MIN)).toMatchObject({ delivered: 0, deferred: 0 });
     expect(w.sent).toEqual([]);
+  });
+
+  test('remise unique à partir d’un message : la session reçoit message, contexte et consigne, puis le lien tombe', async () => {
+    put({ c1: chatOf([msg('1', T0 - 2 * MIN), msg('2', T0 - MIN, { text: 'la demande' }), msg('3', T0)]) });
+    expect(linkConversation(dir, 'c1', SID, NOW, { anchor: 'pas-un-id' })).toBe('message de référence invalide');
+    expect(linkConversation(dir, 'c1', SID, NOW, { note: 'x'.repeat(1501) })).toMatch(/trop longue/);
+    expect(linkConversation(dir, 'c1', SID, NOW, { fresh: true, anchor: '1000002', note: '  cadre\n ce sujet ', once: true })).toBeNull();
+    expect(links().chats.c1).toMatchObject({ anchor: '1000002', note: 'cadre ce sujet', once: true, fresh: true });
+    const w = world([]);
+    expect(await pass(w, NOW)).toMatchObject({ delivered: 1 });
+    expect(w.opened[0]!.prompt).toContain('Consigne de Alex Durand');
+    expect(w.opened[0]!.prompt).toContain('« cadre ce sujet »');
+    expect(links().chats).toEqual({});
+    expect(conversationsView(dir, NOW)!.rows[0]!.link).toBeUndefined();
   });
 
   test('un clic « Détacher » pendant la passe l’emporte', async () => {

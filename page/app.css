@@ -387,3 +387,8 @@ body.ro .crow .cb button { display:none; }
 .cpick select { font:inherit; font-size:12px; max-width:520px; padding:3px 6px; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:6px; }
 .cpick button { font-size:12px; padding:3px 10px; } .cpick .tx { color:var(--mute); font-size:11px; }
 .crow .cs .tag.link { color:var(--done); font-weight:600; } .crow .cs .lerr { color:var(--mute); font-size:11px; }
+.cpick input[type=text] { flex:1 1 320px; min-width:200px; font:inherit; font-size:12px; padding:3px 8px; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:6px; }
+.cpick label { display:inline-flex; gap:4px; align-items:center; } .cpick .from { color:var(--ask); font-weight:600; }
+.cmsg .who button.tos { font:inherit; font-size:11px; margin-left:8px; padding:0 6px; border-radius:999px; border:1px solid var(--line); background:transparent; color:var(--mute); cursor:pointer; opacity:0; }
+.cmsg:hover .who button.tos, .cmsg .who button.tos:focus, .cmsg.anchor .who button.tos { opacity:1; } .cmsg .who button.tos:hover { color:var(--ink); border-color:var(--shell); }
+.cmsg.anchor { border-left:3px solid var(--ask); padding-left:8px; } body.ro .cmsg .who button.tos { display:none; }
