@@ -88,6 +88,27 @@ const ktok = n => n == null ? '' : n < 1000 ? String(n) : Math.round(n / 1000) +
 const modelName = m => { if (!m) return ''; const x = /^claude-([a-z]+)-(\d{1,2})-(\d{1,2})(?!\d)/.exec(m); return x ? x[1][0].toUpperCase() + x[1].slice(1) + ' ' + x[2] + '.' + x[3] + (m.includes('[1m]') ? ' 1M' : '') : m.replace(/^claude-/, ''); };
 // Réglages d'affichage du poste (data.ui : préfixe de chemin à ne pas répéter, adresses des PR et des tickets).
 const ui = () => (data && data.ui) || {};
+// Coût relatif du modèle (data.ui.models : table de config.json, ou table publique par défaut) — la première entrée
+// dont `match` figure dans l'identifiant. Repère : l'entrée à 1 (Opus par défaut).
+const modelCost = m => { if (!m) return null; const id = m.toLowerCase(); return (ui().models || []).find(e => id.includes(e.match)) || null; };
+const costRef = () => ((ui().models || []).find(e => e.cost === 1) || { label: T('la référence', 'the reference') }).label;
+const costFactor = c => '×' + c.toLocaleString(LOCALE, { maximumFractionDigits: c < 0.1 ? 3 : 2 });
+/** Pastille du modèle, colorée par coût : orange plein = plus cher que la référence, discrète = référence, verte = moins
+ *  cher, pointillée = inconnu de la table. `compact` (liste) : nom + multiplicateur seuls ; sinon « vs <référence> ». */
+function modelBadge(m, compact, extra) {
+  const c = modelCost(m), lvl = !c ? 'unk' : c.cost >= 1.2 ? 'hi' : c.cost > 0.85 ? 'std' : 'lo', ref = costRef();
+  const b = el('span', 'mdl ' + lvl);
+  const f = c && c.cost !== 1 ? costFactor(c.cost) : '';
+  b.textContent = (lvl === 'hi' ? '💰 ' : '') + modelName(m) + (f ? (compact ? ' ' + f : ' · ' + f + ' vs ' + ref) : '');
+  b.title = m + '\n' + (!c ? T('Coût inconnu : ajouter une entrée « ui.models » dans config.json.', 'Unknown cost: add a "ui.models" entry in config.json.')
+    : (c.cost === 1 ? T('Modèle de référence pour les coûts', 'Reference model for costs')
+      : T((c.cost > 1 ? 'Coûte ' : 'Coûte seulement ') + f + ' par rapport à ' + ref, 'Costs ' + f + ' compared with ' + ref)
+        + '\n' + T('Sur un abonnement : épuise le quota ' + f + (c.cost > 1 ? ' plus vite' : ''), 'On a subscription: uses up the quota ' + f + (c.cost > 1 ? ' faster' : '')))
+      + (c.note ? '\n' + T('Tarif API (entrée / sortie, par million de tokens) : ', 'API price (input / output, per million tokens): ') + c.note : '')
+      + '\n' + T('Table : « ui.models » de config.json', 'Table: "ui.models" in config.json'))
+    + (extra ? '\n' + extra : '');
+  return b;
+}
 const short = p => { const s = p || '', pre = ui().pathPrefix || ''; return (pre && s.toLowerCase().startsWith(pre.toLowerCase()) ? s.slice(pre.length).replace(/^[\\/]+/, '') : s) || s; };
 const norm = t => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 // Lien avec le serveur (voir tick) : déclaré tôt, post() et l'envoi le lisent.
@@ -1251,7 +1272,7 @@ function renderPassDetail(it, force) {
   const chip = el('span', 'chip'); chip.append(el('span', 'dot'), it.running ? T('travaille · depuis ' + ago(Date.now() - it.at), 'working · for ' + ago(Date.now() - it.at)) : (PASS_FR[p.status] || p.status) + T(' · il y a ' + ago(Date.now() - it.since), ' · ' + ago(Date.now() - it.since) + ' ago'));
   if (p && p.dryRun && p.status !== 'dry-run') chip.append(el('span', 'tag cl', T('à blanc', 'dry run')));
   head.append(chip);
-  if (it.model) head.append(el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)));
+  if (it.model) head.append(modelBadge(it.model));
   if (it.tokens) head.append(el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString(LOCALE) + ' tokens'));
   head.append(el('div', 'meta', [(a.icon ? a.icon + ' ' : '') + a.label, T('lancée le ', 'started ') + new Date(it.at).toLocaleString(LOCALE, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
     p && p.minutes != null ? (p.minutes < 1 ? '< 1 min' : Math.round(p.minutes) + ' min') : null, p && p.costUsd != null ? money(p.costUsd) : null, it.sessionId].filter(Boolean).join(' · ')));
@@ -1423,7 +1444,7 @@ function renderRunDetail(it, force) {
   const chip = el('span', 'chip'); chip.append(el('span', 'dot'), (r.running ? T('travaille · depuis ' + ago(Date.now() - r.at), 'working · for ' + ago(Date.now() - r.at)) : (it.outcome || T('terminé', 'done')) + T(' · il y a ' + ago(Date.now() - it.since), ' · ' + ago(Date.now() - it.since) + ' ago')));
   if (it.wait && STAGE_FR[it.wait.stage]) chip.append(el('span', 'tag cl', STAGE_FR[it.wait.stage]));
   head.append(chip);
-  if (it.model) head.append(el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)));
+  if (it.model) head.append(modelBadge(it.model));
   if (it.tokens) head.append(el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString(LOCALE) + ' tokens'));
   const meta = el('div', 'meta', [T('🤖 lanceur · ', '🤖 launcher · ') + (RUN_FR[r.phase] || r.phase), T('lancé le ', 'started ') + new Date(r.at).toLocaleString(LOCALE, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
     r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + T(' tours', ' turns') : null, r.costUsd != null ? (Math.round(r.costUsd * 100) / 100).toLocaleString(LOCALE) + ' $' : null,
@@ -2042,7 +2063,7 @@ function renderList() {
       const tt = el('span', 't'); if (it.fav) tt.append(el('span', 'star', '★ ')); tt.append(label(it));
       { const d = driftTag(it); if (d) tt.append(d); }
       if (it.hidden) tt.append(el('span', 'tag hid', T('masquée', 'hidden')));
-      r.append(el('span', 'dot'), tt, el('span', 'age', (it.model ? modelName(it.model) + ' · ' : '') + (it.tokens ? ktok(it.tokens) + ' · ' : '') + (sortMode === 'created' ? T('créée il y a ' + ago(data.now - createdOf(it)), 'created ' + ago(data.now - createdOf(it)) + ' ago') : ago(data.now - it.since))));
+      const age = el('span', 'age'); if (it.model) age.append(modelBadge(it.model, true)); r.append(el('span', 'dot'), tt, age); age.append((it.tokens ? ktok(it.tokens) + ' · ' : '') + (sortMode === 'created' ? T('créée il y a ' + ago(data.now - createdOf(it)), 'created ' + ago(data.now - createdOf(it)) + ' ago') : ago(data.now - it.since)));
       const merged = (closable(it) ? T('✓ peut se fermer · ', '✓ can be closed · ') : it.prInfo && it.prInfo.state === 'MERGED' ? T('PR mergée · ', 'PR merged · ') : '') + (it.status === 'shell' && it.state !== 'shell' ? T('commande en arrière-plan · ', 'background command · ') : '');
       const sub = el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : it.kind === 'open' ? merged + (it.state === 'idle' ? (it.lastPrompt || it.name) : LABEL[it.state] + (it.lastPrompt ? ' · ' + it.lastPrompt : '')) : T('fermée · ', 'closed · ') + merged + (it.lastPrompt || short(it.cwd)));
       r.append(sub);
@@ -2845,7 +2866,7 @@ function renderDetail(force) {
   if (it.status === 'shell' && it.state !== 'shell') { const t = el('span', 'tag cl', T('commande en arrière-plan', 'background command')); t.title = T('Tour terminé ; une commande lancée en arrière-plan tourne encore dans cette session', 'Turn finished; a command started in the background is still running in this session'); chip.append(t); }
   if (it.stale) { const t = el('span', 'tag cl', T('statut corrigé d\'après l\'écran', 'status corrected from the screen')); t.title = T('Claude Code la déclare encore « au travail », mais ' + (it.stale === 'hook' ? 'elle a signalé la fin de son tour (hook Stop)' : 'son écran montre un tour terminé'), 'Claude Code still reports it as "working", but ' + (it.stale === 'hook' ? 'it signalled the end of its turn (Stop hook)' : 'its screen shows a finished turn')); chip.append(t); }
   head.append(chip);
-  if (it.model) { const md = el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)); md.title = it.model + T(' — modèle du dernier message de la session (suit un /model en cours de route)', ' — model of the last message of the session (follows a /model on the way)'); head.append(md); }
+  if (it.model) head.append(modelBadge(it.model, false, T('Modèle du dernier message de la session (suit un /model en cours de route)', 'Model of the last message of the session (follows a /model on the way)')));
   if (it.tokens) { const tk = el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString(LOCALE) + ' tokens'); tk.title = T('Taille du dernier appel au modèle : entrée + cache lu + cache écrit', 'Size of the last model call: input + cache read + cache written'); head.append(tk); }
   const meta = el('div', 'meta', [it.name, short(it.cwd), it.pid ? 'pid ' + it.pid : null, it.sessionId, it.version ? 'v' + it.version : null, it.startedAt ? T('lancée il y a ' + ago(data.now - it.startedAt), 'started ' + ago(data.now - it.startedAt) + ' ago') : null].filter(Boolean).join(' · '));
   const a = prLink(it); if (a) { meta.append(' · ', a); prTags(it).forEach(t => meta.append(t)); }

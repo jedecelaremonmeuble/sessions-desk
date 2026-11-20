@@ -421,3 +421,11 @@ body.ro .crow .cb button { display:none; }
 .langtop { flex:none; font-size:11px; font-weight:600; padding:1px 7px; line-height:18px; align-self:center; }
 /* Choix en cours sur ce fil : les boutons des messages restent visibles, pour en retenir plusieurs. */
 .crow.picking .cmsg .who button.tos { opacity:1; } .cmsg.anchor .who button.tos { color:var(--ask); border-color:var(--ask); }
+
+/* Pastille du modèle, colorée par coût relatif (ui.models) : plus cher que la référence = orange plein. */
+.mdl { display:inline-block; font-size:11.5px; font-weight:600; padding:0 8px; border-radius:999px; border:1px solid currentColor; margin-left:8px; white-space:nowrap; vertical-align:1px; cursor:help; }
+.mdl.hi { color:#fff; background:var(--ask); border-color:var(--ask); }
+.mdl.std { color:var(--mute); }
+.mdl.lo { color:var(--busy); }
+.mdl.unk { color:var(--mute); border-style:dashed; }
+.row-s .age .mdl { margin:0 5px 0 0; font-size:10px; padding:0 5px; vertical-align:0; }
