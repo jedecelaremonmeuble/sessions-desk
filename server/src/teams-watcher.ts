@@ -15,19 +15,19 @@
 //   node teams-watcher.ts unfollow <chatId>              détache le fil
 //   node teams-watcher.ts send <chatId>   envoie dans ce chat le texte lu sur stdin (lot 10 ; bouton « Répondre » de la page)
 // Lot 2 : sans réponse, la session est réveillée pour RELANCER elle-même (4 h ouvrées, puis J+1 10 h, puis alerte à
-// l'utilisateur), rouverte si elle est fermée. Relances autonomes éteintes tant que teams-watcher-config.json ne dit pas
+// l'utilisateur), rouverte si elle est fermée. Relances autonomes éteintes tant que modules.teams de config.json ne dit pas
 // { "reminders": true } ; « Relancer maintenant » (clic de l'utilisateur) marche sans.
 // Lot 3 (DEMANDES ENTRANTES) : un collègue interne écrit à l'utilisateur dans un chat 1:1 sans qu'aucune session n'attende sa
 // réponse ⇒ la passe ouvre une session (/api/new) qui diagnostique et PROPOSE une réponse ; rien ne part vers le
-// collègue sans le go de l'utilisateur. Éteint tant que teams-watcher-config.json ne dit pas { "inbound": { "enabled": true } }.
+// collègue sans le go de l'utilisateur. Éteint tant que modules.teams de config.json ne dit pas { "inbound": { "enabled": true } }.
 // Lot 4 (EMAILS) : même attente pour un email Outlook (outils outlook_create_*draft, outlook_send_mail). La session prépare
 // le plus souvent un BROUILLON : l'attente ne démarre qu'à l'envoi par l'utilisateur, constaté dans la conversation. La
 // réponse est injectée comme pour Teams ; une relance est un BROUILLON préparé par la session, jamais un envoi. Éteint tant que
-// teams-watcher-config.json ne dit pas { "mail": true } ; allumé, « login » demande aussi Mail.Read (à refaire une fois).
+// modules.teams de config.json ne dit pas { "mail": true } ; allumé, « login » demande aussi Mail.Read (à refaire une fois).
 // Lot 8 (FILS LUS) : lire un fil par Graph ne le marque pas « lu » — Teams garde son compteur de non-lus alors qu'une session
 // a lu et traité les messages. La passe marque donc le fil lu (markChatReadForUser) quand une session vient d'y ÉCRIRE,
 // quand une réponse lui est REMISE, et quand une demande entrante lui est confiée. Jamais pour un message écarté ou pas
-// encore remis. Éteint tant que teams-watcher-config.json ne dit pas { "markRead": true } ; allumé, « login » demande
+// encore remis. Éteint tant que modules.teams de config.json ne dit pas { "markRead": true } ; allumé, « login » demande
 // aussi Chat.ReadWrite (à refaire une fois) — sans lui, la surveillance continue et la passe le dit.
 //
 // Lot 9 (CONVERSATIONS) : la page ne montrait les fils que session par session. La passe liste désormais TOUS les chats
@@ -35,7 +35,7 @@
 // page en fait une vue par conversation : « à toi de répondre », « à voir » (il s'y est passé quelque chose depuis le
 // dernier pointage « Vu » de l'utilisateur : message d'un collègue OU message envoyé par une session en son nom), « à jour ».
 // L'état lu de Teams ne sert pas (le lot 8 marque lu ce qu'une session a traité). Chat.Read suffit. Éteint tant que
-// teams-watcher-config.json ne dit pas { "conversations": { "enabled": true } }.
+// modules.teams de config.json ne dit pas { "conversations": { "enabled": true } }.
 // Lot 10 (FIL ET RÉPONSE) : le dernier message seul ne suffit pas — une mention suivie d'un autre message, ou une question
 // sans mention dans un groupe, passaient à côté. La passe lit donc les derniers messages des chats qui ont bougé (un appel
 // par chat, seulement quand son dernier message change) : « à toi de répondre » se décide sur tout ce qui est arrivé depuis
@@ -62,6 +62,7 @@
 //   _watcher.log                  une ligne JSON par passe (jamais de jeton, jamais de texte de message)
 // Fichier autonome (aucun import local) : -Deploy le copie tel quel dans ~/.claude/scripts/teams-watcher/.
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
@@ -455,7 +456,7 @@ export interface InboundConfig {
   maxPerHour: number;
 }
 export const defaultInbound: InboundConfig = {
-  enabled: false, cwd: '', model: '',   // cwd et domains : propres au poste (teams-watcher-config.json), sans valeur par défaut
+  enabled: false, cwd: '', model: '',   // cwd et domains : propres au poste (modules.teams de config.json), sans valeur par défaut
   domains: [], settleMs: 120_000, liveTalkMs: 30 * 60_000, maxPerHour: 6,
 };
 export interface InboundChat {
@@ -469,7 +470,7 @@ export interface InboundChat {
 export interface InboundState { v: 1; since: number; chats: Record<string, InboundChat>; opened: number[] }
 
 const GREETINGS = ['comment ca va', 'comment vas tu', 'tu vas bien', 'ca va', 'la forme', 'hello', 'bonjour', 'bonsoir', 'salut', 'coucou'];
-/** Le propriétaire du poste, tel que les invites le nomment (teams-watcher-config.json : "ownerName"). Son prénom
+/** Le propriétaire du poste, tel que les invites le nomment (modules.teams de config.json : "ownerName"). Son prénom
  *  compte aussi comme une salutation (« Hello Alex »). */
 let OWNER = 'ton utilisateur';
 let OWNER_GREETING: string[] = [];
@@ -846,7 +847,7 @@ export type GraphSend = (path: string, body: unknown) => Promise<{ id?: string; 
 /** Bouton « Répondre » de la page (lot 10) : poste le texte dans le chat AU NOM de l'utilisateur, puis tient la vue à
  *  jour sans attendre la passe (dernier mot = le sien, conversation pointée). Retourne l'erreur, ou null. */
 export async function sendChatReply(dir: string, cfg: Pick<WatcherConfig, 'conversations'>, chatId: string, text: string, now: number, post: GraphSend): Promise<string | null> {
-  if (!cfg.conversations.enabled || !cfg.conversations.reply) return 'réponse depuis la page éteinte ({ "conversations": { "reply": true } } dans teams-watcher-config.json)';
+  if (!cfg.conversations.enabled || !cfg.conversations.reply) return 'réponse depuis la page éteinte ({ "conversations": { "reply": true } } dans modules.teams (config.json))';
   const body = text.trim();
   if (!body) return 'message vide';
   if (body.length > 8000) return 'message trop long (8 000 caractères au plus)';
@@ -1000,7 +1001,7 @@ export async function runLinks(dir: string, cfg: Pick<WatcherConfig, 'inbound'>,
     const evidence = () => saveEvidence(validationsDir(dir), link.sessionId, 'inbound', chatId, burst.filter((m) => m.who === 'other').map((m) => ({ id: m.id, at: m.at, from: m.from ?? 'quelqu\'un', text: m.text, files: [] })));
     try {
       if (link.fresh) {
-        if (!cfg.inbound.cwd) { fail('nouvelle session impossible : inbound.cwd est à renseigner dans teams-watcher-config.json'); continue; }
+        if (!cfg.inbound.cwd) { fail('nouvelle session impossible : inbound.cwd est à renseigner dans modules.teams (config.json)'); continue; }
         evidence();
         const err = await deps.open(link.sessionId, linkPrompt(chatId, c.label, c.type, burst, opts.selfCmd, ask));
         if (err) fail(`ouverture impossible : ${err}`); else ok();
@@ -1358,7 +1359,7 @@ export function applyAction(dir: string, sessionId: string, messageId: string, a
 // Le journal de la session reste la source. Une décision qui NOMME son ticket (`--hd` sur la validation) y est recopiée
 // en note interne — jamais sur le ticket déduit de la session : une session traite souvent plusieurs sujets, et son tag
 // dit son sujet du moment, pas celui de chaque question (une note mal placée ne se retire pas en silence). Elle est recopiée par une commande du poste (module éteint par défaut : `export` dans
-// teams-watcher-config.json). La commande reçoit `<id> <fichier HTML> --evt <id d'événement>` et doit répondre POSTED
+// modules.teams de config.json). La commande reçoit `<id> <fichier HTML> --evt <id d'événement>` et doit répondre POSTED
 // ou ALREADY : c'est elle qui garantit une seule note par événement, même si la passe est rejouée.
 export interface ExportConfig {
   /** ex. ["python", "C:/outils/tickets.py", "validationnote"] */
@@ -1445,7 +1446,7 @@ export function exportStatus(st: ExportState | undefined, evt: string | null): s
 
 export interface WatcherConfig {
   tenant: string; clientId: string; scope: string; serverUrl: string;
-  /** Relances AUTONOMES vers les collègues (D6) : éteintes par défaut, allumées sur go (teams-watcher-config.json). « Relancer maintenant » marche sans. */
+  /** Relances AUTONOMES vers les collègues (D6) : éteintes par défaut, allumées sur go (modules.teams de config.json). « Relancer maintenant » marche sans. */
   reminders: boolean; calendar: Calendar;
   /** Demandes ENTRANTES (lot 3) : éteintes par défaut. */
   inbound: InboundConfig;
@@ -1999,13 +2000,25 @@ export function installHook(settingsPath: string, command: string): boolean {
 async function main(argv: string[]): Promise<number> {
   const dir = process.env.SD_TEAMS_WAITS_DIR ?? defaultDir();
   const here = fileURLToPath(new URL('.', import.meta.url));
-  const file = readJson<Partial<WatcherConfig>>(join(here, 'teams-watcher-config.json')) ?? {};
+  // Réglages : `modules.teams` du fichier de configuration du poste, comme le serveur (--config, puis SD_CONFIG, puis
+  // ~/.claude/sessions-desk/config.json). Absent : tout reste éteint. Illisible : on s'arrête en le disant.
+  const ci = argv.indexOf('--config');
+  const cfgFile = (ci >= 0 ? argv[ci + 1] : undefined) ?? process.env.SD_CONFIG ?? join(process.env.USERPROFILE ?? homedir(), '.claude', 'sessions-desk', 'config.json');
+  let file: Partial<WatcherConfig> = {};
+  if (existsSync(cfgFile)) {
+    let raw: any;
+    try { raw = JSON.parse(readFileSync(cfgFile, 'utf8').replace(/^\uFEFF/, '')); } catch (e) {
+      process.stderr.write(`surveillant Teams arrêté : ${cfgFile} est illisible (${(e as Error).message})\n`); return 1;
+    }
+    const t = raw?.modules?.teams;
+    if (t && typeof t === 'object' && !Array.isArray(t)) file = t as Partial<WatcherConfig>;
+  }
   const cfg: WatcherConfig = { ...defaultConfig, ...file, calendar: { ...defaultCalendar, ...(file.calendar ?? {}) }, inbound: { ...defaultInbound, ...(file.inbound ?? {}) }, conversations: { ...defaultConversations, ...(file.conversations ?? {}) } };
   if (typeof cfg.ownerName === 'string') setOwner(cfg.ownerName);
   // Demandes entrantes allumées sans dossier de session ou sans domaine interne : rien ne peut s'ouvrir, on le dit.
   if (cfg.inbound.enabled && (!cfg.inbound.cwd || !cfg.inbound.domains.length)) {
     cfg.inbound = { ...cfg.inbound, enabled: false };
-    process.stderr.write('demandes entrantes ignorées : inbound.cwd et inbound.domains sont à renseigner dans teams-watcher-config.json\n');
+    process.stderr.write('demandes entrantes ignorées : inbound.cwd et inbound.domains sont à renseigner dans modules.teams (config.json)\n');
   }
   const self = join(here, 'teams-watcher.ts');
   const cmd = argv[0] && !argv[0].startsWith('--') ? argv[0] : 'pass';
@@ -2033,7 +2046,7 @@ async function main(argv: string[]): Promise<number> {
   }
   if (cmd === 'conversations') {
     const v = conversationsView(dir, Date.now());
-    if (!v) { console.error('vue par conversation éteinte : { "conversations": { "enabled": true } } dans teams-watcher-config.json, puis une passe'); return 1; }
+    if (!v) { console.error('vue par conversation éteinte : { "conversations": { "enabled": true } } dans modules.teams (config.json), puis une passe'); return 1; }
     const tag = (r: ConvRow) => (r.ball === 'reply' ? 'À TOI DE RÉPONDRE' : r.unseen ? 'à voir' : r.ball === 'session' ? 'une session s\'en occupe' : r.ball === 'waiting' ? 'en attente de leur réponse' : 'à jour');
     for (const r of v.rows) console.log(`${tag(r).padEnd(26)} ${hhmm(r.lastAt)}  ${r.label ?? '(sans nom)'} — ${r.by === 'me' ? 'toi' : r.by === 'session' ? 'une session, en ton nom' : r.lastFrom ?? '?'} : « ${clip(r.excerpt.replace(/\s+/g, ' '), 110)} »${r.news.length > 1 ? `  (${r.news.length} messages)` : ''}${r.sessions.length ? `  [${r.sessions.length} session(s)]` : ''}`);
     console.log(`${v.rows.length} conversation(s), liste du ${hhmm(v.at)}`);

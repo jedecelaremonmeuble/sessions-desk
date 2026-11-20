@@ -827,7 +827,7 @@ function renderChats() {
   const D = chatsData, rows = D && D.rows;
   main.append(el('div', 'dtitle', T('Conversations Teams', 'Teams conversations')));
   if (!D) { main.append(el('div', 'meta', T('Chargement…', 'Loading…'))); return; }
-  if (!rows) { main.append(el('div', 'meta', T('Vue éteinte : le veilleur n’a encore rien listé ({ "conversations": { "enabled": true } } dans teams-watcher-config.json).', 'View off: the watcher has not listed anything yet ({ "conversations": { "enabled": true } } in teams-watcher-config.json).'))); return; }
+  if (!rows) { main.append(el('div', 'meta', T('Vue éteinte : le veilleur n’a encore rien listé ({ "conversations": { "enabled": true } } dans modules.teams de config.json).', 'View off: the watcher has not listed anything yet ({ "conversations": { "enabled": true } } in modules.teams of config.json).'))); return; }
   const groups = chatGroups(rows), todo = groups[0].rows.length + groups[1].rows.length;
   const canSend = canWrite && !!(data.teams && data.teams.conversations && data.teams.conversations.send);
   const meta = el('div', 'meta', T(rows.length + ' chats actifs sur 14 jours (1:1, groupes, réunions), qu’une session les suive ou non · liste d’il y a ' + ago(data.now - D.at) + ' · '
@@ -2931,7 +2931,7 @@ function renderDetail(force) {
       l.append(bs); box.append(l);
     }
     if (!data.teams.enabled) box.append(el('div', 'tx', T('Surveillance éteinte : aucune réponse ne sera lue tant que « node teams-watcher.ts login » n’a pas été fait.', 'Watching is off: no reply will be read until "node teams-watcher.ts login" has been run.')));
-    else if (!data.teams.reminders) box.append(el('div', 'tx', T('Relances automatiques éteintes (teams-watcher-config.json) : seul « Relancer maintenant » écrit au collègue.', 'Automatic reminders are off (teams-watcher-config.json): only "Remind now" writes to your colleague.')));
+    else if (!data.teams.reminders) box.append(el('div', 'tx', T('Relances automatiques éteintes (modules.teams de config.json) : seul « Relancer maintenant » écrit au collègue.', 'Automatic reminders are off (modules.teams in config.json): only "Remind now" writes to your colleague.')));
     head.append(box);
   }
   const dvals = validationsOf(it);
