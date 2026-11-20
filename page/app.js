@@ -1886,6 +1886,37 @@ async function reopenMany(ids) {
   } catch { say(T('échec de la demande', 'request failed')); }
   tick();
 }
+// SANTÉ DU RELAIS d'accès distant (Tailscale) : le serveur PRINCIPAL la donne dans l'état (`server.relay`). En local seulement
+// — à distance, la page n'arrive que si le relais marche. Un clic le relance : relais redémarré s'il est arrêté,
+// identité Tailscale et `tailscale serve` relus, sans redémarrer le serveur.
+let relayBusy = false;
+function relayTitle(r) {
+  if (r.ok) return T('Accès distant prêt', 'Remote access ready') + (r.url ? ' : ' + r.url : '') + '\n' + T('Clic : revérifier', 'Click: check again');
+  return T('Accès distant coupé', 'Remote access down') + ' :\n· ' + r.problems.join('\n· ') + (r.fix ? '\n' + T('À lancer : ', 'Run: ') + r.fix : '') + '\n' + T('Clic : relancer le relais', 'Click: restart the relay');
+}
+function renderRelay(r) {
+  const b = $('relaybtn');
+  if (REMOTE || !r) { b.hidden = true; return; }
+  b.hidden = false; b.disabled = relayBusy || !canWrite;
+  b.classList.toggle('ko', !r.ok);
+  b.textContent = relayBusy ? '📡 …' : r.ok ? '📡' : '📡 ' + T('accès distant coupé', 'remote access down');
+  b.title = relayTitle(r);
+}
+async function restartRelay() {
+  if (relayBusy) return;
+  relayBusy = true; renderRelay(data && data.server && data.server.relay);
+  say(T('relance du relais d’accès distant…', 'restarting the remote-access relay…'));
+  try {
+    const r = await post('/api/relay/restart');
+    if (r && r.error) say(r.error);
+    else if (r && r.ok) say(T('accès distant prêt', 'remote access ready') + (r.url ? ' : ' + r.url : ''));
+    else if (r && r.problems) say(T('accès distant toujours coupé : ', 'remote access still down: ') + r.problems.join(' · ') + (r.fix ? ' — ' + T('lancer ', 'run ') + r.fix : ''));
+    if (r && r.problems && data && data.server) data.server.relay = r;
+  } catch { say(T('échec de la demande', 'request failed')); }
+  relayBusy = false; renderRelay(data && data.server && data.server.relay);
+}
+$('relaybtn').addEventListener('click', restartRelay);
+
 async function dismissReboot() { try { await post('/api/reboot-dismiss'); say(T('liste d\'avant le redémarrage oubliée', 'pre-restart list dismissed')); } catch { say(T('échec de la demande', 'request failed')); } tick(); }
 function rebootPanel() {
   const rb = data.reboot; if (!rb) return null;
@@ -3393,6 +3424,7 @@ async function tick() {
     data = srv; adoptPostLanguage(data.ui && data.ui.language); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
     if (linkUp(data.server)) return;
     renderList(); renderDetail(); refreshScreen(); refreshConv(); try { renderQuota(); } catch (e) { console.log('[sessions] quota :', e); }
+    renderRelay(data.server && data.server.relay);
     if (pendingRoute) { const r = pendingRoute; pendingRoute = null; applyRoute(r); }      // ?view= : écran d'arrivée, une fois l'état connu
     if (pendingRun && runData) { const hd = pendingRun; pendingRun = null; openRun(hd); }   // ?run= : runs arrivés avant l'état
     if (!autoAsked && !automationsOff()) loadAutomations();                               // module annoncé par l'état : première lecture

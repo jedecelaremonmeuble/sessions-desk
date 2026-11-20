@@ -7,6 +7,7 @@
 // En plus du .ps1 : --allow-write absent ⇒ toute action est refusée (serveur À CÔTÉ en lecture seule).
 import { langOf, T, withLang } from './i18n.ts';
 import { UsageProbe } from './usage-probe.ts';
+import { relayHealth, tailscaleIdentity, tailscaleServePort, type RelayHealth } from './relay.ts';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { createServer as createTcpServer, connect, type Server as TcpServer, type Socket } from 'node:net';
 import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -39,8 +40,8 @@ const PAGE: Record<string, [string, string]> = {
 };
 const JSON_TYPE = 'application/json; charset=utf-8';
 const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/teams-conversations', '/api/teams-thread', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards']);
-const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy']);
-const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/teams-reply', '/api/teams-link', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer']);
+const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy', '/api/relay/restart']);
+const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/teams-reply', '/api/teams-link', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer', '/api/relay/restart']);
 const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/close', '/api/relaunch']);
 /** Routes d'un module optionnel : sans lui, elles n'existent pas (404, comme une route inconnue). */
 const LAUNCHER_ROUTES = new Set(['/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/order', '/api/launcher/cards', '/api/launcher/answer', '/api/test-launcher-alerts']);
@@ -133,6 +134,14 @@ export class Server {
   readonly usageProbe: UsageProbe | null;
   remoteOwner: string | null = null;
   remoteOrigin: string | null = null;
+  /** Santé du relais d'accès distant (relay.ts) : faits relevés ici, verdict dans l'état (`server.relay`). */
+  #relaySrv: TcpServer | null = null;
+  #relayError: string | null = null;
+  #identityError: string | null = null;
+  #servePort: number | null | undefined = undefined;
+  #serveError: string | null = null;
+  #relayCheckedAt = 0;
+  #relayChecking: Promise<void> | null = null;
   uploadDir: string | null;
   #state: Buffer | null = null;
   #closed: Buffer | null = null;
@@ -174,8 +183,7 @@ export class Server {
         .catch((e: NodeJS.ErrnoException) => { if (host === '::1' && e.code === 'EADDRNOTAVAIL') return; throw new Error(`Port ${this.cfg.port} déjà pris (serveur déjà lancé ?) : ${e.message}`); });
       this.#servers.push(s);
     }
-    try { await this.#startRelay(this.cfg.port + 1, this.cfg.port); }
-    catch (e) { process.stderr.write(`Relais d'accès distant (port ${this.cfg.port + 1}) non démarré : ${(e as Error).message}\n`); }
+    await this.#ensureRelay();
     try { writeFileSync(join(this.cfg.temp, `sessions-dashboard-${this.cfg.port}.pid`), String(process.pid)); } catch { /* idem */ }
   }
   /** ARRÊT PROPRE : plus aucune requête acceptée (503), celles déjà reçues — en file ou en cours — vont au bout, puis
@@ -202,8 +210,43 @@ export class Server {
   // que rien ne soit transmis. Identité Tailscale inconnue ⇒ tout est refusé.
   #startRelay(port: number, target: number): Promise<void> {
     const srv = createTcpServer((cl) => this.#relay(cl, target));
-    this.#servers.push(srv);
-    return new Promise((ok, ko) => { srv.once('error', ko); srv.listen(port, '127.0.0.1', () => { srv.off('error', ko); ok(); }); });
+    return new Promise<void>((ok, ko) => { srv.once('error', ko); srv.listen(port, '127.0.0.1', () => { srv.off('error', ko); ok(); }); })
+      .then(() => { this.#relaySrv = srv; this.#servers.push(srv); srv.on('close', () => { if (this.#relaySrv === srv) this.#relaySrv = null; }); });
+  }
+  /** Relais démarré s'il ne l'est pas ; l'échec est retenu pour l'affichage (port pris, par exemple). */
+  async #ensureRelay(): Promise<void> {
+    if (this.#relaySrv || this.#stopping) return;
+    try { await this.#startRelay(this.cfg.port + 1, this.cfg.port); this.#relayError = null; }
+    catch (e) { this.#relayError = (e as Error).message; process.stderr.write(`Relais d'accès distant (port ${this.cfg.port + 1}) non démarré : ${this.#relayError}\n`); }
+  }
+  /** Relit l'identité Tailscale (si elle manque, ou si `force`) et où `tailscale serve` renvoie. Une lecture à la fois. */
+  checkRelay(force = false): Promise<void> {
+    this.#relayChecking ??= (async () => {
+      await Promise.resolve();   // jamais de fin synchrone : le finally remettrait null AVANT l'affectation
+      try {
+        if (!this.cfg.tailscaleExe) { this.#identityError = T('accès distant désactivé (--tailscale "")', 'remote access disabled (--tailscale "")'); return; }
+        if (force || this.remoteOrigin === null) {
+          try { const id = await tailscaleIdentity(this.cfg.tailscaleExe); this.remoteOwner = id.owner; this.remoteOrigin = id.origin; this.#identityError = null; }
+          catch (e) { if (this.#identityError === null) this.logError(`écriture à distance désactivée : ${(e as Error).message}`); this.#identityError = (e as Error).message; }
+        }
+        if (this.remoteOrigin !== null) {
+          try { this.#servePort = await tailscaleServePort(this.cfg.tailscaleExe, this.remoteOrigin); this.#serveError = null; }
+          catch (e) { this.#servePort = undefined; this.#serveError = (e as Error).message; }
+        }
+      } finally { this.#relayCheckedAt = nowMs(); this.#relayChecking = null; }
+    })();
+    return this.#relayChecking;
+  }
+  /** Bouton « Relancer » de la page : relais redémarré s'il est arrêté, identité et `tailscale serve` relus. */
+  async restartRelay(): Promise<RelayHealth> {
+    await this.#ensureRelay();
+    await this.checkRelay(true);
+    return this.relayHealth();
+  }
+  relayHealth(): RelayHealth {
+    return relayHealth({ port: this.cfg.port + 1, listening: this.#relaySrv !== null, listenError: this.#relayError,
+      identity: this.remoteOrigin !== null && this.remoteOwner !== null ? { owner: this.remoteOwner, origin: this.remoteOrigin } : null,
+      identityError: this.#identityError, servePort: this.#servePort, serveError: this.#serveError });
   }
   #relay(cl: Socket, target: number): void {
     cl.setTimeout(30000, () => cl.destroy());
@@ -357,13 +400,15 @@ export class Server {
         lastState = now;
         try {
           const st = await this.d.state();
-          this.#state = Buffer.from(JSON.stringify({ ...st, server: { boot: BOOT, page: this.#pageVersion() } })); this.beat();
+          this.#state = Buffer.from(JSON.stringify({ ...st, server: { boot: BOOT, page: this.#pageVersion(), relay: this.cfg.primary ? this.relayHealth() : null } })); this.beat();
           if (!this.cfg.noBackground && now - lastWatch >= 2000) {
             lastWatch = now;
             try { await this.watch.tick(st as never); } catch { /* idem */ }
             try { this.#kickTeams(st as { sessions?: KickSession[]; teams?: unknown }, now); } catch { /* idem */ }
             if (this.cfg.primary) this.search.maybeIndex();
             this.usageProbe?.maybeRun(now);
+            // Identité absente (serveur lancé avant Tailscale) : relue toutes les 30 s ; sinon `tailscale serve` chaque minute.
+            if (now - this.#relayCheckedAt >= (this.remoteOrigin === null ? 30_000 : 60_000)) { void this.checkRelay(); void this.#ensureRelay(); }
           }
         } catch (e) { this.logError(`état : ${(e as Error).message}`); }
       }
@@ -433,7 +478,7 @@ export class Server {
       if (headless) { status = 409; body = JSON.stringify({ code: 4, error: T('automate sans terminal (claude -p) : il se pilote depuis son lanceur', 'automation without a terminal (claude -p): drive it from its launcher') }); }
       else if ((!this.launcher.enabled && LAUNCHER_ROUTES.has(path)) || (!this.cfg.modules.teams && TEAMS_ROUTES.has(path)) || (!this.automations.enabled && AUTOMATION_ROUTES.has(path))) { req.resume(); status = 404; body = '{}'; }
       else switch (path) {
-        case '/api/state': body = JSON.stringify({ ...(await this.d.state()), server: { boot: BOOT, page: this.#pageVersion() } }); break;
+        case '/api/state': body = JSON.stringify({ ...(await this.d.state()), server: { boot: BOOT, page: this.#pageVersion(), relay: this.cfg.primary ? this.relayHealth() : null } }); break;
         case '/api/closed': body = JSON.stringify(await this.d.closed()); break;
         case '/api/focus':
           if (knownPid) body = JSON.stringify({ code: await this.actions.focus(target) }); else { status = 400; body = '{}'; }
@@ -461,6 +506,7 @@ export class Server {
         case '/api/reopen': body = JSON.stringify({ error: await this.actions.reopen(q.get('id') ?? '') }); break;
         case '/api/reopen-many': { const j = await payload(); if (!isObjBody(j)) { status = 400; body = '{}'; } else { this.d.rebootView.at = 0; body = JSON.stringify(await this.actions.reopenMany(arr(pget(j, 'ids')))); } break; }
         case '/api/reboot-dismiss': this.d.clearReboot(); body = '{"ok":true}'; break;
+        case '/api/relay/restart': body = JSON.stringify(await this.restartRelay()); break;
         case '/api/test-launcher-alerts': if (this.cfg.noBackground) body = JSON.stringify({ alerts: await this.launcher.alerts({}) }); else { status = 404; body = '{}'; } break;
         case '/api/launcher': { let h = parseIntZero(q.get('hours')); if (h <= 0) h = 48; body = JSON.stringify(await this.launcher.view(Math.min(24 * 30, h))); break; }
         case '/api/launcher/hd': body = JSON.stringify(await lookupHd(q.get('hd') ?? '', process.env, this.cfg.modules.launcher)); break;
