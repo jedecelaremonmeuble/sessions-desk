@@ -462,3 +462,9 @@ body.ro .crow .cb button { display:none; }
 .dlg pre.menu { margin:0 0 10px; padding:8px 10px; background:#161616; color:#d9d6cf; border-radius:6px; font:12px/1.35 ui-monospace, Consolas, monospace; white-space:pre; overflow:auto; max-height:46vh; }
 .dlg .keys.pad button { min-width:44px; padding:6px 12px; font-size:13px; } .dlg .keys.pad button.esc { margin-left:auto; }
 @media (max-width: 700px) { .dlg pre.menu { font-size:10.5px; } .dlg .keys.pad button { min-height:40px; flex:1 1 0; } .dlg .keys.pad button.esc { margin-left:0; } }
+/* Run du lanceur en cours : ce qu'il fait maintenant (lu dans son transcript). */
+.runlive { margin:10px 0 4px; padding:8px 12px; border:1px solid var(--line); border-left:3px solid var(--busy); border-radius:8px; }
+.runlive .rl-now { font-weight:600; overflow-wrap:anywhere; }
+.runlive .rl-sub { color:var(--mute); font-size:12px; margin-top:3px; overflow-wrap:anywhere; }
+.runlive.stale { border-left-color:var(--ask); }
+.runlive-l.stale { color:var(--ask); }

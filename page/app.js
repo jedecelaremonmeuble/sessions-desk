@@ -1013,6 +1013,8 @@ function renderLauncher() {
              el('span', 'lm', [r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + T(' tours', ' turns') : null, r.costUsd != null ? T((Math.round(r.costUsd * 100) / 100).toLocaleString(LOCALE) + ' $', '$' + (Math.round(r.costUsd * 100) / 100).toLocaleString('en-GB')) : null].filter(Boolean).join(' · ')));
     row.append(h);
     if (r.detail) row.append(el('div', 'ld', r.detail));
+    { const lv = r.running ? runLiveLine(r.live, Date.now()) : null;
+      if (lv) row.append(el('div', 'ld runlive-l' + (lv.stale ? ' stale' : ''), [lv.text, lv.todos, lv.stale ? '⚠️ ' + lv.moved : null].filter(Boolean).join(' · '))); }
     const fl = el('div', 'lf');
     for (const f of r.files) { const b = el('button', 'quick' + (launchView === r.dir + '/' + f.name ? ' on' : ''), f.name); b.title = Math.max(1, Math.round(f.size / 1024)) + T(' Ko', ' KB'); b.onclick = () => viewLaunchFile(r.dir, f.name); fl.append(b); }
     if (r.sessionId && !r.running) { const b = el('button', 'quick', '↻ conversation'); b.title = T('Rouvrir cette conversation dans un onglet (claude --resume ' + r.sessionId.slice(0, 8) + '…)', 'Reopen this conversation in a tab (claude --resume ' + r.sessionId.slice(0, 8) + '…)'); b.onclick = () => openRunConversation(r); fl.append(b); }
@@ -1312,9 +1314,26 @@ async function openPassConversation(it) {
 // Enchaînement des phases d'une demande, du premier au dernier run ; au-delà de 5, seules les 5 dernières.
 const phaseChain = phases => (phases.length > 5 ? ['…'].concat(phases.slice(-5)) : phases).map(p => RUN_FR[p] || p).join(' → ');
 const RUN_FR = { diagnostic:'diagnostic', suite:T('suite', 'follow-up'), dev:'dev', relecture:T('relecture', 'review'), recette:T('recette', 'testing'), reprise:T('reprise', 'rework'), relance:T('relance', 'restart'), reveil:T('réveil', 'wake-up'), go:'go', merge:'merge', production:'production', doc:'doc' };
+// ── Run EN COURS : ce qu'il fait maintenant (`r.live`, lu par le serveur dans le transcript du run). runLiveLine est
+// PURE (testée) : l'outil en cours et depuis quand, sinon le dernier texte de Claude ; `stale` quand le transcript n'a
+// plus bougé depuis RUN_STALE_MS (une commande longue fait battre le transcript toutes les 30 s : le silence est anormal).
+const RUN_STALE_MS = 3 * 60000;
+const TOOL_ICON = { Bash:'⌨️', PowerShell:'⌨️', Edit:'✏️', Write:'✏️', MultiEdit:'✏️', NotebookEdit:'✏️', Read:'📖', Grep:'🔎', Glob:'🔎', Agent:'🤖', Task:'🤖', WebFetch:'🌐', WebSearch:'🌐', TodoWrite:'📋' };
+function runLiveLine(live, now) {
+  if (!live) return null;
+  const tool = x => (TOOL_ICON[x.name] || '🔧') + ' ' + (x.label && x.label !== x.name ? x.name + ' : ' + x.label : x.name) + (x.since ? T(' · depuis ', ' · for ') + ago(now - x.since) : '');
+  const stale = live.lastAt != null && now - live.lastAt > RUN_STALE_MS;
+  const text = live.now ? '⏳ ' + tool(live.now) + (live.now.inner ? ' › ' + tool(live.now.inner) : '') : live.text ? '💬 ' + live.text : T('démarre…', 'starting…');
+  const todos = live.todos && live.todos.total ? T('📋 ' + live.todos.done + '/' + live.todos.total + ' tâches', '📋 ' + live.todos.done + '/' + live.todos.total + ' tasks') + (live.todos.current ? ' · ' + live.todos.current : '') : null;
+  const tools = (live.partial ? '≥ ' : '') + live.tools + T(' outils appelés', ' tool calls');
+  const moved = live.lastAt != null ? T('dernier mouvement il y a ' + ago(now - live.lastAt), 'last activity ' + ago(now - live.lastAt) + ' ago') + (stale ? T(' — bloqué ?', ' — stuck?') : '') : null;
+  return { text, todos, tools, moved, stale };
+}
 function runSub(it) {
   const r = it.run, multi = it.runCount > 1;
   const tail = multi ? [phaseChain(it.phases), it.runCount + ' runs' + (it.costTotal != null ? ' · ' + money(it.costTotal) : '')] : [];
+  const lv = r.running ? runLiveLine(r.live, Date.now()) : null;
+  if (lv) return [lv.text].concat(lv.stale ? ['⚠️ ' + lv.moved] : [], tail).join(' · ');
   if (r.running) return [T('travaille' + (r.at ? ' depuis ' + ago(Date.now() - r.at) : ''), 'working' + (r.at ? ' for ' + ago(Date.now() - r.at) : ''))].concat(tail, it.reply ? [lastLine(it.reply)] : []).join(' · ');
   return [it.wait && STAGE_FR[it.wait.stage] ? STAGE_FR[it.wait.stage] : null, it.outcome || null, it.scripted ? T('étape scriptée', 'scripted step') : null]
     .concat(multi ? tail : [r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.costUsd != null ? money(r.costUsd) : null]).filter(Boolean).join(' · ') || '—';
@@ -1473,6 +1492,15 @@ function renderRunDetail(it, force) {
   const a = prLink(it); if (a) meta.append(' · ', a);
   head.append(meta);
   if (r.detail) head.append(el('div', 'meta', r.detail));
+  { const lv = r.running ? runLiveLine(r.live, Date.now()) : null;
+    if (lv) {
+      const box = el('div', 'runlive' + (lv.stale ? ' stale' : ''));
+      box.append(el('div', 'rl-now', lv.text));
+      if (lv.todos) box.append(el('div', 'rl-sub', lv.todos));
+      if (r.live.now && r.live.text) box.append(el('div', 'rl-sub', '💬 ' + r.live.text));
+      box.append(el('div', 'rl-sub', [lv.tools, lv.moved].filter(Boolean).join(' · ')));
+      head.append(box);
+    } }
   if (it.wait && it.wait.detail) head.append(el('div', 'meta', T('Demande : ', 'Request: ') + it.wait.detail));
   head.append(hdBlock(r.hd));
   const actions = el('div', 'actions');
