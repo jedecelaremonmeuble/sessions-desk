@@ -1027,9 +1027,9 @@ function runOrders(phase, stage, pr) {
   if (['diagnostic', 'suite', 'relance', 'reveil'].includes(phase)) o.push('verdict');
   return o;
 }
-// ── Décision de la Tech (carte ✅ posée sous la dernière note — tech_decision.py du lanceur, docs/CartesTechVersPoste-
-// Cadrage.md) : tranchée ICI comme sur la carte. decisionForm et decideBody sont PURES (testées par sessions-dashboard-
-// tests.ps1) ; le lanceur refait toutes les gardes (ordre « decide ») et pose la note de trace qui ferme la carte.
+// ── Décision de la Tech (carte ✅ posée par le lanceur sous sa dernière note, `techDecision` de son state.json) :
+// tranchée ICI comme sur la carte. decisionForm et decideBody sont PURES ; le
+// lanceur refait toutes les gardes (ordre « decide ») et pose la note de trace qui ferme la carte.
 const DECISION_KIND_FR = { validation:'✅ Validation Tech', cadrage:'📐 Ouvrir un cadrage', doc:'📝 Mémoire de domaine' };
 function decisionForm(d) {
   let qs = [];
