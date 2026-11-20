@@ -42,8 +42,8 @@ const PAGE: Record<string, [string, string]> = {
 const JSON_TYPE = 'application/json; charset=utf-8';
 const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/teams-conversations', '/api/teams-thread', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/commands', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards']);
 const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy', '/api/relay/restart']);
-const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/teams-reply', '/api/teams-link', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer', '/api/relay/restart']);
-const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/close', '/api/relaunch']);
+const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/model', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/teams-reply', '/api/teams-link', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer', '/api/relay/restart']);
+const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/model', '/api/close', '/api/relaunch']);
 /** Routes d'un module optionnel : sans lui, elles n'existent pas (404, comme une route inconnue). */
 const LAUNCHER_ROUTES = new Set(['/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/order', '/api/launcher/cards', '/api/launcher/answer', '/api/test-launcher-alerts']);
 const TEAMS_ROUTES = new Set(['/api/teams-wait', '/api/teams-conversations', '/api/teams-seen', '/api/teams-thread', '/api/teams-reply', '/api/teams-link']);
@@ -486,6 +486,10 @@ export class Server {
           break;
         case '/api/send':
           if (knownPid) { const j = await payload(); body = JSON.stringify(await this.actions.sendFromPage(target, psString(pget(j, 'text')), psTruthy(pget(j, 'suggestion')), psTruthy(pget(j, 'force')))); }
+          else { status = 400; body = '{}'; }
+          break;
+        case '/api/model':                                // modèle pour CETTE session seulement (menu /model, touche « s »)
+          if (knownPid) { const j = await payload(); body = JSON.stringify({ error: await this.actions.sessionModel(target, psString(pget(j, 'model'))) }); }
           else { status = 400; body = '{}'; }
           break;
         case '/api/keys':

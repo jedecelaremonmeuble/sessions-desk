@@ -45,6 +45,34 @@ async function waitExit(pid: number, ms: number): Promise<boolean> {
 }
 function kill(pid: number): void { try { process.kill(pid, 'SIGKILL'); } catch { /* déjà mort */ } }
 
+/** Menu « Select model » lu à l'écran : ses lignes numérotées, celle que le curseur « ❯ » désigne, et s'il offre
+ *  « s to use this session only ». null : ce n'est pas ce menu. */
+export interface ModelMenu { opts: { num: number; label: string }[]; cur: number; sessionOnly: boolean }
+export function parseModelMenu(screen: string): ModelMenu | null {
+  const L = screen.split('\n');
+  let foot = -1;
+  for (let i = L.length - 1; i >= Math.max(0, L.length - 12); i--) if (/enter to (save|select|confirm)/i.test(L[i]!) && /esc to cancel/i.test(L[i]!)) { foot = i; break; }
+  if (foot < 0) return null;
+  const opts: ModelMenu['opts'] = []; let cur = -1;
+  for (let i = Math.max(0, foot - 30); i < foot; i++) {
+    const m = /^\s*(❯\s*)?(\d{1,2})\.\s+(\S.*?)\s*$/.exec(L[i]!);
+    if (!m) continue;
+    const num = Number(m[2]);
+    if (num === 1) { opts.length = 0; cur = -1; }
+    if (num !== opts.length + 1) continue;
+    if (m[1]) cur = opts.length;
+    opts.push({ num, label: m[3]!.split(/\s{2,}/)[0]!.replace(/\s*✔\s*$/, '').trim() });
+  }
+  if (opts.length < 2 || cur < 0) return null;
+  return { opts, cur, sessionOnly: /\bs to use this session only\b/i.test(L[foot]!) };
+}
+/** La ligne du menu qui correspond au modèle demandé (« opus », « haiku »…) : la première dont le libellé le contient,
+ *  hors ligne « Default » (elle désigne le réglage par défaut, pas un modèle). -1 : absent. */
+export function pickModel(menu: ModelMenu, want: string): number {
+  const w = want.trim().toLowerCase();
+  return menu.opts.findIndex((o) => !/^default\b/i.test(o.label) && o.label.toLowerCase().includes(w));
+}
+
 export class Actions {
   readonly d: Dashboard;
   readonly commands: Commands;
@@ -139,6 +167,56 @@ export class Actions {
     addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, code, keys: items.map((x) => x.replaceAll('\u0001', '#')), expect }));
     if (code === 0) { this.d.setSeen([sess.sessionId]); return null; }
     return code === 3 ? T('touche inconnue', 'unknown key') : T('console de la session inaccessible', 'session console unreachable');
+  }
+
+  /** Délais du changement de modèle : attente du menu, pause après une touche (tests : 0). */
+  modelWaitMs = 4000; modelStepMs = 350;
+  /** MODÈLE POUR CETTE SESSION SEULEMENT. « /model <nom> » écrit aussi le réglage par défaut des prochaines sessions ;
+   *  le seul chemin qui s'arrête à la session est le menu : /model, curseur sur le modèle, touche « s ». On le rejoue,
+   *  en relisant l'écran à chaque pas : menu ouvert et offrant bien « s » (sinon la version de Claude Code ne sait pas
+   *  le faire : Échap, refus), modèle trouvé parmi les lignes numérotées, curseur arrivé dessus, puis la question
+   *  « Switch model? » (posée quand une conversation est en cache) validée. Au moindre écart : Échap et refus —
+   *  jamais Entrée dans ce menu, qui enregistrerait le choix comme réglage par défaut. */
+  async sessionModel(pid: number, wantRaw: string): Promise<string | null> {
+    const want = wantRaw.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9 .\-]{0,40}$/.test(want)) return T('modèle invalide', 'invalid model');
+    const sess = await this.session(pid);
+    if (!sess) return T('session introuvable', 'session not found');
+    if (!ieq(sess.status, 'idle')) return T(`la session n'est pas inactive (statut ${psString(sess.status)})`, `the session is not idle (status ${psString(sess.status)})`);
+    const call = async (op: string, args: Record<string, unknown>): Promise<unknown> => { try { return await this.d.driver.call(op, args); } catch { return null; } };
+    const read = async (): Promise<string> => { const s = await call('read', { pid }); return typeof s === 'string' ? s : ''; };
+    const keys = async (...items: string[]): Promise<boolean> => { const ok = (await call('sendKeys', { pid, items })) === 0; await sleep(this.modelStepMs); return ok; };
+    const log = (extra: Record<string, unknown>): void => { addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, command: '/model', sessionOnly: true, want, ...extra })); };
+    const giveUp = async (why: string): Promise<string> => { await keys('\u0001Esc'); log({ code: 7, error: why }); return why; };
+
+    const code = await call('send', { pid, line: '/model' });
+    if (code !== 0) return code === 5 ? notEmpty() : T('console de la session inaccessible', 'session console unreachable');
+    let menu: ModelMenu | null = null;
+    for (const until = Date.now() + this.modelWaitMs; ;) {
+      menu = parseModelMenu(await read());
+      if (menu || Date.now() >= until) break;
+      await sleep(Math.min(300, this.modelStepMs || 1));
+    }
+    if (!menu) {
+      // Rien de reconnu : si un dialogue tient l'écran (plus d'invite), on le referme ; sinon rien n'a été ouvert.
+      if (promptDraft(await read(), null) === null) await keys('\u0001Esc');
+      const why = T('menu /model non reconnu à l\'écran', '/model menu not recognised on screen'); log({ code: 7, error: why }); return why;
+    }
+    if (!menu.sessionOnly) return giveUp(T('ce menu /model ne propose pas « cette session seulement » (version de Claude Code ?)', 'this /model menu has no "this session only" choice (Claude Code version?)'));
+    const target = pickModel(menu, want);
+    if (target < 0) return giveUp(T(`modèle « ${want} » absent du menu (${menu.opts.map((o) => o.label).join(', ')})`, `model "${want}" not in the menu (${menu.opts.map((o) => o.label).join(', ')})`));
+    const delta = target - menu.cur;
+    if (delta && !(await keys(...Array.from({ length: Math.abs(delta) }, () => (delta > 0 ? '\u0001Down' : '\u0001Up'))))) return giveUp(T('console de la session inaccessible', 'session console unreachable'));
+    const at = parseModelMenu(await read());
+    if (!at || at.cur !== target || at.opts[target]?.label !== menu.opts[target]!.label) return giveUp(T('le curseur du menu n\'est pas arrivé sur le modèle demandé', 'the menu cursor did not reach the requested model'));
+    await keys('s');
+    let scr = await read();
+    if (/Switch model\?/i.test(scr) && /❯\s*1\.\s+Yes/i.test(scr)) { await keys('\u0001Enter'); scr = await read(); }
+    const label = menu.opts[target]!.label;
+    if (promptDraft(scr, null) === null) { log({ code: 8, model: label }); return T(`« ${label} » choisi, mais un dialogue est encore ouvert : à finir dans le panneau « Dialogue » ou le terminal`, `"${label}" picked, but a dialog is still open: finish it in the "Dialog" panel or the terminal`); }
+    log({ code: 0, model: label });
+    this.d.setSeen([sess.sessionId]);
+    return null;
   }
 
   /** Invoke-Close : /exit si inactive (arrêt du process s'il ne sort pas en 10 s) ; sinon needForce, puis arrêt sur force. */
