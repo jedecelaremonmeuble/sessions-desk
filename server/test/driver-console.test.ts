@@ -39,16 +39,18 @@ describe('invite vide', () => {
   });
 
   test('send : le texte tapé tel quel, puis Entrée À PART (≥ 500 ms après, sinon lu comme un collage)', async () => {
-    const before = t.keys().length;
+    const before = t.keys().length; const t0 = Date.now();
     expect(await c.call('send', { pid: t.pid, line: 'bonjour é ✓ « x »' })).toBe(SendCode.Sent);
+    const took = Date.now() - t0;
     await sleep(200);
     const k = t.keys().slice(before);
     expect(k.map((e) => e.ch).join('')).toBe('bonjour é ✓ « x »\r');
     const enter = k.at(-1)!;
     expect(enter.vk).toBe(0x0d);
-    // Le pilote attend 500 ms ; la console de test horodate à la LECTURE, et sur un runner chargé elle lit le texte en
-    // retard puis l'Entrée aussitôt (écart mesuré jusqu'à ~350 ms en CI) : seuil bas, mais deux lectures bien séparées.
-    expect(enter.at - k.at(-2)!.at).toBeGreaterThanOrEqual(200);
+    // La pause se mesure du côté de l'ENVOI : le pilote attend 500 ms entre le texte et l'Entrée, l'appel dure donc au
+    // moins autant. L'écart entre les deux touches, lui, est horodaté à la LECTURE par la console de test : sur une
+    // machine chargée elle lit le texte en retard puis l'Entrée aussitôt (26 ms relevés en CI), il ne prouve rien.
+    expect(took).toBeGreaterThanOrEqual(450);
   });
 
   test('sendKeys : touches nommées (code virtuel, touche étendue) et texte, dans l\'ordre', async () => {
