@@ -99,6 +99,7 @@ try {
     Check 'figé : arrêté' (-not (Get-Process -Id $h.Id -ErrorAction SilentlyContinue))
     Check 'figé : vrai serveur relancé' (WaitUp)
     Check 'figé : arrêt tracé' ((Get-Content $log -Raw) -match "serveur figé ou muet \(pid $($h.Id)\)")
+    Check 'figé : issue de l''arrêt tracée (process parti, port rendu)' ((Get-Content $log -Raw) -match "pid $($h.Id) arrêté, port rendu en [\d.,]+ s")
     Stop-Process -Id ([int](Get-Content $pidFile -Raw).Trim()) -Force; Start-Sleep 1
 
     # 5. Port tenu par un AUTRE process (pas un serveur Node de ce port) : ni arrêté, ni relance.

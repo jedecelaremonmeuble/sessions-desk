@@ -21,7 +21,11 @@ param(
     [string]$Node = '',
     [string]$StateDir = $env:TEMP,
     [switch]$AllowWrite,
-    [switch]$Primary
+    [switch]$Primary,
+    # Attente maximale, après l'arrêt d'un serveur figé, que le process ait disparu ET rendu le port. Un process
+    # figé peut mettre longtemps à mourir et garder ses sockets pendant ce temps. La tâche est limitée à 1 min :
+    # cette attente doit y tenir avec le délai de grâce et les pings.
+    [int]$StopWaitSeconds = 20
 )
 
 if ($Port -eq 8765 -and -not $Primary) { throw 'Port 8765 = production : -Primary requis (posé par Switch-SessionsDesk.ps1 -To node).' }
@@ -76,12 +80,32 @@ foreach ($id in ($cands | Sort-Object -Unique)) {
     $p = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
     if (Test-OurServer $p) {
         Write-Log "serveur figé ou muet (pid $id) => arrêt"
-        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 2
+        # Le résultat de l'arrêt est tracé : un échec silencieux laissait croire à « un autre process » ensuite.
+        $stopErr = $null
+        try { Stop-Process -Id $id -Force -ErrorAction Stop } catch { $stopErr = $_.Exception.Message }
+        # Attendre que le process soit parti ET qu'il ne tienne plus le port : un process figé peut être déclaré
+        # introuvable alors que ses sockets d'écoute restent ouvertes, le temps que Windows le ferme.
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        do {
+            $alive = [bool](Get-Process -Id $id -ErrorAction SilentlyContinue)
+            $holds = (Test-Listening) -and (@(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Object OwningProcess) -contains $id)
+            if (-not $alive -and -not $holds) { break }
+            Start-Sleep -Milliseconds 500
+        } while ($sw.Elapsed.TotalSeconds -lt $StopWaitSeconds)
+        $took = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+        $why = if ($stopErr) { " (Stop-Process : $stopErr)" } else { '' }
+        if (-not $alive -and -not $holds) { Write-Log "pid $id arrêté, port rendu en $took s$why" }
+        elseif ($alive) { Write-Log "pid $id toujours vivant après $took s$why" }
+        else { Write-Log "pid $id parti mais tient encore le port $Port après $took s$why" }
     }
 }
 $holder = if (Test-Listening) { @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Object OwningProcess) | Select-Object -First 1 }
-if ($holder) { Write-Log "port $Port tenu par un autre process (pid $holder) : pas de relance"; return }
+if ($holder) {
+    # Distinguer un vrai autre process d'un serveur qui n'en finit pas de mourir : le diagnostic n'est pas le même.
+    if (Get-Process -Id $holder -ErrorAction SilentlyContinue) { Write-Log "port $Port tenu par un autre process (pid $holder) : pas de relance" }
+    else { Write-Log "port $Port encore tenu par le pid $holder, qui n'existe plus (fermeture en cours) : pas de relance, nouvel essai au prochain passage" }
+    return
+}
 
 # Garder la trace de l'erreur du serveur précédent avant qu'elle soit écrasée.
 if ((Test-Path $errLog) -and (Get-Item $errLog).Length -gt 0) {
