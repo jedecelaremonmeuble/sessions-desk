@@ -3144,6 +3144,24 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'l') { launchMode ? closeLauncher() : openLauncher(); }
   else if (e.key === 'm') { chatsMode ? closeChats() : openChats(); }
 });
+// ── Copie à la sélection (comme le terminal de Claude Code) ──
+// Relâcher la souris sur une sélection non vide la copie dans le presse-papier : écran du terminal, conversation,
+// derniers prompts, n'importe quel texte de la page. Pas dans un champ de saisie (on y sélectionne pour corriger).
+// Les lignes de l'écran du terminal sont complétées d'espaces jusqu'à la largeur de la console : on les retire.
+function selectionToCopy(text) {
+  const t = String(text == null ? '' : text).replace(/\r\n?/g, '\n').replace(/[ \t\u00a0]+$/gm, '');
+  return t.trim() ? t.replace(/^\n+|\n+$/g, '') : '';
+}
+document.addEventListener('mouseup', e => {
+  if (e.button !== 0) return;
+  const a = document.activeElement;
+  if (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(button|checkbox|radio)$/.test(a.type)))) return;
+  setTimeout(() => {                                       // après le double/triple-clic : la sélection est alors complète
+    const sel = getSelection(), text = sel && !sel.isCollapsed ? selectionToCopy(sel.toString()) : '';
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => say('copié : ' + plural(text.split('\n').length, 'ligne', 'lignes') + ' · ' + text.length.toLocaleString('fr-FR') + ' caractères'), () => say('copie refusée par le navigateur'));
+  }, 0);
+});
 $('q').addEventListener('input', () => { renderList(); scheduleFind(); });
 $('bell').onclick = () => { localStorage.setItem('cc.notifSeen', String(Date.now())); select(null); setPane(true); $('main').scrollTop = 0; };
 $('mback').onclick = () => { if (selected) select(null); else if (launchMode) closeLauncher(); else if (chatsMode) closeChats(); else if (boardMode) closeBoard(); else if (newMode) closeNew(); else if (bcMode) closeBc(); else setPane(false); };
