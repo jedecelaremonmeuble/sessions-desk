@@ -4,6 +4,10 @@ A local dashboard for people who run many [Claude Code](https://claude.com/claud
 Windows machine. It lists every open session, shows which ones are working, waiting for you or finished, lets you
 read their screen and conversation, and lets you answer them — from one browser tab, or from your phone.
 
+![Sessions Desk: one session waiting on a permission dialog, one finished with its pull request, one at work](docs/demo.gif)
+
+<sub>Recorded on the demo profile (`npm run demo`, made-up sessions). The interface is in French for now.</sub>
+
 > **Status: shared as-is.** This is a tool one team built for its own daily use and published in the hope it is
 > useful. There is no support and no compatibility promise. Issues are welcome; they may not get an answer.
 >
@@ -173,6 +177,19 @@ cd server
 npm run typecheck
 npm test          # builds the driver, then runs the tests against throw-away test consoles
 ```
+
+### Try it without touching your sessions
+
+```powershell
+cd server
+npm run build:driver   # once
+npm run demo           # http://localhost:8851/ — Ctrl+C stops it and removes the demo folder
+```
+
+The demo runs the server on a throw-away profile with five made-up sessions (one waiting on a permission dialog,
+one finished with a pull request, two at work, one idle) and a closed one to reopen or search for. Nothing of your
+real `~/.claude` is read or written. `--root C:\some\empty\folder` puts the demo files there instead of the temp
+folder, `--port` changes the port.
 
 Tests never write to a real session: they open their own test consoles. Source comments, test names and the
 interface are in French.
