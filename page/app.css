@@ -67,7 +67,7 @@ body.ro .twaits .twb { display:none; }
 .row-s.closed .t, .fhit.closed .ft > span:nth-child(2) { font-style:italic; color:var(--mute); }
 .tag.cl { color:var(--mute); font-style:normal; } .tag.hid { color:var(--ask); font-style:normal; }
 .tag.drift { color:var(--mute); font-style:normal; font-weight:normal; }
-.banner { margin:14px 0 4px; padding:10px 14px; border:1px dashed var(--line); border-radius:8px; color:var(--mute); }
+.banner { margin:14px 0 4px; padding:10px 14px; border:1px dashed var(--line); border-radius:8px; color:var(--mute); } .banner.delivering { border-style:solid; color:var(--ink); margin:0 0 10px; }
 .grp a.lnk { text-transform:none; letter-spacing:0; font-weight:400; }
 .sendbox { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .sendbox input, .sendbox textarea { flex:1; min-width:240px; padding:8px 12px; font:inherit; color:var(--ink); background:var(--card); border:1px solid var(--line); border-radius:6px; }

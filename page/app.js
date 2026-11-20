@@ -750,7 +750,7 @@ function renderChats() {
 // ── Lanceur (🤖) : supervision des claude -p du diagnostic automatique — santé, runs en cours, tickets qui attendent,
 // runs récents par phase avec leurs fichiers (texte brut / captures) et la conversation à rouvrir. Rafraîchi toutes les 10 s. ──
 let launchMode = false, launchData = null, launchHours = 48, launchTimer = null, launchView = null, launchViewText = null, launchFilter = '';
-const STAGE_FR = { 'pr-awaiting-approval':'PR en attente de validation', 'deploying':'en déploiement', 'dev-failed':'dev en échec', 'diagnosis-held':'diagnostic posé',
+const STAGE_FR = { 'pr-awaiting-approval':'PR en attente de validation', 'delivering':'livraison en cours', 'deploying':'en déploiement', 'dev-failed':'dev en échec', 'diagnosis-held':'diagnostic posé',
   'in-production':'en production', 'diagnosis-skipped':'diagnostic écarté', 'dev-abandoned':'dev abandonné', 'pr-closed':'PR fermée' };
 const PHASE_FR = { diagnostic:'diagnostic', go:'go', dev:'dev', recette:'recette', relecture:'relecture', reprise:'reprise', merge:'merge' };
 function openLauncher() { if (launcherOff()) return; findMode = false; newMode = false; bcMode = false; boardMode = false; chatsMode = false; selected = null; sessionStorage.removeItem('cc.sel'); launchMode = true; setPane(true);
@@ -1281,6 +1281,15 @@ function renderRunDetail(it, force) {
     if (it.sessionId) { body.append(el('h2', null, 'Conversation complète'), convPane()); applyConvView(it); }
     else body.append(el('div', 'empty', it.scripted ? 'Étape scriptée du lanceur : aucune session Claude, donc pas de conversation (voir ses fichiers).' : 'Conversation introuvable : identifiant de session inconnu pour ce run.'));
   }
+  // L'étape de la demande change sans changement de run (ordre pris, livraison démarrée) : le corps n'est pas reconstruit,
+  // le bloc « Piloter » doit suivre quand même — sinon « Livrer la PR » reste offert alors que la livraison tourne.
+  // Jamais sous les doigts : ni ordre en cours, ni saisie ; un formulaire ouvert ne cède qu'à la livraison.
+  { const w = it.wait || deliveringWait(it), stg = w ? w.stage : null, ob = $('orders');
+    const sig = stg + '|' + (stg === 'delivering' ? Math.floor(Date.now() / 60000) : '');
+    if (ob && orderUi.key === it.key && orderUi.sig !== sig && !orderUi.busy && !ob.contains(document.activeElement) && (!orderUi.open || stg === 'delivering')) {
+      const first = orderUi.sig === undefined; orderUi.sig = sig;
+      if (!first) { if (stg === 'delivering') orderUi.open = null; renderOrders(it); }
+    } }
   const head = $('head'); head.replaceChildren(); head.className = it.look;
   head.append(el('div', 'dtitle', it.title));
   const chip = el('span', 'chip'); chip.append(el('span', 'dot'), (r.running ? 'travaille · depuis ' + ago(Date.now() - r.at) : (it.outcome || 'terminé') + ' · il y a ' + ago(Date.now() - it.since)));
@@ -1365,7 +1374,8 @@ function runBanner(running, conv) {
 // runOrders est PURE (testée par sessions-dashboard-tests.ps1) : les gestes PROPOSÉS selon la phase du run et l'étape de
 // la demande — un filtre de lisibilité, pas une garde (le lanceur refuse ce qui n'a pas lieu d'être).
 function runOrders(phase, stage, pr) {
-  if (stage === 'deploying' || stage === 'in-production') return ['diagnostic', 'suite', 'relance', 'reveil'].includes(phase) ? ['verdict'] : [];
+  // Livraison demandée ou en cours : « Livrer la PR » est déjà pris — le reproposer faisait croire que le clic était perdu.
+  if (stage === 'delivering' || stage === 'deploying' || stage === 'in-production') return ['diagnostic', 'suite', 'relance', 'reveil'].includes(phase) ? ['verdict'] : [];
   // Étape de livraison (merge, production, doc) sans attente en cours : la demande est livrée ou en train de l'être —
   // un « go » n'a plus de sens (il proposait de relancer un dev sur un correctif déjà en production).
   if (!stage && ['merge', 'production', 'doc'].includes(phase)) return [];
@@ -1374,6 +1384,15 @@ function runOrders(phase, stage, pr) {
   const o = prSide ? ['merge', 'review', 'recette-skip', 'rework'] : ['go'];
   if (['diagnostic', 'suite', 'relance', 'reveil'].includes(phase)) o.push('verdict');
   return o;
+}
+// Livraison en cours (étape `delivering`) : ce que le bloc « Piloter » dit À LA PLACE des boutons de livraison. PURE.
+// since = moment où le lanceur a enregistré la demande ; mergeAt = début de son run de livraison, s'il a démarré.
+function deliveringWait(it) { const w = ((it.runs || []).find(x => x.wait) || {}).wait; return w && w.stage === 'delivering' ? w : null; }
+function deliveringNote(stage, since, mergeAt, now) {
+  if (stage !== 'delivering') return null;
+  const min = t => Math.max(0, Math.round((now - t) / 60000));
+  const head = '🚀 Livraison ' + (since ? 'demandée à ' + hhmm(since) + ' — ' : '') + (mergeAt ? 'en cours depuis ' + min(mergeAt) + ' min' : 'le lanceur la prend à sa prochaine passe');
+  return head + '. Rebase sur master, contrôles rejoués (20 à 40 min), puis squash-merge : rien à refaire ici, l’ordre est pris.';
 }
 // ── Décision de la Tech (carte ✅ posée par le lanceur sous sa dernière note, `techDecision` de son state.json) :
 // tranchée ICI comme sur la carte. decisionForm et decideBody sont PURES ; le
@@ -1610,14 +1629,23 @@ function renderOrders(it) {
   const r = it.run, hd = String(r.hd);
   if (orderUi.key !== it.key) orderUi = { key: it.key, open: null, text: '', busy: false, result: null, diff: null };
   box.replaceChildren();
+  // L'attente est portée par le DERNIER run de la demande : un run plus ancien choisi dans la frise la lit chez lui —
+  // pour la livraison seulement (ses boutons y seraient tout aussi trompeurs).
+  const wait = it.wait || deliveringWait(it);
+  const stage = wait ? wait.stage : null, pr = it.pr;
+  if (stage === 'delivering') {
+    const mr = (it.runs || []).map(x => x.run).filter(x => x.phase === 'merge' && (!wait.since || x.at >= wait.since - 60000)).sort((a, b) => b.at - a.at)[0];
+    const note = el('div', 'banner delivering', deliveringNote(stage, wait.since, mr ? mr.at : null, Date.now()));
+    if (mr && mr.dir !== r.dir) { const b = el('button', 'quick', 'Voir le run de livraison'); b.onclick = () => { const head = (it.runs.find(i => i.run.running) || it.runs[0]).run.dir; if (mr.dir === head) runPick.delete(it.key); else runPick.set(it.key, mr.dir); runFile = null; renderDetail(true); }; note.append(' ', b); }
+    box.append(note);
+  }
   if (r.running) return;
-  const stage = it.wait ? it.wait.stage : null, pr = it.pr;
   // Cartes de questions (jeton rangé) : elles portent AUSSI la décision ✅ — l'ancien formulaire ne sert plus que sans elles.
   const cards = cardsFor(hd);
   if (cards.length) refreshCards(it, hd);
   const dec = cardsOn() ? null : decisionOf(hd);
   // Une décision en attente remplace le go nu : « Lancer » de la carte part avec ses choix et laisse la trace.
-  const list = deliveryOrders(runOrders(r.phase, stage, pr).filter(o => !((dec || cards.some(c => c.kind === 'validation')) && o === 'go')), it.wait ? it.wait.refusalKind : null);
+  const list = deliveryOrders(runOrders(r.phase, stage, pr).filter(o => !((dec || cards.some(c => c.kind === 'validation')) && o === 'go')), wait ? wait.refusalKind : null);
   const noToken = !!(runData && runData.cardsToken === 'absent' && (r.files || []).some(f => f.name === 'questions.json'));
   if (!list.length && !dec && !cards.length && !noToken) return;
   box.append(el('h2', null, 'Piloter HD-' + hd));
