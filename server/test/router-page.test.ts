@@ -68,3 +68,18 @@ describe('navStep', () => {
     expect(navStep(st(1, '?sel=a'), ['', '?sel=a'], '', true)).toEqual({ op: 'replace', idx: 1 });
   });
 });
+
+// Garde-fou : retirer NARROW avec l'ancien historique du téléphone avait fait lever renderDetail (écran du terminal
+// resté sur « … », carte de survol muette). Toute requête média lue (X.matches) doit être déclarée.
+export function undeclaredMediaQueries(src: string): string[] {
+  const used = new Set([...src.matchAll(/\b([A-Z][A-Z_]+)\.matches\b/g)].map(m => m[1] as string));
+  return [...used].filter(n => !new RegExp(`[\\s,]${n} = matchMedia\\(`).test(src));   // « const A = …, B = matchMedia(…) » compris
+}
+describe('requêtes média de la page', () => {
+  test('toute requête lue (X.matches) est déclarée', () => {
+    expect(undeclaredMediaQueries(js)).toEqual([]);
+  });
+  test('le garde-fou voit une requête non déclarée', () => {
+    expect(undeclaredMediaQueries('\nconst A = matchMedia(\'x\');\nA.matches; NARROW.matches;')).toEqual(['NARROW']);
+  });
+});
