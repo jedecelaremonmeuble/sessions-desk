@@ -2542,6 +2542,11 @@ function slashRender(inp, ctx) {
   if (st.items.length > items.length) box.append(el('div', 'snote', T('… ' + (st.items.length - items.length) + ' de plus : précise le nom', '… ' + (st.items.length - items.length) + ' more: type more of the name')));
   if (st.cmd && !st.typing) { const r = el('div', 'srow info'); r.append(el('span', 'sn', st.cmd.name), el('span', 'sa', st.cmd.args || ''), el('span', 'sd', st.cmd.desc || '')); box.append(r); }
   if (st.cmd && st.cmd.forms.length && !st.args) for (const f of st.cmd.forms) { const b = el('button', 'quick', f); b.title = T('Sans menu dans le terminal', 'No menu in the terminal'); b.onmousedown = e => { e.preventDefault(); inp.value = f; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus(); }; box.append(b); }
+  // /model : le choix qui s'arrête à la session, modèle par modèle (le nom tapé en argument, lui, change le défaut).
+  if (st.cmd && st.cmd.name === '/model' && !st.args && c.it) for (const e of offeredModels()) {
+    const b = el('button', 'quick', T(e.label + ' · cette session', e.label + ' · this session')); b.title = MODEL_HINT();
+    b.onmousedown = ev => { ev.preventDefault(); inp.value = ''; inp.dispatchEvent(new Event('input', { bubbles: true })); setSessionModel(c.it, e.match, e.label); }; box.append(b);
+  }
   for (const n of slashNotes(st, c.busy, c.many)) box.append(el('div', 'snote', '⚠ ' + n));
   box.hidden = !box.childNodes.length;
   const cur = box.querySelector('.srow.sel'); if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
@@ -2587,6 +2592,28 @@ async function sendShortcut(it, command) {
     say(r.error ? T('non envoyé : ', 'not sent: ') + r.error : T(command + (it.status === 'busy' ? ' mis en file pour « ' : ' envoyé à « ') + label(it) + ' »', command + (it.status === 'busy' ? ' queued for "' : ' sent to "') + label(it) + '"'));
   } catch { say(T('échec de la demande', 'request failed')); }
   sending = false; tick();
+}
+// MODÈLE POUR CETTE SESSION SEULEMENT. « /model <nom> » change aussi le réglage par défaut des prochaines sessions ;
+// le serveur rejoue donc le menu /model du terminal (curseur sur le modèle, touche « s ») en relisant l'écran à chaque
+// pas (/api/model). Proposés : les modèles de ui.models marqués `offer`, comme dans « Nouvelle session ».
+const offeredModels = () => (ui().models || []).filter(e => e.offer !== false);
+const MODEL_HINT = () => T('Change le modèle de CETTE session seulement : le réglage par défaut des prochaines sessions ne bouge pas. Session inactive requise ; la conversation est relue par le nouveau modèle (réponse suivante plus lente).', 'Changes the model of THIS session only: the default for future sessions is untouched. The session must be idle; the conversation is re-read by the new model (slower next answer).');
+async function setSessionModel(it, match, name) {
+  if (!it || it.kind !== 'open' || sending) return;
+  if (link.down) return say(T('serveur injoignable', 'server unreachable'));
+  sending = true; say(T('« ' + label(it) + ' » : passage sur ' + name + '…', '"' + label(it) + '": switching to ' + name + '…'));
+  try {
+    const r = await (await fetch('/api/model?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ model: match }) })).json();
+    say(r.error ? T('modèle non changé : ', 'model not changed: ') + r.error : T('« ' + label(it) + ' » passe sur ' + name + ' — cette session seulement', '"' + label(it) + '" now uses ' + name + ' — this session only'));
+  } catch { say(T('échec de la demande', 'request failed')); }
+  sending = false; tick(); setTimeout(refreshScreen, 400);
+}
+function modelPicker(live) {
+  const s = el('select', 'quick'); s.title = MODEL_HINT();
+  const first = el('option', null, T('Modèle (cette session)…', 'Model (this session)…')); first.value = ''; s.append(first);
+  for (const e of offeredModels()) { const o = el('option', null, e.label); o.value = e.match; s.append(o); }
+  s.onchange = () => { const o = s.selectedOptions[0], v = s.value; s.value = ''; if (v) setSessionModel(live(), v, o.textContent); };
+  return s;
 }
 async function sendReply(force = false) {
   const it = selected && byKey(selected), inp = $('sendtext');
@@ -2993,8 +3020,8 @@ function renderDetail(force) {
       for (const q of ['go', T('oui', 'yes'), T('non', 'no'), 'continue']) { const b = el('button', 'quick', q); b.title = T('Pré-remplit la réponse (n\'envoie pas)', 'Prefills the reply (does not send)'); b.onclick = () => { inp.value = q; growArea(inp); inp.focus(); }; box.append(b); }
       // Commandes « / » : menu sous la zone, et boutons de raccourci (une commande toute faite, en un clic).
       const live = () => byKey(inp.dataset.key) || it;
-      slashAttach(inp, () => ({ pid: live().pid, busy: live().status === 'busy', many: false }));
-      const sc = el('span', 'shortcuts'); box.append(sc); shortcutBar(sc, it.pid, c => sendShortcut(live(), c));
+      slashAttach(inp, () => ({ pid: live().pid, busy: live().status === 'busy', many: false, it: live() }));
+      const sc = el('span', 'shortcuts'); box.append(sc, modelPicker(live)); shortcutBar(sc, it.pid, c => sendShortcut(live(), c));
       const hint = el('div', 'hint'); hint.id = 'sendhint'; box.append(attachBar('reply:' + it.key), hint); body.append(box);
       if (inp.value) growArea(inp);   // brouillon repris : la zone reprend sa hauteur
     }

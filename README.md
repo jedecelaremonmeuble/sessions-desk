@@ -23,6 +23,8 @@ read their screen and conversation, and lets you answer them — from one browse
 - **Slash commands** — type `/` in the reply box for the menu of the session’s commands (built-in, your skills and
   commands, the project’s, enabled plugins), with a warning for those that open a menu, cannot be undone or change
   a lasting setting. A mistyped command is refused instead of running its closest match.
+- **Model for one session** — switch the model of a running session without touching the default for the next
+  ones: the server drives the `/model` menu of the terminal and picks "this session only".
 - **Start, fork, reopen, close** — new session in a folder or in a fresh git worktree, a fork of an existing
   session, reopen a closed one, close the ones whose work is merged.
 - **Find** — full-text search across conversations, favourites, hide, tags.
