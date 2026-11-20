@@ -47,9 +47,9 @@ describe('garde : noms propres et exceptions', () => {
     expect(() => parseAllow('server/x.ts\tmotif')).toThrow(/raison/);
   });
 
-  test('périmètre privé : le serveur historique et l\'étiqueteur, pas la page', () => {
+  test('périmètre privé : le serveur historique seul, ni la page ni l\'étiqueteur', () => {
     expect(isPrivate('legacy/sessions-dashboard.ps1')).toBe(true);
-    expect(isPrivate('server/src/tagger.ts')).toBe(true);
+    expect(isPrivate('server/src/tagger.ts')).toBe(false);
     expect(isPrivate('legacy/sessions-dashboard-page/app.js')).toBe(false);
     expect(isPrivate('server/src/http.ts')).toBe(false);
   });

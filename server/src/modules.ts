@@ -219,11 +219,26 @@ export function claudeArgsOk(v: unknown): string | null {
 export const parseClaudeArgs = (raw: unknown): string => claudeArgsOk(obj(raw)?.claudeArgs) ?? '';
 
 /** Fichier de configuration du poste, lu une fois : `modules`, `ui` et `claudeArgs`. */
-export interface Settings { modules: Modules; ui: UiConfig; claudeArgs: string; delays: Delays; tailscaleExe?: string }
+/** Vocabulaire des axes fermés des tags (domaines, outils) : section `tagger` (domains, tools[].v). « Autre » n'en est pas. */
+export interface TagVocab { domaines: string[]; outils: string[] }
+export function parseTagVocab(raw: unknown): TagVocab {
+  const t = obj(obj(raw)?.tagger); if (!t) return { domaines: [], outils: [] };
+  const domaines = Array.isArray(t.domains) ? t.domains.filter((x): x is string => typeof x === 'string' && x !== 'Autre') : [];
+  const outils = Array.isArray(t.tools) ? t.tools.map((r) => obj(r)?.v).filter((x): x is string => typeof x === 'string') : [];
+  return { domaines, outils };
+}
+
+export interface Settings { modules: Modules; ui: UiConfig; claudeArgs: string; delays: Delays; tailscaleExe?: string; tagVocab: TagVocab;
+  /** Fichier présent mais illisible (JSON invalide) : le message, avec la position. null : lu, ou absent. */
+  error: string | null }
 export function loadSettings(file: string, env: PathEnv): Settings {
+  const none = (error: string | null): Settings => ({ modules: { ...NO_MODULES }, ui: { ...NO_UI }, claudeArgs: '', delays: {}, tagVocab: { domaines: [], outils: [] }, error });
+  let text: string;
+  try { text = readFileSync(file, 'utf8'); } catch { return none(null); }   // absent : rien d'allumé, ce n'est pas une erreur
   let raw: unknown;
-  try { const text = readFileSync(file, 'utf8'); raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch { return { modules: { ...NO_MODULES }, ui: { ...NO_UI }, claudeArgs: '', delays: {} }; }
+  // Illisible : tout reste éteint, mais on le DIT (un seul fichier porte tous les modules : une virgule de trop les éteint tous).
+  try { raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch (e) { return none(`${file} : ${(e as Error).message}`); }
   const ts = parseTailscale(raw, env);
-  return { modules: parseModules(raw, env), ui: parseUi(raw, env), claudeArgs: parseClaudeArgs(raw), delays: parseDelays(raw), ...(ts !== undefined ? { tailscaleExe: ts } : {}) };
+  return { modules: parseModules(raw, env), ui: parseUi(raw, env), claudeArgs: parseClaudeArgs(raw), delays: parseDelays(raw), tagVocab: parseTagVocab(raw), error: null, ...(ts !== undefined ? { tailscaleExe: ts } : {}) };
 }
 export const loadModules = (file: string, env: PathEnv): Modules => loadSettings(file, env).modules;

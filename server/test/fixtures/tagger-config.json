@@ -1,0 +1,332 @@
+{
+  "modules": {
+    "tickets": {
+      "pattern": "HD-\\d{6}"
+    }
+  },
+  "tagger": {
+    "domains": [
+      "Tickets & vues",
+      "BDC & paiement",
+      "Téléphonie",
+      "Acquisition & PRP",
+      "RDV & agendas",
+      "Fiche client",
+      "Macros & emails",
+      "Mailing",
+      "Compta",
+      "DP",
+      "OCR",
+      "Prestige",
+      "Partenaires",
+      "Immatriculation",
+      "IA & assistant",
+      "Autre"
+    ],
+    "tools": [
+      {
+        "v": "lanceur",
+        "re": [
+          "^acme_app/backend/scripts/(autodiagnostic|memoryhousekeeping)/"
+        ]
+      },
+      {
+        "v": "sessions-desk",
+        "re": [
+          "^sessions-desk[^/]*/",
+          "^claude-scripts/(sessions-dashboard|focus-session|restart-idle-sessions)"
+        ]
+      },
+      {
+        "v": "portail-partenaires",
+        "re": [
+          "^acme_app/frontend-partner/",
+          "^acme_app/backend/partnerapi/"
+        ]
+      },
+      {
+        "v": "formations",
+        "re": [
+          "^acme_app/frontend-formations/",
+          "^acme_app/backend/formationsapi/"
+        ]
+      },
+      {
+        "v": "gestion-locative",
+        "re": [
+          "^acme_app/frontend-rental/",
+          "^acme_app/backend/[a-z.]*rental[a-z.]*/"
+        ]
+      },
+      {
+        "v": "espace-client",
+        "re": [
+          "^acme_app/frontend-client/",
+          "^acme_app/backend/clientapi/"
+        ]
+      },
+      {
+        "v": "contact-center",
+        "re": [
+          "^twilio-contact-center/"
+        ]
+      },
+      {
+        "v": "temporal",
+        "re": [
+          "^acme_app/backend/temporalworker[^/]*/"
+        ]
+      },
+      {
+        "v": "function",
+        "re": [
+          "^acme_app/backend/(function|function\\.dataloghub|nodefunction|pythonfunction)/"
+        ]
+      },
+      {
+        "v": "mcp",
+        "re": [
+          "^acme_app/backend/api/mcp/",
+          "^acme_app/backend/application/mcp/"
+        ]
+      },
+      {
+        "v": "extension-inpi",
+        "re": [
+          "^inpi-assistant-extension/"
+        ]
+      },
+      {
+        "v": "cms",
+        "re": [
+          "^cms/"
+        ]
+      },
+      {
+        "v": "metabase",
+        "re": [
+          "^acme_app/backend/scripts/metabase/"
+        ]
+      },
+      {
+        "v": "infra",
+        "re": [
+          "^devops/",
+          "^\\.github/",
+          "^acme_app/backend/devops/",
+          "^iac/",
+          "/iac/"
+        ]
+      },
+      {
+        "v": "webapp",
+        "re": [
+          "^acme_app/frontend/",
+          "^acme_app/backend/(api|application|domain|dal|core|services|services\\.shared|dependencyinjection|testsuites)/"
+        ]
+      }
+    ],
+    "topics": [
+      {
+        "v": "Téléphonie",
+        "re": [
+          "incomingcallrouting",
+          "/twilio",
+          "/calls?/",
+          "/sms",
+          "voicemaildrop",
+          "transcription",
+          "contact-center",
+          "phoneheader",
+          "softphone",
+          "telephony",
+          "callcsat",
+          "power-?dial",
+          "speechsynthesis"
+        ]
+      },
+      {
+        "v": "Tickets & vues",
+        "re": [
+          "/tickets?/",
+          "ticket[a-z]*\\.(cs|ts|tsx|md)$",
+          "entityviews",
+          "query-?builder",
+          "/typesense"
+        ]
+      },
+      {
+        "v": "Macros & emails",
+        "re": [
+          "/macros?/",
+          "/email/",
+          "messagemails",
+          "messagetemplates",
+          "maildrafts",
+          "monitoredmailbox",
+          "/mjml",
+          "quickphrases",
+          "smartcompose",
+          "/notifications/"
+        ]
+      },
+      {
+        "v": "Mailing",
+        "re": [
+          "campagne",
+          "emailtracking",
+          "/mailing"
+        ]
+      },
+      {
+        "v": "BDC & paiement",
+        "re": [
+          "/payments?/",
+          "stripe",
+          "bdcmodeles",
+          "boucle-?bdc",
+          "promocodes",
+          "checkout",
+          "blackfriday",
+          "/bdc"
+        ]
+      },
+      {
+        "v": "Acquisition & PRP",
+        "re": [
+          "googleads",
+          "/prospect",
+          "referrals",
+          "parrainage",
+          "/onboarding/",
+          "webinar",
+          "commercialoperations"
+        ]
+      },
+      {
+        "v": "RDV & agendas",
+        "re": [
+          "appointment",
+          "/agenda",
+          "calendar"
+        ]
+      },
+      {
+        "v": "Fiche client",
+        "re": [
+          "/clients/",
+          "/contacts/",
+          "/fields/",
+          "computedfields",
+          "clientjourney",
+          "bulkclientupdates",
+          "clientportal",
+          "^acme_app/frontend-client/"
+        ]
+      },
+      {
+        "v": "Compta",
+        "re": [
+          "compta",
+          "anneefiscale",
+          "einvoicing",
+          "regimereel",
+          "lettremission",
+          "liasse"
+        ]
+      },
+      {
+        "v": "DP",
+        "re": [
+          "dossierpermanent",
+          "/dp[a-z]*/",
+          "completude"
+        ]
+      },
+      {
+        "v": "OCR",
+        "re": [
+          "/ocr",
+          "documentintelligence",
+          "customextraction"
+        ]
+      },
+      {
+        "v": "Prestige",
+        "re": [
+          "prestige"
+        ]
+      },
+      {
+        "v": "Partenaires",
+        "re": [
+          "partner"
+        ]
+      },
+      {
+        "v": "Immatriculation",
+        "re": [
+          "immatriculation",
+          "signature",
+          "inpi"
+        ]
+      },
+      {
+        "v": "IA & assistant",
+        "re": [
+          "/knowledge",
+          "/llm",
+          "dataassistant",
+          "rcanalysis"
+        ]
+      }
+    ],
+    "toolsWithoutTopic": [
+      "lanceur",
+      "sessions-desk",
+      "infra"
+    ],
+    "docs": {
+      "Telephony": "Téléphonie",
+      "Tickets": "Tickets & vues",
+      "PartnerPortal": "Partenaires",
+      "Immatriculation": "Immatriculation",
+      "KnowledgeAssistant": "IA & assistant",
+      "Clients": "Fiche client"
+    },
+    "roots": [
+      {
+        "re": "^.*(?:/work/acme|/\\.claude/worktrees/[^/]+|/work/(?:wt|acme-wt)[^/]*)/(.+)$"
+      },
+      {
+        "re": "/\\.claude/scripts/(.+)$",
+        "prefix": "claude-scripts/"
+      },
+      {
+        "re": "/appdata/local/acme-runner/(.+)$",
+        "prefix": "lanceur-data/"
+      }
+    ],
+    "worktrees": [
+      "/\\.claude/worktrees/([^/]+)",
+      "/work/wt-([^/]+)",
+      "/work/acme-wt-([^/]+)",
+      "/work/acme/sessions-desk-([^/]+)"
+    ],
+    "deepDirs": [
+      "acme_app/"
+    ],
+    "genericWords": [
+      "webapp",
+      "auto-runner"
+    ],
+    "context": "Acme, un logiciel de gestion",
+    "maxBytesPerPass": 3000000000,
+    "maxHdLookupsPerPass": 30,
+    "llmModel": "claude-haiku-5-5",
+    "llmBatch": 20,
+    "maxLlmBatchesPerPass": 5,
+    "llmQuotaMaxPct": 90,
+    "llmIdleMinutes": 15
+  }
+}

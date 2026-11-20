@@ -1,22 +1,39 @@
-// ÉTIQUETEUR DES SESSIONS (HD-987833, docs/SessionsDeskTags-Cadrage.md, lot 1 : règles seules).
+// ÉTIQUETEUR DES SESSIONS.
 // Lit les transcripts ~/.claude/projects/*/*.jsonl et écrit ~/.claude/state/session-tags/<sessionId>.json :
 //   { sessionId, rulesVersion, computedAt, transcriptLen, acc, hdPending, tags: [{ axis, v, src }] }
+// Règles : section `tagger` du fichier de configuration du poste (~/.claude/sessions-desk/config.json, ou --config,
+// ou SD_CONFIG) — rien de propre à un poste ou à une équipe n'est écrit ici. `rulesVersion` est une empreinte de
+// cette section : la modifier recalcule tous les tags.
 // Les serveurs (.ps1 et Node) ne font que LIRE `tags`. Ce fichier est autonome (aucun import local) : -Deploy le copie
 // tel quel dans ~/.claude/scripts/session-tagger/, la tâche planifiée « Claude - étiqueteur des sessions » le lance
 // toutes les 5 min (`node tagger.ts`). Lecture INCRÉMENTALE : `acc` garde ce qui a été relevé et l'octet où la lecture
 // s'est arrêtée ; un transcript qui grandit n'est relu que depuis là. Les règles s'appliquent à `acc` : changer les
-// motifs (rulesVersion) recalcule tout sans relire un seul transcript.
+// règles (empreinte rulesVersion) recalcule tout sans relire un seul transcript.
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export type Axis = 'origine' | 'domaine' | 'outil' | 'fonction' | 'hd';
 export interface Tag { axis: Axis; v: string; src: string }
 export interface Rule { v: string; re: string[] }
+/** Racine d'un dépôt dans un chemin absolu : `re` (sur le chemin en minuscules, séparateur « / ») capture en groupe 1
+ *  le chemin relatif, auquel s'ajoute `prefix` devant. */
+export interface Root { re: RegExp; prefix: string }
 export interface TaggerConfig {
-  rulesVersion: number; hdDomains: string[]; outils: Rule[]; domaines: Rule[]; claudeDocs: Record<string, string>;
+  rulesVersion: string; hdDomains: string[]; outils: Rule[]; domaines: Rule[]; claudeDocs: Record<string, string>;
   outilsSansDomaine?: string[]; hdApi: string; maxBytesPerPass: number; maxHdLookupsPerPass: number;
+  /** Chemins → dépôt (relPath) et → nom de worktree (worktreeOf, groupe 1), dans l'ordre. */
+  roots: Root[]; worktrees: RegExp[];
+  /** Motif des références de ticket (modules.tickets.pattern) ; '' : aucune. */
+  ticketPattern: string;
+  /** Préfixes de chemin relatif dont topDirs garde 4 niveaux (au lieu de 2) ; mots qui ne disent rien d'une fonctionnalité. */
+  deepDirs: string[]; genericWords: string[];
+  /** Ce sur quoi portent les sessions, en une ligne, pour le petit modèle (« un logiciel de gestion », …). */
+  context: string;
+  /** Relevé du quota (claude-usage.json du lanceur) : '' si inconnu. */
+  usageFile: string;
   /** Lot 2 : petit modèle pour la fonctionnalité. Lots de `llmBatch` sessions, au plus `maxLlmBatchesPerPass` appels par
    *  passe, aucun appel si le quota de la semaine atteint `llmQuotaMaxPct` %. */
   llmModel?: string; llmBatch?: number; maxLlmBatchesPerPass?: number; llmQuotaMaxPct?: number; llmIdleMinutes?: number;
@@ -41,41 +58,100 @@ export interface Acc {
 /** Version de la forme de `acc` : un fichier plus ancien est relu depuis le début (les champs manquants n'y sont pas). */
 export const ACC_VERSION = 2;
 export interface TagFile {
-  sessionId: string; rulesVersion: number; accVersion?: number; computedAt: number; transcriptLen: number; acc: Acc; hdPending: boolean;
+  sessionId: string; rulesVersion: number | string; accVersion?: number; computedAt: number; transcriptLen: number; acc: Acc; hdPending: boolean;
   llm?: LlmResult | null; tags: Tag[];
 }
 
 const MAX_FILES = 3000;
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep']);
-const HD_RE = /\bHD-(\d{6})\b/g;
+
+/** Section `tagger` absente : aucune règle, seuls les worktrees de Claude Code sont reconnus. */
+export const EMPTY_CONFIG: TaggerConfig = {
+  rulesVersion: '', hdDomains: [], outils: [], domaines: [], claudeDocs: {}, outilsSansDomaine: [], hdApi: '', maxBytesPerPass: 50 * 1024 * 1024,
+  maxHdLookupsPerPass: 20, roots: [{ re: /^.*\/\.claude\/worktrees\/[^/]+\/(.+)$/, prefix: '' }], worktrees: [/\/\.claude\/worktrees\/([^/]+)/],
+  ticketPattern: '', deepDirs: [], genericWords: [], context: 'un projet logiciel', usageFile: '',
+};
+/** Règles en service pour ce qui ne reçoit pas la configuration (lecture des lignes, chemins) : posées par runPass. */
+let active: TaggerConfig = EMPTY_CONFIG;
+let ticketRe: RegExp | null = null;
+let ticketSlugRe: RegExp | null = null;
+export function useConfig(cfg: TaggerConfig): void {
+  active = cfg;
+  ticketRe = cfg.ticketPattern ? new RegExp('\\b(?:' + cfg.ticketPattern + ')\\b', 'g') : null;
+  // Dans un nom de worktree, la référence s'écrit en minuscules, tiret facultatif (« hd-123456 » ou « hd123456 »).
+  ticketSlugRe = cfg.ticketPattern ? new RegExp('(^|-)(?:' + cfg.ticketPattern.toLowerCase().replace(/-/g, '-?') + ')(?=-|$)', 'g') : null;
+}
+
+const str = (v: unknown, d = ''): string => (typeof v === 'string' ? v : d);
+const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : d);
+const rules = (v: unknown): Rule[] => (Array.isArray(v) ? v.filter((r: any) => r && typeof r.v === 'string' && Array.isArray(r.re)).map((r: any) => ({ v: r.v, re: strs(r.re) })) : []);
+/** %VAR% (et ~) d'un chemin, comme le serveur (modules.ts, expandPath). */
+export function expandEnv(p: string, env: Record<string, string | undefined> = process.env): string {
+  return p.replace(/^~(?=[\\/]|$)/, env.USERPROFILE ?? env.HOME ?? '~').replace(/%([A-Za-z0-9_]+)%/g, (m, k: string) => env[k] ?? env[k.toUpperCase()] ?? m);
+}
+
+/** Configuration de l'étiqueteur tirée du fichier du poste : section `tagger`, plus le motif des tickets
+ *  (modules.tickets.pattern), le script de tickets et le dossier du lanceur (modules.launcher). Expression invalide ⇒
+ *  erreur (le fichier est à corriger, pas à ignorer). */
+export function taggerConfigFrom(raw: unknown, env: Record<string, string | undefined> = process.env): TaggerConfig {
+  const root = (raw && typeof raw === 'object' ? raw : {}) as Record<string, any>;
+  const t = (root.tagger && typeof root.tagger === 'object' ? root.tagger : null) as Record<string, any> | null;
+  const mods = (root.modules && typeof root.modules === 'object' ? root.modules : {}) as Record<string, any>;
+  const launcher = mods.launcher && typeof mods.launcher === 'object' ? mods.launcher : {};
+  const ticketPattern = str(mods.tickets?.pattern);
+  const launcherRoot = str(launcher.root) ? expandEnv(str(launcher.root), env) : '';
+  const base: TaggerConfig = { ...EMPTY_CONFIG, ticketPattern, hdApi: str(launcher.ticketApi) ? expandEnv(str(launcher.ticketApi), env) : '', usageFile: launcherRoot ? join(launcherRoot, 'claude-usage.json') : '' };
+  if (!t) return { ...base, rulesVersion: 'h:' + createHash('sha1').update(JSON.stringify([null, ticketPattern])).digest('hex').slice(0, 12) };
+  const rx = (x: string, what: string): RegExp => { try { return new RegExp(x); } catch (e) { throw new Error(`tagger.${what} : expression invalide « ${x} » (${(e as Error).message})`); } };
+  const roots: Root[] = Array.isArray(t.roots)
+    ? t.roots.filter((r: any) => r && typeof r.re === 'string').map((r: any) => ({ re: rx(r.re, 'roots'), prefix: str(r.prefix) }))
+    : base.roots;
+  const worktrees = Array.isArray(t.worktrees) ? strs(t.worktrees).map((x) => rx(x, 'worktrees')) : base.worktrees;
+  const cfg: TaggerConfig = {
+    ...base,
+    rulesVersion: 'h:' + createHash('sha1').update(JSON.stringify([t, ticketPattern])).digest('hex').slice(0, 12),
+    hdDomains: strs(t.domains), outils: rules(t.tools), domaines: rules(t.topics),
+    claudeDocs: t.docs && typeof t.docs === 'object' ? Object.fromEntries(Object.entries(t.docs).filter(([, v]) => typeof v === 'string')) as Record<string, string> : {},
+    outilsSansDomaine: strs(t.toolsWithoutTopic), roots, worktrees,
+    deepDirs: strs(t.deepDirs).map((d) => d.toLowerCase()), genericWords: strs(t.genericWords).map((w) => w.toLowerCase()),
+    context: str(t.context, base.context) || base.context,
+    maxBytesPerPass: num(t.maxBytesPerPass, base.maxBytesPerPass), maxHdLookupsPerPass: num(t.maxHdLookupsPerPass, base.maxHdLookupsPerPass),
+  };
+  for (const k of ['llmModel', 'llmBatch', 'maxLlmBatchesPerPass', 'llmQuotaMaxPct', 'llmIdleMinutes'] as const) {
+    const v = t[k]; if (k === 'llmModel' ? typeof v === 'string' && v : typeof v === 'number' && Number.isFinite(v)) (cfg as any)[k] = v;
+  }
+  for (const r of [...cfg.outils, ...cfg.domaines]) for (const x of r.re) rx(x, 'tools/topics');
+  return cfg;
+}
 
 export const newAcc = (): Acc => ({ offset: 0, cwd: null, entrypoint: null, branch: null, firstUser: false, hd: [], files: {}, kind: null, title: null, firstText: '', users: 0 });
 
 /** Chemin absolu → chemin relatif à la racine du dépôt (minuscules, « / »), ou null s'il ne dit rien du sujet
- *  (mémoire de Claude, %TEMP%, profil…). Worktrees : `.claude/worktrees/<nom>/`, `C:\Sources\wt-*`, `jd2m-wt*`. */
-export function relPath(p: string): string | null {
+ *  (mémoire de Claude, %TEMP%, profil…). Racines : `tagger.roots`, dans l'ordre ; un relatif sous `.claude/` ne compte pas. */
+export function relPath(p: string, cfg: TaggerConfig = active): string | null {
   const s = p.replace(/\\/g, '/').toLowerCase();
-  const m = /^.*(?:\/sources\/jd2m|\/\.claude\/worktrees\/[^/]+|\/sources\/(?:wt|jd2m-wt)[^/]*)\/(.+)$/.exec(s);
-  if (m && !m[1]!.startsWith('.claude/')) return m[1]!;
-  let i = s.indexOf('/.claude/scripts/'); if (i >= 0) return 'claude-scripts/' + s.slice(i + 17);
-  i = s.indexOf('/appdata/local/jd2m-auto-diagnostic/'); if (i >= 0) return 'lanceur-data/' + s.slice(i + 36);
+  for (const r of cfg.roots) {
+    const m = r.re.exec(s);
+    if (m && m[1] && !m[1].startsWith('.claude/')) return r.prefix + m[1];
+  }
   return null;
 }
 
-/** Nom du worktree d'un chemin absolu (`.claude/worktrees/<nom>/`, `C:\Sources\wt-<nom>`, `C:\Sources\jd2m\sessions-desk-<nom>`). */
-export function worktreeOf(p: string): string | null {
+/** Nom du worktree d'un chemin absolu : `tagger.worktrees`, dans l'ordre (groupe 1). */
+export function worktreeOf(p: string, cfg: TaggerConfig = active): string | null {
   const s = p.replace(/\\/g, '/').toLowerCase();
-  const m = /\/\.claude\/worktrees\/([^/]+)/.exec(s) ?? /\/sources\/wt-([^/]+)/.exec(s) ?? /\/sources\/jd2m-wt-([^/]+)/.exec(s)
-    ?? /\/sources\/jd2m\/sessions-desk-([^/]+)/.exec(s);
-  return m ? m[1]! : null;
+  for (const re of cfg.worktrees) { const m = re.exec(s); if (m && m[1]) return m[1]; }
+  return null;
 }
 
 /** Nom de worktree → fonctionnalité : sans ticket, lot ni suffixe de cadrage. null si rien de parlant ne reste. */
 export function featureSlug(wt: string): string | null {
   let s = wt.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
-  s = s.replace(/(^|-)hd-?\d{6}(?=-|$)/g, '').replace(/-(cadrage|lot-?\d+[a-z]?|recette|fix|hold|v\d+)(?=-|$)/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
-  if (!s || s.length < 3 || GENERIC.test(s)) return null;
+  if (ticketSlugRe) s = s.replace(ticketSlugRe, '');
+  s = s.replace(/-(cadrage|lot-?\d+[a-z]?|recette|fix|hold|v\d+)(?=-|$)/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (!s || s.length < 3 || isGeneric(s)) return null;
   return s.length > 40 ? s.slice(0, 40).replace(/-[^-]*$/, '') : s;
 }
 
@@ -116,7 +192,7 @@ export function feedLine(acc: Acc, line: string): void {
       acc.firstUser = true; acc.users = 1;
       acc.firstText = body.replace(/\s+/g, ' ').trim().slice(0, 2000);
       acc.kind = launchKind(body);
-      for (const m of body.slice(0, 8000).matchAll(HD_RE)) { const id = 'HD-' + m[1]; if (!acc.hd.includes(id) && acc.hd.length < 3) acc.hd.push(id); }
+      if (ticketRe) for (const m of body.slice(0, 8000).matchAll(ticketRe)) { const id = m[0]; if (!acc.hd.includes(id) && acc.hd.length < 3) acc.hd.push(id); }
     }
   }
   if (isTool && j.type === 'assistant' && Array.isArray(j.message?.content)) {
@@ -224,9 +300,11 @@ export function decide(acc: Acc, hdDomain: string | null, cfg: TaggerConfig, llm
 }
 
 /** Une fonctionnalité acceptable : kebab-case, 1 à 5 mots, 3 à 40 caractères. */
-export const isFeatureSlug = (v: unknown): v is string => typeof v === 'string' && v.length >= 3 && v.length <= 40 && /^[a-z0-9]+(-[a-z0-9]+){0,4}$/.test(v) && !GENERIC.test(v);
+export const isFeatureSlug = (v: unknown): v is string => typeof v === 'string' && v.length >= 3 && v.length <= 40 && /^[a-z0-9]+(-[a-z0-9]+){0,4}$/.test(v) && !isGeneric(v);
 /** Mots qui ne disent rien de la fonctionnalité (ou déjà dits par un autre axe : outil, origine). */
-const GENERIC = /^(master|main|tmp|test|tests|wt|auto-diagnostic|auto-dev|archive|fix|bug|bugs|front|back|api|server|serveur|docs|doc|feat|wip|spike|backend|frontend|session|sessions|lanceur|hubdesk|refactor|cadrage|recette|infra|demande|demande-sans-titre|demande-non-renseignee|sans-titre|non-renseigne|inconnu|divers|autre)$/;
+const GENERIC = /^(master|main|tmp|test|tests|wt|auto-dev|archive|fix|bug|bugs|front|back|api|server|serveur|docs|doc|feat|wip|spike|backend|frontend|session|sessions|lanceur|refactor|cadrage|recette|infra|demande|demande-sans-titre|demande-non-renseignee|sans-titre|non-renseigne|inconnu|divers|autre)$/;
+/** Mot vide : la liste commune, plus `tagger.genericWords` du poste (nom du produit, d'un outil…). */
+const isGeneric = (v: string): boolean => GENERIC.test(v) || active.genericWords.includes(v);
 
 /** Lit `path` depuis `acc.offset` (au plus `budget` octets), jusqu'au dernier saut de ligne complet. Rend les octets lus. */
 export function readFrom(path: string, acc: Acc, size: number, budget: number): number {
@@ -260,7 +338,7 @@ export function topDirs(acc: Acc): string[] {
   const w = new Map<string, number>(), r = new Map<string, number>();
   for (const [key, mode] of Object.entries(acc.files)) {
     const rel = key.split('\t')[0]!; const parts = rel.split('/');
-    const d = parts.slice(0, Math.min(parts.length - 1, rel.startsWith('jd2m_backoffice/') ? 4 : 2)).join('/');
+    const d = parts.slice(0, Math.min(parts.length - 1, active.deepDirs.some((p) => rel.startsWith(p)) ? 4 : 2)).join('/');
     if (d) (mode === 'w' ? w : r).set(d, ((mode === 'w' ? w : r).get(d) ?? 0) + 1);
   }
   return ranked(w.size ? w : r).slice(0, 12).map(([d]) => d);
@@ -269,7 +347,7 @@ export function topDirs(acc: Acc): string[] {
 /** La question posée au petit modèle pour un lot de sessions. */
 export function llmPrompt(items: LlmItem[], known: string[], cfg: TaggerConfig): string {
   return [
-    'Tu classes des sessions de travail d\'un développeur (Claude Code) sur HubDesk, le CRM interne de JD2M (location meublée).',
+    'Tu classes des sessions de travail d\'un développeur (Claude Code) sur ' + cfg.context + '.',
     'Pour CHAQUE session, propose :',
     '- "fonction" : 1 ou 2 identifiants de fonctionnalité en kebab-case, 1 à 4 mots, minuscules sans accents (ex. "power-dial", "bdc-relance", "tags-sessions"). RÉUTILISE en priorité un identifiant de la liste connue dès qu\'il désigne la même fonctionnalité ou une très proche (même écran, même flux, même chantier) ; n\'en crée un nouveau que si AUCUN ne convient. Le but est un vocabulaire court et stable pour retrouver les sessions d\'un même sujet. Chaque session se juge SEULE, sur son titre, sa demande et son message : ne recopie pas la réponse d\'une voisine. Pas de numéro de ticket, pas de mot vide ("fix", "bug", "session").',
     `- Session d'origine "lanceur-…" (diagnostic, développement, relecture, recette ou reprise AUTOMATIQUES d'une demande) : la fonctionnalité est celle de la DEMANDE (son titre), JAMAIS le processus du lanceur — pas de "auto-diag", "auto-dev", "relecture", "recette", "correctif", "reprise". Son message est surtout la consigne du lanceur : fie-toi à la demande. Si tu ne peux pas savoir la fonctionnalité, réponds "fonction": [] — JAMAIS un bouche-trou ("demande-sans-titre", "inconnu", "divers").`,
@@ -355,6 +433,7 @@ type HdEntry = { domain: string | null; title?: string | null; at: number };
  *  puis les sessions qui attendent une proposition du petit modèle la reçoivent, par lots. */
 export function runPass(o: PassOptions): PassResult {
   const now = o.now ?? Date.now();
+  useConfig(o.cfg);
   const res: PassResult = { sessions: 0, updated: 0, skipped: 0, bytes: 0, hdLookups: 0, pending: 0, purged: 0, budgetHit: false, llmCalls: 0, llmTagged: 0, llmFailed: 0, llmWaiting: 0 };
   mkdirSync(o.outDir, { recursive: true });
   const cachePath = join(o.outDir, '_hd-domains.json');
@@ -363,7 +442,7 @@ export function runPass(o: PassOptions): PassResult {
   let cacheDirty = false;
   // Une entrée sans `title` (lot 1) est relue pour avoir le titre de la demande, dans le budget de la passe.
   const hdOf = (hd: string): { info: HdInfo; pending: boolean } => {
-    const id = hd.slice(3); const e = hdCache[id];
+    const id = hd.replace(/^[^0-9]*/, '') || hd; const e = hdCache[id];
     const cached: HdInfo = { domain: e?.domain ?? null, title: e?.title ?? null };
     if (e && 'title' in e && now - e.at < (e.domain ? HD_TTL : HD_NULL_TTL)) return { info: cached, pending: false };
     if (res.hdLookups >= o.cfg.maxHdLookupsPerPass) return { info: cached, pending: !e };
@@ -479,11 +558,12 @@ export function runPass(o: PassOptions): PassResult {
     const vocab = JSON.stringify({ domaines: o.cfg.hdDomains.filter((d) => d !== 'Autre'), outils: o.cfg.outils.map((r) => r.v) });
     const vp = join(o.outDir, '_vocab.json'); let old = ''; try { old = readFileSync(vp, 'utf8'); } catch { /* premier passage */ }
     if (old !== vocab) { writeFileSync(vp + '.tmp', vocab); renameSync(vp + '.tmp', vp); }
-  } catch { /* facultatif : le serveur retombe sur le fichier de règles voisin */ }
+  } catch { /* facultatif : le serveur retombe sur la section tagger de son fichier de configuration */ }
   return res;
 }
 
-/** Domaine et titre HD par `hd_api.py ticket` du lanceur (jeton d'exploitation, lecture seule). */
+/** Domaine et titre d'un ticket par le script de tickets du lanceur (`python <ticketApi> ticket <id>`, lecture seule) :
+ *  JSON avec `title` et `internalRequest.domain`. */
 export function hdApiLookup(hdApi: string): (id: string) => HdInfo | null | undefined {
   return (id) => {
     try {
@@ -500,11 +580,20 @@ export function hdApiLookup(hdApi: string): (id: string) => HdInfo | null | unde
 }
 
 function main(argv: string[]): number {
-  const here = dirname(fileURLToPath(import.meta.url));
   const arg = (k: string): string | undefined => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
   const home = process.env.USERPROFILE ?? process.env.HOME ?? '';
-  const cfg = JSON.parse(readFileSync(arg('--config') ?? join(here, 'tagger-config.json'), 'utf8')) as TaggerConfig;
-  if (process.env.SD_TAGGER_HD_API) cfg.hdApi = process.env.SD_TAGGER_HD_API;
+  // Le fichier de configuration du poste, comme le serveur : --config, puis SD_CONFIG, puis ~/.claude/sessions-desk/config.json.
+  const file = arg('--config') ?? process.env.SD_CONFIG ?? join(home, '.claude', 'sessions-desk', 'config.json');
+  let raw: unknown = {};
+  if (existsSync(file)) {
+    const text = readFileSync(file, 'utf8');
+    try { raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch (e) {
+      console.error(`étiqueteur arrêté : ${file} est illisible (${(e as Error).message})`); return 1;
+    }
+  }
+  let cfg: TaggerConfig;
+  try { cfg = taggerConfigFrom(raw); } catch (e) { console.error(`étiqueteur arrêté : ${(e as Error).message} (${file})`); return 1; }
+  if (process.env.SD_TAGGER_TICKET_API) cfg.hdApi = process.env.SD_TAGGER_TICKET_API;
   const claude = join(home, '.claude');
   const outDir = arg('--out') ?? join(claude, 'state', 'session-tags');
   mkdirSync(outDir, { recursive: true });
@@ -517,10 +606,10 @@ function main(argv: string[]): number {
   writeFileSync(lock, String(process.pid));
   const t0 = Date.now();
   try {
-    const hdLookup = existsSync(cfg.hdApi) && !argv.includes('--no-hd') ? hdApiLookup(cfg.hdApi) : () => undefined;
+    const hdLookup = cfg.hdApi && existsSync(cfg.hdApi) && !argv.includes('--no-hd') ? hdApiLookup(cfg.hdApi) : () => undefined;
     // Petit modèle : ni en essai à blanc (--no-llm), ni quand le quota de la semaine atteint le seuil.
     const llmModel = cfg.llmModel ?? 'claude-haiku-5-5';
-    const quota = weeklyQuotaPct(join(process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local'), 'jd2m-auto-diagnostic', 'claude-usage.json'), llmModel);
+    const quota = cfg.usageFile ? weeklyQuotaPct(cfg.usageFile, llmModel) : null;
     const llmOff = argv.includes('--no-llm') ? 'désactivé' : quota !== null && quota >= (cfg.llmQuotaMaxPct ?? 90) ? `quota ${quota} %` : null;
     const exe = [join(home, '.local', 'bin', 'claude.exe'), join(home, '.local', 'bin', 'claude')].find((p) => existsSync(p)) ?? 'claude';
     const llm = llmOff ? undefined : claudeAsk(exe, llmModel);

@@ -59,9 +59,10 @@ function Register-HiddenNodeTask([string]$Name, [string]$Script, [int]$EveryMinu
     Write-Host "Tâche « $Name » créée (toutes les $EveryMinutes min)." -ForegroundColor Green
 }
 
-# Étiqueteur des sessions : fichier autonome et ses règles.
+# Étiqueteur des sessions : fichier autonome ; ses règles sont la section `tagger` du fichier de configuration du poste.
 $tTag = Join-Path $Target 'session-tagger'; $null = New-Item -ItemType Directory -Force $tTag
-foreach ($f in 'tagger.ts', 'tagger-config.json') { Copy-Item (Join-Path $src $f) (Join-Path $tTag $f) -Force }
+Copy-Item (Join-Path $src 'tagger.ts') (Join-Path $tTag 'tagger.ts') -Force
+Remove-Item (Join-Path $tTag 'tagger-config.json') -Force -ErrorAction SilentlyContinue   # ancien fichier de règles, plus lu
 Register-HiddenNodeTask 'Claude - étiqueteur des sessions' (Join-Path $tTag 'tagger.ts') 5 30 'Tags des sessions Claude Code (sessions-desk) : ~/.claude/state/session-tags'
 
 # Surveillant des réponses Teams : fichier autonome, hook ajouté une fois à ~/.claude/settings.json. La passe ne lit

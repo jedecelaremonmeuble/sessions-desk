@@ -122,6 +122,8 @@ function modelBadge(m, compact, extra) {
     + (extra ? '\n' + extra : '');
   return b;
 }
+// config.json illisible : tous les modules sont éteints — le dire en tête de la liste, avec la cause.
+function cfgErr(msg) { const e = $('cfgerr'); if (!e) return; e.hidden = !msg; if (msg) e.textContent = T('⚠ Fichier de configuration illisible : tout est éteint (lanceur, Teams, quota, tags). Corriger puis redémarrer le serveur. — ', '⚠ Configuration file unreadable: everything is off (launcher, Teams, quota, tags). Fix it, then restart the server. — ') + msg; }
 const short = p => { const s = p || '', pre = ui().pathPrefix || ''; return (pre && s.toLowerCase().startsWith(pre.toLowerCase()) ? s.slice(pre.length).replace(/^[\\/]+/, '') : s) || s; };
 const norm = t => (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 // Lien avec le serveur (voir tick) : déclaré tôt, post() et l'envoi le lisent.
@@ -3496,7 +3498,7 @@ async function tick() {
     ticking = false; return;
   }
   try {
-    data = srv; skew = data.now ? Date.now() - data.now : 0; adoptPostLanguage(data.ui && data.ui.language); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
+    data = srv; skew = data.now ? Date.now() - data.now : 0; adoptPostLanguage(data.ui && data.ui.language); cfgErr(data.configError); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
     if (linkUp(data.server)) return;
     renderList(); renderDetail(); refreshScreen(); refreshConv(); try { renderQuota(); } catch (e) { console.log('[sessions] quota :', e); }
     renderRelay(data.server && data.server.relay);

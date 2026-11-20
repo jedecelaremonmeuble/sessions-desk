@@ -442,3 +442,4 @@ body.ro .crow .cb button { display:none; }
 #newform .nf-seg button.pricey { color:var(--ask); font-weight:600; }
 #newform .nf-seg button.pricey.sel { background:var(--ask); color:#fff; }
 #newform .nf-cost { margin-top:6px; font-size:12px; color:var(--ask); }
+.cfgerr { margin:6px 0; padding:6px 10px; border:1px solid var(--waiting); border-radius:6px; color:var(--waiting); font-size:12px; word-break:break-word; }

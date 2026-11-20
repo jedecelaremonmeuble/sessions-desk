@@ -14,10 +14,10 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
 
-/** Dispensés du contrôle des références internes : le serveur PowerShell historique (non publié) et l'étiqueteur de
- *  tags, publié tel quel — ses règles décrivent le dépôt de l'équipe d'origine. La recherche de secrets (gitleaks),
+/** Dispensés du contrôle des références internes : le serveur PowerShell historique (non publié). Les règles de
+ *  l'étiqueteur vivent dans le fichier de configuration du poste, hors du dépôt. La recherche de secrets (gitleaks),
  *  elle, lit tout. */
-export const PRIVATE = [/^legacy\/(?!sessions-dashboard-page\/)/, /^server\/src\/tagger(\.ts|-config\.json)$/, /^server\/test\/tagger\.test\.ts$/];
+export const PRIVATE = [/^legacy\/(?!sessions-dashboard-page\/)/];
 /** Jamais lus : générés, ou le garde lui-même (il porte les motifs). */
 const SKIP = [/^server\/package-lock\.json$/, /^server\/scripts\/guard(\.mjs|-allow\.txt)$/, /^server\/test\/guard\.test\.ts$/, /\.(png|ico|jpg|gif|exe|dll)$/i];
 

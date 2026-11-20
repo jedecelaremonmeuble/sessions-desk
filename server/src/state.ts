@@ -113,20 +113,15 @@ export function checkTag(id: string, axis: string, v: string, vocab: { domaines:
   return null;
 }
 /** Valeurs admises pour les axes fermés. L'étiqueteur n'est pas une pièce du serveur : il publie son vocabulaire dans
- *  `<tags>/_vocab.json` ({ domaines: [...], outils: [...] }) à côté des tags qu'il écrit. À défaut — tant que son fichier
- *  de règles vit encore à côté du serveur — on lit ce fichier-là. Ni l'un ni l'autre : listes vides, aucun axe fermé admis. */
-export function loadVocab(tagsDir?: string): { domaines: string[]; outils: string[] } {
+ *  `<tags>/_vocab.json` ({ domaines: [...], outils: [...] }) à côté des tags qu'il écrit. À défaut — il n'a pas encore
+ *  tourné — la section `tagger` du fichier de configuration (`fallback`). Ni l'un ni l'autre : aucun axe fermé admis. */
+export function loadVocab(tagsDir?: string, fallback: { domaines: string[]; outils: string[] } = { domaines: [], outils: [] }): { domaines: string[]; outils: string[] } {
   if (tagsDir) {
     const v = readJson(join(tagsDir, '_vocab.json')) as { domaines?: unknown; outils?: unknown } | undefined;
     const list = (x: unknown): string[] => (Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string' && s.length > 0 && s.length <= 60) : []);
     if (v && typeof v === 'object' && (Array.isArray(v.domaines) || Array.isArray(v.outils))) return { domaines: list(v.domaines), outils: list(v.outils) };
   }
-  try {
-    const c = readJson(join(dirname(fileURLToPath(import.meta.url)), 'tagger-config.json')) as { hdDomains?: unknown; outils?: unknown } | undefined;
-    const doms = Array.isArray(c?.hdDomains) ? c.hdDomains.filter((x): x is string => typeof x === 'string' && x !== 'Autre') : [];
-    const outs = Array.isArray(c?.outils) ? c.outils.map((o: any) => o?.v).filter((x: unknown): x is string => typeof x === 'string') : [];
-    return { domaines: doms, outils: outs };
-  } catch { return { domaines: [], outils: [] }; }
+  return { domaines: [...fallback.domaines], outils: [...fallback.outils] };
 }
 
 export class Dashboard {
@@ -262,8 +257,8 @@ export class Dashboard {
     if (!this.#changed(p, force)) return;
     this.tagsManual = parseManual(readJson(p));
   }
-  /** Listes fermées : tagger-config.json (à côté de ce fichier). */
-  tagVocab(): { domaines: string[]; outils: string[] } { return loadVocab(this.sf('session-tags')); }
+  /** Listes fermées : publiées par l'étiqueteur, sinon la section `tagger` du fichier de configuration. */
+  tagVocab(): { domaines: string[]; outils: string[] } { return loadVocab(this.sf('session-tags'), this.cfg.tagVocab); }
   /** Set-SessionTag : null, ou le motif du refus (même texte que le .ps1). */
   setTag(id: string, axis: string, v: string, on: boolean): string | null {
     const err = checkTag(id, axis, v, this.tagVocab()); if (err) return err;
@@ -606,7 +601,7 @@ export class Dashboard {
     try { this.writeStatusChanges(sess); } catch { /* idem */ }
     let quota: unknown[] = [];
     try { quota = markActiveAccount(readClaudeUsage(this.cfg), activeAccountUuid(this.cfg)); } catch { /* idem */ }
-    return { now: nowMs(), sessions: sess, reboot: this.rebootInfo(sess), restarts: restarts.slice(-40), favs: [...this.favs], hidden: [...this.hidden], notifs: this.notifs.slice(-60), quota, promptSuggestion: promptSuggestionSetting(this.cfg), teams: this.cfg.modules.teams ? this.teamsWaits() : null, modules: modulesView(this.cfg.modules), ui: this.cfg.ui };
+    return { now: nowMs(), sessions: sess, reboot: this.rebootInfo(sess), restarts: restarts.slice(-40), favs: [...this.favs], hidden: [...this.hidden], notifs: this.notifs.slice(-60), quota, promptSuggestion: promptSuggestionSetting(this.cfg), teams: this.cfg.modules.teams ? this.teamsWaits() : null, modules: modulesView(this.cfg.modules), ui: this.cfg.ui, configError: this.cfg.configError };
   }
 
   /** Get-TeamsWaits : résumé tenu par teams-watcher.ts (state/teams-waits/_summary.json), relu quand il change. */
