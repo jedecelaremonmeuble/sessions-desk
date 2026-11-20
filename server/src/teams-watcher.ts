@@ -10,6 +10,7 @@
 //   node teams-watcher.ts [--dry-run]   une passe (tâche planifiée toutes les 2 min) ; --dry-run n'injecte rien
 //   node teams-watcher.ts --dry-run --since=24   aperçu des demandes entrantes des 24 dernières heures (rien d'ouvert ni d'écrit)
 //   node teams-watcher.ts act <dismiss|remind|snooze> <sessionId> <messageId>   boutons de la page (lot 2)
+//   node teams-watcher.ts conversations   la vue par conversation, en texte (lot 9 ; ne lit que les fichiers d'état)
 // Lot 2 : sans réponse, la session est réveillée pour RELANCER elle-même (4 h ouvrées, puis J+1 10 h, puis alerte à
 // l'utilisateur), rouverte si elle est fermée. Relances autonomes éteintes tant que teams-watcher-config.json ne dit pas
 // { "reminders": true } ; « Relancer maintenant » (clic de l'utilisateur) marche sans.
@@ -26,10 +27,19 @@
 // encore remis. Éteint tant que teams-watcher-config.json ne dit pas { "markRead": true } ; allumé, « login » demande
 // aussi Chat.ReadWrite (à refaire une fois) — sans lui, la surveillance continue et la passe le dit.
 //
+// Lot 9 (CONVERSATIONS) : la page ne montrait les fils que session par session. La passe liste désormais TOUS les chats
+// actifs de l'utilisateur (1:1, groupes, réunions — qu'une session y soit abonnée ou non) avec leur dernier message, et la
+// page en fait une vue par conversation : « à toi de répondre », « à voir » (il s'y est passé quelque chose depuis le
+// dernier pointage « Vu » de l'utilisateur : message d'un collègue OU message envoyé par une session en son nom), « à jour ».
+// L'état lu de Teams ne sert pas (le lot 8 marque lu ce qu'une session a traité). Chat.Read suffit. Éteint tant que
+// teams-watcher-config.json ne dit pas { "conversations": { "enabled": true } }.
+//
 // Fichiers : ~/.claude/state/teams-waits/
 //   _inbound.json                 demandes entrantes : curseur par chat, session ouverte (jamais de texte de message)
 //   <sessionId>_<messageId>.json  une attente (écrite par le hook, mise à jour par la passe)
 //   _summary.json                 résumé par session, SEUL fichier lu par les serveurs (.ps1 et Node)
+//   _conversations.json           chats actifs : nom, dernier message (auteur, heure, extrait court) — écrit par la passe
+//   _conv-seen.json               pointages « Vu » de l'utilisateur par chat — écrit par les boutons de la page seulement
 //   _read.json                    fils à marquer lus, rejoués 30 min après un échec (ids de chat seulement)
 //   _token.dpapi                  jeton de rafraîchissement chiffré par DPAPI (utilisateur Windows) — jamais en clair
 //   _watcher.log                  une ligne JSON par passe (jamais de jeton, jamais de texte de message)
@@ -82,7 +92,7 @@ export interface SummaryWait {
   channel?: 'mail'; pendingSend?: boolean;
 }
 export interface SummaryInbound { chatId: string; chatLabel: string | null; from: string; at: number; openedAt: number }
-export interface Summary { at: number; enabled: boolean; reminders: boolean; sessions: Record<string, SummaryWait[]>; inbound?: Record<string, SummaryInbound>; validations?: Record<string, ValSummary> }
+export interface Summary { at: number; enabled: boolean; reminders: boolean; sessions: Record<string, SummaryWait[]>; inbound?: Record<string, SummaryInbound>; validations?: Record<string, ValSummary>; /** Lot 9 : compteurs de la vue par conversation (absents = vue éteinte). */ conversations?: { reply: number; unseen: number; total: number; at: number } }
 
 export const TOOL = 'mcp__claude_ai_Microsoft_365__teams_send_chat_message';
 const M365 = 'mcp__claude_ai_Microsoft_365__';
@@ -419,6 +429,8 @@ export interface InboundChat {
   handledAt: number;
   label?: string | null; email?: string | null; internal?: boolean;
   sessionId?: string; openedAt?: number; from?: string; lastError?: string | null;
+  /** Dernier message remis à la session ouverte (lot 9 : « une session s'en occupe » ne vaut que jusque-là). */
+  sessionUpTo?: number;
 }
 export interface InboundState { v: 1; since: number; chats: Record<string, InboundChat>; opened: number[] }
 
@@ -514,6 +526,127 @@ export function inboundSummary(st: InboundState | undefined, now: number): Recor
   return out;
 }
 
+// ─────────────── conversations (lot 9) : pur ───────────────
+
+export interface ConversationsConfig {
+  enabled: boolean;
+  /** Fenêtre : chats dont le dernier message a moins de tant de jours. */
+  days: number;
+  /** Plafond de chats gardés (les plus récents). */
+  max: number;
+  /** Noms affichés d'expéditeurs à traiter comme des applications (compte de service qui notifie, robot) : listés, jamais « à voir ». */
+  mute: string[];
+}
+export const defaultConversations: ConversationsConfig = { enabled: false, days: 14, max: 120, mute: [] };
+export type ConvKind = 'oneOnOne' | 'group' | 'meeting';
+/** Un chat tel que la passe l'a vu : son dernier VRAI message (les événements système ne comptent pas). */
+export interface ConvChat {
+  label: string | null; type: ConvKind; webUrl: string | null;
+  lastId: string; lastAt: number; lastFrom: string | null;
+  /** Auteur du dernier message : l'utilisateur (lui ou une session en son nom), un autre membre, une application. */
+  who: 'me' | 'other' | 'app';
+  excerpt: string;
+  /** Politesse ou accusé de réception (isAck) : rien à répondre. */
+  ack: boolean;
+  /** L'utilisateur est mentionné (@) dans ce message : dans un groupe, c'est ce qui en fait une demande pour lui. */
+  mention: boolean;
+}
+export interface ConvState { v: 1; since: number; at: number; chats: Record<string, ConvChat> }
+export interface ConvSeen { v: 1; chats: Record<string, number> }
+/** Session liée à un chat : attente ouverte, réponse reçue en cours de remise, demande entrante, ou attente close récente. */
+export interface ConvSession { sessionId: string; role: 'wait' | 'replied' | 'inbound' | 'past'; at: number }
+export interface ConvRow {
+  chatId: string; label: string | null; type: ConvKind; webUrl: string | null;
+  lastAt: number; lastFrom: string | null;
+  /** 'session' : écrit en son nom par une session (message connu d'une attente). */
+  by: 'me' | 'session' | 'other' | 'app';
+  excerpt: string; seenAt: number;
+  /** Il s'est passé quelque chose depuis le dernier pointage : message d'un autre, ou d'une session en son nom. */
+  unseen: boolean;
+  /** 'reply' : à l'utilisateur de répondre · 'session' : une session a reçu ce message · 'waiting' : une session attend leur réponse. */
+  ball: 'reply' | 'session' | 'waiting' | null;
+  sessions: ConvSession[];
+}
+
+/** Aperçu Graph du dernier message d'un chat (lastMessagePreview). */
+export interface GraphPreview {
+  id?: string; createdDateTime?: string; isDeleted?: boolean; messageType?: string;
+  body?: { contentType?: string; content?: string } | null;
+  from?: { user?: { id?: string; displayName?: string } | null; application?: { displayName?: string } | null } | null;
+}
+/** L'utilisateur est-il mentionné ? Les mentions d'un corps Teams sont des balises <at>…</at> portant le nom affiché. */
+export function mentionsOwner(html: string): boolean {
+  if (!OWNER_GREETING.length) return false;
+  for (const m of html.matchAll(/<at\b[^>]*>(.*?)<\/at>/gis)) {
+    if (fold(htmlText(m[1] ?? '')).split(/[^a-z0-9]+/).includes(OWNER_GREETING[0]!)) return true;
+  }
+  return false;
+}
+/** Rien à répondre à ce message ? Plus large qu'isAck (qui décide d'OUVRIR une session, donc prudent) : ici l'enjeu n'est
+ *  qu'un badge. Un remerciement sans question (« merci pour les accès, tout fonctionne ») n'attend rien ; « merci de … » est une demande. */
+export function needsNoReply(text: string): boolean {
+  if (isAck(text)) return true;
+  const t = fold(text);
+  return t.length <= 240 && !t.includes('?') && !/https?:\/\//.test(t) && /(^|[^a-z])merci(?! d[e'’])/.test(t);
+}
+/** Dernier message d'un chat → ce qu'on en garde (null : événement système, aperçu vide ou incomplet — on garde l'état d'avant). */
+export function convFromPreview(p: GraphPreview | null | undefined, meId: string, mute: string[] = []): Pick<ConvChat, 'lastId' | 'lastAt' | 'lastFrom' | 'who' | 'excerpt' | 'ack' | 'mention'> | null {
+  const at = Date.parse(p?.createdDateTime ?? '');
+  if (!p?.id || !Number.isFinite(at) || (p.messageType ?? 'message') !== 'message') return null;
+  const uid = p.from?.user?.id ?? null;
+  const html = p.body?.content ?? '';
+  const text = p.isDeleted ? '' : p.body?.contentType === 'text' ? html.replace(/\s+/g, ' ').trim() : htmlText(html);
+  const excerpt = p.isDeleted ? '(message supprimé)' : text ? clip(text, 140) : /<img/i.test(html) ? '(image)' : '(pièce jointe ou carte)';
+  const lastFrom = p.from?.user?.displayName ?? p.from?.application?.displayName ?? null;
+  const muted = !!lastFrom && mute.some((m) => fold(m).trim() === fold(lastFrom).trim());
+  const who = !uid || (muted && uid !== meId) ? 'app' : uid === meId ? 'me' : 'other';
+  return {
+    lastId: p.id, lastAt: at, lastFrom, who, excerpt,
+    // Un message supprimé n'attend plus rien ; une image ou une pièce jointe seule, si.
+    ack: who === 'other' && (!!p.isDeleted || (!!text && needsNoReply(text))), mention: who === 'other' && mentionsOwner(html),
+  };
+}
+
+const ROLE_RANK: Record<ConvSession['role'], number> = { replied: 0, wait: 1, inbound: 2, past: 3 };
+/** La vue par conversation : chats connus × pointages × attentes × demandes entrantes. « À traiter » d'abord, puis le plus récent. */
+export function conversationRows(st: ConvState | undefined, seen: ConvSeen | undefined, waits: Wait[], inbound: InboundState | undefined, now: number, days = defaultConversations.days): ConvRow[] {
+  if (!st) return [];
+  const teams = waits.filter((w) => w.channel !== 'mail' && w.chatId);
+  const sessionSent = new Set(teams.map((w) => w.messageId));
+  const rows: ConvRow[] = [];
+  for (const [chatId, c] of Object.entries(st.chats)) {
+    if (now - c.lastAt > days * 86_400_000) continue;
+    const mine = teams.filter((w) => w.chatId === chatId);
+    const inb = inbound?.chats[chatId];
+    const by: ConvRow['by'] = c.who === 'me' ? (sessionSent.has(c.lastId) ? 'session' : 'me') : c.who;
+    // Un pointage explicite l'emporte ; sinon tout ce qui précède la première passe est réputé vu (on part de maintenant).
+    const seenAt = seen?.chats[chatId] ?? st.since;
+    const bySession = new Map<string, ConvSession>();
+    const add = (s: ConvSession) => { const cur = bySession.get(s.sessionId); if (!cur || ROLE_RANK[s.role] < ROLE_RANK[cur.role] || (s.role === cur.role && s.at > cur.at)) bySession.set(s.sessionId, s); };
+    for (const w of mine) {
+      if (w.status === 'open') add({ sessionId: w.sessionId, role: 'wait', at: w.sentAt });
+      else if (w.status === 'replied') add({ sessionId: w.sessionId, role: 'replied', at: w.repliedAt ?? w.sentAt });
+      else if (now - w.sentAt < days * 86_400_000) add({ sessionId: w.sessionId, role: 'past', at: w.sentAt });
+    }
+    if (inb?.sessionId && inb.openedAt && now - inb.openedAt < days * 86_400_000) add({ sessionId: inb.sessionId, role: 'inbound', at: inb.openedAt });
+    let ball: ConvRow['ball'] = null;
+    if (by === 'other') {
+      const handled = mine.some((w) => w.replies?.some((r) => r.id === c.lastId)) || (!!inb?.sessionId && (inb.sessionUpTo ?? inb.openedAt ?? 0) >= c.lastAt);
+      if (handled) ball = 'session';
+      // Un pointage EXPLICITE de ce message (« Rien à répondre ») l'éteint ; le départ de la première passe, non.
+      else if (!c.ack && (c.type === 'oneOnOne' || c.mention) && c.lastAt > (seen?.chats[chatId] ?? 0)) ball = 'reply';
+    } else if (by !== 'app' && mine.some((w) => w.status === 'open')) ball = 'waiting';
+    rows.push({
+      chatId, label: c.label, type: c.type, webUrl: c.webUrl, lastAt: c.lastAt, lastFrom: c.lastFrom, by, excerpt: c.excerpt, seenAt,
+      unseen: (by === 'other' || by === 'session') && c.lastAt > seenAt, ball,
+      sessions: [...bySession.values()].sort((a, b) => ROLE_RANK[a.role] - ROLE_RANK[b.role] || b.at - a.at).slice(0, 4),
+    });
+  }
+  const rank = (r: ConvRow) => (r.ball === 'reply' ? 0 : r.unseen ? 1 : 2);
+  return rows.sort((a, b) => rank(a) - rank(b) || b.lastAt - a.lastAt);
+}
+export const conversationCounts = (rows: ConvRow[], at: number) => ({ reply: rows.filter((r) => r.ball === 'reply').length, unseen: rows.filter((r) => r.unseen && r.ball !== 'reply').length, total: rows.length, at });
+
 // ─────────────── fichiers ───────────────
 
 const home = () => process.env.USERPROFILE ?? process.env.HOME ?? '';
@@ -536,8 +669,40 @@ function saveFromPass(dir: string, before: Wait, w: Wait): boolean {
 export function writeSummary(dir: string, now: number, reminders?: boolean) {
   const on = reminders ?? readJson<Summary>(join(dir, '_summary.json'))?.reminders ?? false;
   const waits = loadWaits(dir);
-  const sum: Summary = { ...summarize(waits, existsSync(join(dir, '_token.dpapi')), now, on), inbound: inboundSummary(readJson<InboundState>(join(dir, '_inbound.json')), now), validations: validationSummaries(validationsDir(dir), waits, now) };
+  const inbound = readJson<InboundState>(join(dir, '_inbound.json'));
+  const conv = readJson<ConvState>(join(dir, '_conversations.json'));
+  const sum: Summary = { ...summarize(waits, existsSync(join(dir, '_token.dpapi')), now, on), inbound: inboundSummary(inbound, now), validations: validationSummaries(validationsDir(dir), waits, now),
+    ...(conv ? { conversations: conversationCounts(conversationRows(conv, readJson<ConvSeen>(join(dir, '_conv-seen.json')), waits, inbound, now), conv.at) } : {}) };
   writeAtomic(join(dir, '_summary.json'), JSON.stringify(sum));
+}
+/** Vue par conversation pour la page (lot 9) : null tant que la passe n'a rien listé (vue éteinte). */
+export function conversationsView(dir: string, now: number): { at: number; since: number; rows: ConvRow[] } | null {
+  const conv = readJson<ConvState>(join(dir, '_conversations.json'));
+  if (!conv || conv.v !== 1) return null;
+  return { at: conv.at, since: conv.since, rows: conversationRows(conv, readJson<ConvSeen>(join(dir, '_conv-seen.json')), loadWaits(dir), readJson<InboundState>(join(dir, '_inbound.json')), now) };
+}
+/** Boutons « Vu » / « Remettre à voir » / « Tout marquer vu » de la page. Le pointage porte l'heure du dernier message
+ *  AFFICHÉ (`at`), pas celle du clic : un message arrivé entre-temps reste à voir. chatId '*' = toutes les conversations. */
+export function markConversationSeen(dir: string, chatId: string, action: string, at: number, now: number): string | null {
+  const conv = readJson<ConvState>(join(dir, '_conversations.json'));
+  if (!conv || conv.v !== 1) return 'vue par conversation éteinte';
+  if (action !== 'seen' && action !== 'unseen') return 'action inconnue';
+  const file = join(dir, '_conv-seen.json');
+  const seen: ConvSeen = readJson<ConvSeen>(file) ?? { v: 1, chats: {} };
+  const shown = Number.isFinite(at) && at > 0 ? Math.min(at, now) : now;
+  if (chatId === '*') {
+    if (action !== 'seen') return 'action inconnue';
+    for (const [id, c] of Object.entries(conv.chats)) seen.chats[id] = Math.max(seen.chats[id] ?? 0, Math.min(c.lastAt, shown));
+  } else {
+    const c = conv.chats[chatId];
+    if (!c) return 'conversation introuvable';
+    seen.chats[chatId] = action === 'seen' ? Math.max(seen.chats[chatId] ?? 0, Math.min(c.lastAt, shown)) : c.lastAt - 1;
+  }
+  // Les pointages de chats sortis de la fenêtre ne servent plus.
+  for (const id of Object.keys(seen.chats)) if (!conv.chats[id]) delete seen.chats[id];
+  writeAtomic(file, JSON.stringify(seen));
+  writeSummary(dir, now);
+  return null;
 }
 
 // ─────────────── validations métier (lot 5) ───────────────
@@ -934,6 +1099,8 @@ export interface WatcherConfig {
   export: ExportConfig | null;
   /** Lot 8 : marquer « lu » dans Teams un fil qu'une session a lu ou auquel elle a répondu. Éteint par défaut ; allumé, il demande Chat.ReadWrite au « login ». */
   markRead: boolean; readScope: string;
+  /** Lot 9 : vue par conversation (tous les chats actifs). Éteinte par défaut ; Chat.Read suffit. */
+  conversations: ConversationsConfig;
 }
 export const defaultConfig: WatcherConfig = {
   tenant: 'organizations',
@@ -945,6 +1112,7 @@ export const defaultConfig: WatcherConfig = {
   mail: false, mailScope: 'Mail.Read User.Read offline_access',
   export: null,
   markRead: false, readScope: 'Chat.ReadWrite User.Read offline_access',
+  conversations: defaultConversations,
 };
 /** Portée demandée au « login » : celles des emails et des fils lus en plus quand ils sont allumés (le jeton de rafraîchissement les couvre alors toutes). */
 export const loginScope = (cfg: Pick<WatcherConfig, 'scope' | 'mail' | 'mailScope'> & Partial<Pick<WatcherConfig, 'markRead' | 'readScope'>>): string =>
@@ -1117,7 +1285,7 @@ export async function runInbound(dir: string, cfg: WatcherConfig, meId: string, 
         saveEvidence(validationsDir(dir), open.sessionId, 'inbound', c.id, v.burst);
         const err = await deps.send(open.pid, inboundFollowUp(who, v.burst, opts.selfCmd, open.sessionId)).catch((x: Error) => x.message);
         if (err) { e.lastError = err; res.deferred++; continue; }
-        open.status = 'busy'; e.handledAt = v.upTo; e.lastError = null; res.followed++; res.read.push(c.id);
+        open.status = 'busy'; e.handledAt = v.upTo; e.sessionUpTo = v.upTo; e.lastError = null; res.followed++; res.read.push(c.id);
         continue;
       }
       if (st.opened.length >= ic.maxPerHour) { e.lastError = 'plafond horaire atteint'; res.deferred++; continue; }
@@ -1125,11 +1293,60 @@ export async function runInbound(dir: string, cfg: WatcherConfig, meId: string, 
       saveEvidence(validationsDir(dir), sid, 'inbound', c.id, v.burst);
       const err = await deps.open(sid, inboundPrompt(c.id, who, v.burst, opts.selfCmd, sid)).catch((x: Error) => x.message);
       if (err) { e.lastError = `ouverture impossible : ${err}`; res.errors.push(`demande entrante : ${err}`); res.deferred++; continue; }
-      Object.assign(e, { sessionId: sid, openedAt: now, from: v.burst[0]!.from, handledAt: v.upTo, lastError: null });
+      Object.assign(e, { sessionId: sid, openedAt: now, from: v.burst[0]!.from, handledAt: v.upTo, sessionUpTo: v.upTo, lastError: null });
       st.opened.push(now); res.opened++; res.read.push(c.id);
     } catch (x) { res.errors.push(String((x as Error).message)); }
   }
   if (!opts.dryRun) writeAtomic(file, JSON.stringify(st, null, 1));
+  return res;
+}
+
+/** Chat listé par Graph, avec l'aperçu de son dernier message. */
+interface GraphChatFull { id: string; chatType?: string; topic?: string | null; webUrl?: string | null; viewpoint?: { isHidden?: boolean } | null; lastMessagePreview?: GraphPreview | null }
+export interface ConvResult { listed: number; errors: string[] }
+const GRAPH_ROOT = 'https://graph.microsoft.com/v1.0';
+/** Passe de la vue par conversation (lot 9) : tous les chats actifs de la fenêtre, leur dernier message, leur nom.
+ *  Un appel par page de 50 chats ; les membres ne sont lus qu'une fois par chat sans sujet ni nom connu (20 au plus par passe). */
+export async function runConversations(dir: string, cfg: Pick<WatcherConfig, 'conversations'>, meId: string, graphGet: <T>(path: string) => Promise<T>, opts: { dryRun: boolean; now: number }): Promise<ConvResult> {
+  const { now } = opts, cc = cfg.conversations;
+  const res: ConvResult = { listed: 0, errors: [] };
+  const file = join(dir, '_conversations.json');
+  const prev = readJson<ConvState>(file);
+  const inbound = readJson<InboundState>(join(dir, '_inbound.json'));
+  // Première passe : on part de MAINTENANT — l'historique est réputé vu (« à toi de répondre » reste calculé).
+  const st: ConvState = { v: 1, since: prev?.since ?? now, at: now, chats: {} };
+  const floor = now - cc.days * 86_400_000;
+  let path: string | null = '/me/chats?$expand=lastMessagePreview&$orderby=lastMessagePreview/createdDateTime desc&$top=50';
+  let labels = 0, done = false;
+  try {
+    for (let page = 0; path && !done && page < 6; page++) {
+      const r: { value: GraphChatFull[]; '@odata.nextLink'?: string } = await graphGet(path);
+      for (const c of r.value) {
+        const rawAt = Date.parse(c.lastMessagePreview?.createdDateTime ?? '');
+        if (Number.isFinite(rawAt) && rawAt < floor) { done = true; break; }
+        if (c.viewpoint?.isHidden) continue;
+        const old = prev?.chats[c.id];
+        const last = convFromPreview(c.lastMessagePreview, meId, cc.mute ?? []) ?? (old ? { lastId: old.lastId, lastAt: old.lastAt, lastFrom: old.lastFrom, who: old.who, excerpt: old.excerpt, ack: old.ack, mention: old.mention } : null);
+        if (!last || last.lastAt < floor) continue;
+        const type: ConvKind = c.chatType === 'oneOnOne' ? 'oneOnOne' : c.chatType === 'meeting' ? 'meeting' : 'group';
+        let label = c.topic ? clip(c.topic, 60) : old?.label ?? inbound?.chats[c.id]?.label ?? null;
+        // Un 1:1 porte le nom de l'autre : son dernier message le donne sans rien lire de plus.
+        if (!label && type === 'oneOnOne' && last.who === 'other') label = last.lastFrom;
+        if (!label && labels < 20) {
+          labels++;
+          try { label = chatLabel(await graphGet(`/chats/${encodeURIComponent(c.id)}?$expand=members`), meId); } catch { /* au prochain passage */ }
+        }
+        st.chats[c.id] = { label, type, webUrl: c.webUrl ?? old?.webUrl ?? null, ...last };
+        if (++res.listed >= cc.max) { done = true; break; }
+      }
+      const next: string | undefined = r['@odata.nextLink'];
+      path = next?.startsWith(GRAPH_ROOT) ? next.slice(GRAPH_ROOT.length) : null;
+    }
+  } catch (e) {
+    // Liste incomplète : on garde l'état d'avant plutôt que de faire disparaître des conversations.
+    res.errors.push(`conversations : ${String((e as Error).message)}`); return res;
+  }
+  if (!opts.dryRun) writeAtomic(file, JSON.stringify(st));
   return res;
 }
 
@@ -1262,7 +1479,7 @@ async function runMail(dir: string, cfg: WatcherConfig, todo: Wait[], all: Wait[
   }
 }
 
-export interface PassResult { live: number; checked: number; replied: number; injected: number; reminded: number; alerted: number; reopened: number; takenOver: number; expired: number; errors: string[]; inbound?: Omit<InboundResult, 'errors' | 'read'>; /** Fils marqués lus dans Teams (lot 8). */ read?: number }
+export interface PassResult { live: number; checked: number; replied: number; injected: number; reminded: number; alerted: number; reopened: number; takenOver: number; expired: number; errors: string[]; inbound?: Omit<InboundResult, 'errors' | 'read'>; /** Fils marqués lus dans Teams (lot 8). */ read?: number; /** Chats listés pour la vue par conversation (lot 9). */ conversations?: number }
 export interface PassOptions { dryRun: boolean; now?: number; selfCmd?: string; previewSince?: number }
 export async function runPass(dir: string, cfg: WatcherConfig, opts: PassOptions): Promise<PassResult> {
   const now = opts.now ?? Date.now(), cal = cfg.calendar;
@@ -1270,7 +1487,7 @@ export async function runPass(dir: string, cfg: WatcherConfig, opts: PassOptions
   const all = loadWaits(dir);
   const live = all.filter((w) => LIVE.has(w.status));
   res.live = live.length;
-  if ((!live.length && !cfg.inbound.enabled) || !existsSync(join(dir, '_token.dpapi'))) { writeSummary(dir, now, cfg.reminders); return res; }
+  if ((!live.length && !cfg.inbound.enabled && !cfg.conversations.enabled) || !existsSync(join(dir, '_token.dpapi'))) { writeSummary(dir, now, cfg.reminders); return res; }
   const me = readJson<{ id: string }>(join(dir, '_me.json'));
   if (!me?.id) { res.errors.push('_me.json absent : relancer login'); writeSummary(dir, now, cfg.reminders); return res; }
   const sessionSent = new Set(all.map((w) => w.messageId));
@@ -1359,6 +1576,10 @@ export async function runPass(dir: string, cfg: WatcherConfig, opts: PassOptions
     res.inbound = inb; res.errors.push(...errors);
     for (const c of read) toRead.add(c);
   }
+  if (cfg.conversations.enabled) {
+    const c = await runConversations(dir, cfg, me.id, (path) => graph(token, path), { dryRun: opts.dryRun, now });
+    res.conversations = c.listed; res.errors.push(...c.errors);
+  }
   if (cfg.markRead && !opts.dryRun) {
     // Portée à part (Chat.ReadWrite) : refusée, la surveillance a déjà tourné — seul le marquage manque, et la passe le dit.
     let tok: Promise<string> | undefined;
@@ -1394,7 +1615,7 @@ async function main(argv: string[]): Promise<number> {
   const dir = process.env.SD_TEAMS_WAITS_DIR ?? defaultDir();
   const here = fileURLToPath(new URL('.', import.meta.url));
   const file = readJson<Partial<WatcherConfig>>(join(here, 'teams-watcher-config.json')) ?? {};
-  const cfg: WatcherConfig = { ...defaultConfig, ...file, calendar: { ...defaultCalendar, ...(file.calendar ?? {}) }, inbound: { ...defaultInbound, ...(file.inbound ?? {}) } };
+  const cfg: WatcherConfig = { ...defaultConfig, ...file, calendar: { ...defaultCalendar, ...(file.calendar ?? {}) }, inbound: { ...defaultInbound, ...(file.inbound ?? {}) }, conversations: { ...defaultConversations, ...(file.conversations ?? {}) } };
   if (typeof cfg.ownerName === 'string') setOwner(cfg.ownerName);
   // Demandes entrantes allumées sans dossier de session ou sans domaine interne : rien ne peut s'ouvrir, on le dit.
   if (cfg.inbound.enabled && (!cfg.inbound.cwd || !cfg.inbound.domains.length)) {
@@ -1424,6 +1645,14 @@ async function main(argv: string[]): Promise<number> {
     // node teams-watcher.ts validation <record|withdraw|list> --session <id> … — appelé par la session elle-même.
     const [code, out] = validationCommand(dir, argv.slice(1), process.env, Date.now(), randomUUID());
     (code ? console.error : console.log)(out); return code;
+  }
+  if (cmd === 'conversations') {
+    const v = conversationsView(dir, Date.now());
+    if (!v) { console.error('vue par conversation éteinte : { "conversations": { "enabled": true } } dans teams-watcher-config.json, puis une passe'); return 1; }
+    const tag = (r: ConvRow) => (r.ball === 'reply' ? 'À TOI DE RÉPONDRE' : r.unseen ? 'à voir' : r.ball === 'session' ? 'une session s\'en occupe' : r.ball === 'waiting' ? 'en attente de leur réponse' : 'à jour');
+    for (const r of v.rows) console.log(`${tag(r).padEnd(26)} ${hhmm(r.lastAt)}  ${r.label ?? '(sans nom)'} — ${r.by === 'me' ? 'toi' : r.by === 'session' ? 'une session, en ton nom' : r.lastFrom ?? '?'} : « ${r.excerpt} »${r.sessions.length ? `  [${r.sessions.length} session(s)]` : ''}`);
+    console.log(`${v.rows.length} conversation(s), liste du ${hhmm(v.at)}`);
+    return 0;
   }
   if (cmd === 'login') return login(cfg, dir);
   if (cmd === 'logout') { rmSync(join(dir, '_token.dpapi'), { force: true }); writeSummary(dir, Date.now()); console.log('Jeton oublié : surveillance éteinte.'); return 0; }

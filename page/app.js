@@ -125,7 +125,7 @@ function renderQuota() {
       mc.title = 'Quota hebdomadaire propre au modèle ' + m.name;
       mc.append(mt, el('span', 'qx'), quotaBar(m)); d.append(mc);
     }
-    d.onclick = () => { findMode = newMode = bcMode = boardMode = false; if (launchMode) closeLauncher(); selected = null; sessionStorage.removeItem('cc.sel'); renderList(); renderDetail(true); };
+    d.onclick = () => { findMode = newMode = bcMode = boardMode = chatsMode = false; if (launchMode) closeLauncher(); selected = null; sessionStorage.removeItem('cc.sel'); renderList(); renderDetail(true); };
     box.append(d);
   }
   if (sm) {
@@ -548,7 +548,7 @@ function stageOf(it) {
   return 'cadrer';
 }
 let boardMode = false;
-function openBoard() { findMode = false; newMode = false; bcMode = false; launchMode = false; selected = null; sessionStorage.removeItem('cc.sel'); boardMode = true; setPane(true); renderList(); renderDetail(true); }
+function openBoard() { findMode = false; newMode = false; bcMode = false; launchMode = false; chatsMode = false; selected = null; sessionStorage.removeItem('cc.sel'); boardMode = true; setPane(true); renderList(); renderDetail(true); }
 function closeBoard() { boardMode = false; setPane(false); renderDetail(true); }
 function boardCards() {
   const week = data.now - 7 * 86400000;
@@ -597,13 +597,99 @@ function renderBoard(force) {
   main.append(board);
 }
 
+// ── Conversations Teams (💬, module « teams », teams-watcher.ts lot 9) : la vue TRANSVERSE, une ligne par chat et non par
+// session. Le veilleur liste tous les chats actifs (qu'une session y soit abonnée ou non) ; la page les range en « à toi
+// de répondre » (dernier mot au collègue, aucune session ne l'a reçu), « à voir » (il s'y est passé quelque chose depuis
+// ton dernier pointage : un collègue a écrit, ou une session a écrit en ton nom) et « à jour ». L'état lu de Teams ne
+// sert pas : le veilleur marque lu ce qu'une session a traité. Lue par /api/teams-conversations, relue toutes les 30 s
+// et dès que le veilleur a refait sa liste ; les compteurs du bouton viennent de l'état (data.teams.conversations).
+let chatsMode = false, chatsData = null, chatsTimer = null;
+const chatsOff = () => !(data && data.teams && data.teams.conversations);
+function chatsBadge() {
+  const c = data && data.teams && data.teams.conversations, b = $('chatsbtn'); b.hidden = !c; if (!c) return;
+  const n = c.reply + c.unseen; $('chatsn').textContent = n ? String(n) : '';
+  if (chatsMode && chatsData && chatsData.at !== c.at) loadChats();   // le veilleur vient de refaire sa liste
+}
+function openChats() { if (chatsOff()) return; findMode = false; newMode = false; bcMode = false; boardMode = false; launchMode = false; selected = null; sessionStorage.removeItem('cc.sel'); chatsMode = true; setPane(true);
+  clearInterval(chatsTimer); chatsTimer = setInterval(loadChats, 30000); renderList(); renderDetail(true); loadChats(); }
+function closeChats() { chatsMode = false; setPane(false); clearInterval(chatsTimer); renderDetail(true); }
+async function loadChats() {
+  if (!chatsMode) { clearInterval(chatsTimer); return; }
+  try { const r = await fetch('/api/teams-conversations', { cache:'no-store' }); chatsData = r.ok ? await r.json() : null; if (chatsMode) renderChats(); } catch { say('conversations illisibles'); }
+}
+// chatGroups est PURE (testée par server/test/conversations-page.test.ts) : lignes du serveur → les trois groupes de la vue.
+function chatGroups(rows) {
+  const g = [
+    { key:'reply', title:'À toi de répondre', hint:'le dernier mot est au collègue et aucune session ne l’a reçu', rows:[] },
+    { key:'unseen', title:'À voir', hint:'du nouveau depuis ton dernier pointage : un collègue a écrit, ou une session a écrit en ton nom', rows:[] },
+    { key:'ok', title:'À jour', hint:'', rows:[] },
+  ];
+  for (const r of rows || []) (r.ball === 'reply' ? g[0] : r.unseen ? g[1] : g[2]).rows.push(r);
+  for (const x of g) x.rows.sort((a, b) => b.lastAt - a.lastAt);
+  return g;
+}
+async function chatSeen(chatId, action, at) {
+  if (!canWrite) return;
+  try {
+    const r = await (await fetch('/api/teams-seen', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ chatId, action, at }) })).json();
+    if (r.error) say('refusé : ' + r.error);
+  } catch { say('échec de la demande'); }
+  loadChats();
+}
+const CHAT_ICON = { oneOnOne:'👤', group:'👥', meeting:'📅' };
+const CHAT_ROLE = { wait:'attend leur réponse', replied:'reçoit leur réponse', inbound:'ouverte pour cette demande', past:'y a écrit' };
+function renderChats() {
+  const main = $('main'), keep = detailKey === '__chats__' ? main.scrollTop : 0; detailKey = '__chats__'; main.replaceChildren();
+  const D = chatsData, rows = D && D.rows;
+  main.append(el('div', 'dtitle', 'Conversations Teams'));
+  if (!D) { main.append(el('div', 'meta', 'Chargement…')); return; }
+  if (!rows) { main.append(el('div', 'meta', 'Vue éteinte : le veilleur n’a encore rien listé ({ "conversations": { "enabled": true } } dans teams-watcher-config.json).')); return; }
+  const groups = chatGroups(rows), todo = groups[0].rows.length + groups[1].rows.length;
+  const meta = el('div', 'meta', rows.length + ' chats actifs sur 14 jours (1:1, groupes, réunions), qu’une session les suive ou non · liste d’il y a ' + ago(data.now - D.at) + ' · '
+    + (todo ? todo + ' à traiter' : 'tu es à jour partout') + '. « Vu » pointe le dernier message affiché : ce qui arrive ensuite revient « à voir ».');
+  main.append(meta);
+  const box = el('div', 'chats');
+  for (const g of groups) {
+    if (!g.rows.length && g.key !== 'reply') continue;
+    const h = el('div', 'chead', g.title + ' · ' + g.rows.length); if (g.hint) h.append(el('span', 'tx', g.hint));
+    if (g.key === 'unseen' && g.rows.length > 1 && canWrite) { const b = el('button', null, 'Tout marquer vu'); b.title = 'Pointe toutes les conversations « à voir » d’un coup (celles où c’est à toi de répondre restent)'; b.onclick = () => chatSeen('*', 'seen', D.at); h.append(b); }
+    box.append(h);
+    if (!g.rows.length) box.append(el('div', 'meta', 'Personne n’attend ta réponse.'));
+    for (const r of g.rows) {
+      const row = el('div', 'crow ' + g.key);
+      const t = el('div', 'ct', (CHAT_ICON[r.type] || '') + ' ' + (r.label || '(chat sans nom)')); t.append(el('span', 'when', 'il y a ' + ago(data.now - r.lastAt))); row.append(t);
+      const m = el('div', 'cm');
+      m.append(el('span', 'who' + (r.by === 'session' ? ' ses' : ''), (r.by === 'me' ? 'toi' : r.by === 'session' ? '🤖 une session, en ton nom' : r.lastFrom || 'une application') + ' : '), '« ' + r.excerpt + ' »');
+      row.append(m);
+      const s = el('div', 'cs');
+      if (r.ball === 'reply') s.append(el('span', 'tag reply', 'à toi de répondre'));
+      else if (r.ball === 'session') s.append(el('span', 'tag ses', 'une session a reçu ce message'));
+      else if (r.ball === 'waiting') s.append(el('span', 'tag wait', 'en attente de leur réponse'));
+      for (const x of r.sessions) {
+        const it = allItems().find(i => i.sessionId === x.sessionId && i.kind !== 'run' && i.kind !== 'pass');
+        if (it) { const b = el('button', 'chip', label(it) + ' — ' + CHAT_ROLE[x.role]); b.title = 'Ouvrir la session (' + LABEL[it.state] + ')'; b.onclick = () => select(it.key, true); s.append(b); }
+        else { const o = el('span', 'chip gone', 'session fermée — ' + CHAT_ROLE[x.role]); o.title = x.sessionId; s.append(o); }
+      }
+      if (s.childNodes.length) row.append(s);
+      const bs = el('div', 'cb');
+      if (r.webUrl) { const l = el('a', null, 'Teams ↗'); l.href = r.webUrl; l.target = '_blank'; l.rel = 'noopener'; l.title = 'Ouvrir la conversation dans Teams'; bs.append(l); }
+      if (g.key === 'reply') { const b = el('button', null, 'Rien à répondre'); b.title = 'Tu as lu, il n’y a rien à répondre : la conversation passe « à jour » jusqu’au prochain message'; b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
+      else if (g.key === 'unseen') { const b = el('button', null, 'Vu'); b.title = 'Tu as vu ce qui s’est passé ici : la conversation passe « à jour » jusqu’au prochain message'; b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
+      else if (r.by !== 'me' && r.by !== 'app') { const b = el('button', null, '↺'); b.title = 'Remettre à voir'; b.onclick = () => chatSeen(r.chatId, 'unseen', r.lastAt); bs.append(b); }
+      row.append(bs);
+      box.append(row);
+    }
+  }
+  main.append(box); main.scrollTop = keep;
+}
+
 // ── Lanceur (🤖) : supervision des claude -p du diagnostic automatique — santé, runs en cours, tickets qui attendent,
 // runs récents par phase avec leurs fichiers (texte brut / captures) et la conversation à rouvrir. Rafraîchi toutes les 10 s. ──
 let launchMode = false, launchData = null, launchHours = 48, launchTimer = null, launchView = null, launchViewText = null, launchFilter = '';
 const STAGE_FR = { 'pr-awaiting-approval':'PR en attente de validation', 'deploying':'en déploiement', 'dev-failed':'dev en échec', 'diagnosis-held':'diagnostic posé',
   'in-production':'en production', 'diagnosis-skipped':'diagnostic écarté', 'dev-abandoned':'dev abandonné', 'pr-closed':'PR fermée' };
 const PHASE_FR = { diagnostic:'diagnostic', go:'go', dev:'dev', recette:'recette', relecture:'relecture', reprise:'reprise', merge:'merge' };
-function openLauncher() { if (launcherOff()) return; findMode = false; newMode = false; bcMode = false; boardMode = false; selected = null; sessionStorage.removeItem('cc.sel'); launchMode = true; setPane(true);
+function openLauncher() { if (launcherOff()) return; findMode = false; newMode = false; bcMode = false; boardMode = false; chatsMode = false; selected = null; sessionStorage.removeItem('cc.sel'); launchMode = true; setPane(true);
   clearInterval(launchTimer); launchTimer = setInterval(loadLauncher, 10000); renderList(); renderDetail(true); loadLauncher(); }
 function closeLauncher() { launchMode = false; setPane(false); clearInterval(launchTimer); renderDetail(true); }
 async function loadLauncher() {
@@ -1810,7 +1896,7 @@ function setMobileTitle(text, state) { const t = $('mtitle'); t.className = 'chi
 function select(key, scroll) {
   clearTimeout(recentTimer);
   if (key) recentTimer = setTimeout(() => { if (selected === key) { touchRecent(key); renderList(); } }, 1500);
-  selected = key; lastScreen = null; newMode = false; findMode = false; bcMode = false; boardMode = false; launchMode = false;
+  selected = key; lastScreen = null; newMode = false; findMode = false; bcMode = false; boardMode = false; launchMode = false; chatsMode = false;
   setPane(!!key);
   key ? sessionStorage.setItem('cc.sel', key) : sessionStorage.removeItem('cc.sel');
   renderList(); renderDetail(true);
@@ -2043,7 +2129,7 @@ function scheduleFind() {
 }
 async function runFind(q) {
   const seq = ++findSeq;
-  if (!findMode) { findMode = true; newMode = false; bcMode = false; boardMode = false; launchMode = false; findRes = null; findQ = q; renderDetail(true); }
+  if (!findMode) { findMode = true; newMode = false; bcMode = false; boardMode = false; launchMode = false; chatsMode = false; findRes = null; findQ = q; renderDetail(true); }
   try {
     const r = await (await fetch('/api/find?q=' + encodeURIComponent(q), { cache:'no-store' })).json();
     if (seq !== findSeq) return;                   // une frappe plus récente a relancé la recherche
@@ -2103,7 +2189,7 @@ function renderFind() {
 // newPrefill : formulaire prérempli par une autre vue ({ title, prompt, tags }) — « Reprendre en session » d'une livraison
 // refusée. Rien n'est lancé : on relit, on modifie, on choisit le dossier, puis « Lancer ».
 let newMode = false, launching = false, newFork = null, newPrefill = null;
-function openNew(fork = null, prefill = null) { newFork = fork; newPrefill = prefill; newTags = prefill ? prefill.tags.map(t => ({ ...t })) : forkTags(fork); findMode = false; bcMode = false; boardMode = false; launchMode = false; selected = null; sessionStorage.removeItem('cc.sel'); newMode = true; setPane(true); renderList(); renderDetail(true); }
+function openNew(fork = null, prefill = null) { newFork = fork; newPrefill = prefill; newTags = prefill ? prefill.tags.map(t => ({ ...t })) : forkTags(fork); findMode = false; bcMode = false; boardMode = false; launchMode = false; chatsMode = false; selected = null; sessionStorage.removeItem('cc.sel'); newMode = true; setPane(true); renderList(); renderDetail(true); }
 function closeNew() { newMode = false; setPane(false); renderDetail(true); }
 
 // ── Message à plusieurs sessions (✉) : même texte tapé dans chaque session cochée — seulement les inactives ou
@@ -2111,7 +2197,7 @@ function closeNew() { newMode = false; setPane(false); renderDetail(true); }
 let bcMode = false, bcSending = false;
 const bcPick = new Set();
 const bcEligible = () => allItems().filter(it => it.kind === 'open' && !it.headless && (it.status === 'idle' || it.status === 'shell'));
-function openBc() { findMode = false; newMode = false; boardMode = false; launchMode = false; selected = null; sessionStorage.removeItem('cc.sel'); bcMode = true; setPane(true); renderList(); renderDetail(true); }
+function openBc() { findMode = false; newMode = false; boardMode = false; launchMode = false; chatsMode = false; selected = null; sessionStorage.removeItem('cc.sel'); bcMode = true; setPane(true); renderList(); renderDetail(true); }
 function closeBc() { bcMode = false; setPane(false); renderDetail(true); }
 function renderBc() {
   detailKey = '__bc__'; const main = $('main'); main.replaceChildren();
@@ -2315,11 +2401,12 @@ function promptResizer(split) {
 
 function renderDetail(force) {
   $('newbtn').classList.toggle('on', newMode); $('bcbtn').classList.toggle('on', bcMode); $('boardbtn').classList.toggle('on', boardMode);
-  $('launchbtn').classList.toggle('on', launchMode);
+  $('launchbtn').classList.toggle('on', launchMode); $('chatsbtn').classList.toggle('on', chatsMode);
   document.body.classList.toggle('finding', findMode);
-  const mt = launchMode ? 'Lanceur' : boardMode ? 'Tableau par projet' : newMode ? 'Nouvelle session' : bcMode ? 'Message à plusieurs sessions' : findMode ? 'Recherche dans les conversations' : null;
+  const mt = launchMode ? 'Lanceur' : chatsMode ? 'Conversations Teams' : boardMode ? 'Tableau par projet' : newMode ? 'Nouvelle session' : bcMode ? 'Message à plusieurs sessions' : findMode ? 'Recherche dans les conversations' : null;
   if (mt) setMobileTitle(mt); else { const cur = selected && byKey(selected); cur ? setMobileTitle(label(cur), cur.look || cur.state) : setMobileTitle('Vue d’ensemble'); }
   if (launchMode) { if (detailKey !== '__launch__' || force) renderLauncher(); return; }   // rafraîchie par son propre minuteur (10 s)
+  if (chatsMode) { if (detailKey !== '__chats__' || force) renderChats(); return; }   // rafraîchie par son minuteur (30 s) et à chaque nouvelle liste
   if (boardMode) { renderBoard(force); return; }
   if (newMode) { if (detailKey !== '__new__' || force) renderNew(); return; }
   if (bcMode) { if (detailKey !== '__bc__' || force) renderBc(); return; }
@@ -2926,7 +3013,7 @@ async function tick() {
   try {
     const r = await fetch('/api/state', { cache:'no-store', signal: AbortSignal.timeout(25000) });
     if (!r.ok) throw new Error('réponse ' + r.status);
-    data = await r.json(); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff();
+    data = await r.json(); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
     if (linkUp(data.server)) return;
     renderList(); renderDetail(); refreshScreen(); refreshConv(); try { renderQuota(); } catch (e) { console.log('[sessions] quota :', e); }
     if (pendingRun && runData) { const hd = pendingRun; pendingRun = null; openRun(hd); }   // ?run= : runs arrivés avant l'état
@@ -2979,15 +3066,17 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'd') { const it = selected && byKey(selected); if (it && !it.headless) { e.preventDefault(); openNew({ sessionId: it.sessionId, title: it.title, cwd: it.cwd, tags: it.tags }); } }
   else if (e.key === 't') { boardMode ? closeBoard() : openBoard(); }
   else if (e.key === 'l') { launchMode ? closeLauncher() : openLauncher(); }
+  else if (e.key === 'm') { chatsMode ? closeChats() : openChats(); }
 });
 $('q').addEventListener('input', () => { renderList(); scheduleFind(); });
 $('bell').onclick = () => { localStorage.setItem('cc.notifSeen', String(Date.now())); select(null); setPane(true); $('main').scrollTop = 0; };
-$('mback').onclick = () => { if (selected) select(null); else if (launchMode) closeLauncher(); else if (boardMode) closeBoard(); else if (newMode) closeNew(); else if (bcMode) closeBc(); else setPane(false); };
+$('mback').onclick = () => { if (selected) select(null); else if (launchMode) closeLauncher(); else if (chatsMode) closeChats(); else if (boardMode) closeBoard(); else if (newMode) closeNew(); else if (bcMode) closeBc(); else setPane(false); };
 $('mfind').onclick = () => setPane(true);
 $('newbtn').onclick = () => newMode ? closeNew() : openNew();
 $('bcbtn').onclick = () => bcMode ? closeBc() : openBc();
 $('boardbtn').onclick = () => boardMode ? closeBoard() : openBoard();
 $('launchbtn').onclick = () => launchMode ? closeLauncher() : openLauncher();
+$('chatsbtn').onclick = () => chatsMode ? closeChats() : openChats();
 $('favonly').onclick = () => { favOnly = !favOnly; localStorage.setItem('cc.favonly', favOnly ? '1' : '0'); renderList(); };
 $('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 'created'; localStorage.setItem('cc.sort', sortMode); say(sortMode === 'created' ? 'tri par date de création' : 'tri par dernière activité'); renderList(); };
 // Largeur de la barre latérale : glisser son bord droit, double-clic pour revenir à 360 px ; retenue d'une visite à l'autre.

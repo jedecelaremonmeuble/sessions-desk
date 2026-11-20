@@ -24,7 +24,7 @@ import { addContent, exists, GUID, ieq, nowMs, psArray, psIntZero, psString, psT
 import { Watch } from './watch.ts';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { applyAction } from './teams-watcher.ts';
+import { applyAction, conversationsView, markConversationSeen } from './teams-watcher.ts';
 
 /** Identifiant de CE démarrage du serveur : la page sait ainsi qu'il a redémarré, même entre deux lectures. */
 const BOOT = `${Date.now().toString(36)}-${process.pid}`;
@@ -34,13 +34,13 @@ const PAGE: Record<string, [string, string]> = {
   '/app.css': ['app.css', 'text/css; charset=utf-8'],
 };
 const JSON_TYPE = 'application/json; charset=utf-8';
-const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards']);
+const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/teams-conversations', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards']);
 const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy']);
-const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer']);
+const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer']);
 const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/close', '/api/relaunch']);
 /** Routes d'un module optionnel : sans lui, elles n'existent pas (404, comme une route inconnue). */
 const LAUNCHER_ROUTES = new Set(['/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/order', '/api/launcher/cards', '/api/launcher/answer', '/api/test-launcher-alerts']);
-const TEAMS_ROUTES = new Set(['/api/teams-wait']);
+const TEAMS_ROUTES = new Set(['/api/teams-wait', '/api/teams-conversations', '/api/teams-seen']);
 const AUTOMATION_ROUTES = new Set(['/api/automations', '/api/automations/file', '/api/automations/order']);
 export const STALE_AFTER_SECONDS = 90;
 const FORBIDDEN_URL = ['<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN""http://www.w3.org/TR/html4/strict.dtd">',
@@ -466,6 +466,21 @@ export class Server {
           const err = ['dismiss', 'remind', 'snooze'].includes(action) && /^[\w-]+$/.test(sid) && /^\d+$/.test(mid)
             ? applyAction(this.d.sf('teams-waits'), sid, mid, action, nowMs()) : 'demande invalide';
           if (!err && action === 'remind') spawn(process.execPath, [fileURLToPath(new URL('./teams-watcher.ts', import.meta.url))], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_TEAMS_WAITS_DIR: this.d.sf('teams-waits') } }).unref();
+          this.d.teamsCache = { k: '', value: null };
+          body = JSON.stringify({ error: err });
+          break;
+        }
+        case '/api/teams-conversations': {               // vue par conversation (lot 9) : tous les chats actifs, calculée à la demande
+          const v = conversationsView(this.d.sf('teams-waits'), nowMs());
+          body = JSON.stringify(v ?? { at: 0, since: 0, rows: null });
+          break;
+        }
+        case '/api/teams-seen': {                        // pointage « Vu » d'une conversation (ou de toutes : chatId « * »)
+          const j = await payload();
+          if (!isObjBody(j)) { status = 400; body = '{}'; break; }
+          const action = psString(pget(j, 'action')), chatId = psString(pget(j, 'chatId')), at = Number(pget(j, 'at'));
+          const err = ['seen', 'unseen'].includes(action) && chatId.length <= 240 && (chatId === '*' || /^[\w:@.-]+$/.test(chatId))
+            ? markConversationSeen(this.d.sf('teams-waits'), chatId, action, at, nowMs()) : 'demande invalide';
           this.d.teamsCache = { k: '', value: null };
           body = JSON.stringify({ error: err });
           break;

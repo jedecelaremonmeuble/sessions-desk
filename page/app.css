@@ -355,3 +355,19 @@ body.offline .actions, body.offline .sendbox button, body.offline .suggest, body
 /* Carte de questions du lanceur : mêmes éléments que le dialogue d'une session (.dlg), plusieurs questions empilées. */
 .dlg.qcard { margin:6px 0 12px; border-left-color:var(--ask, var(--waiting)); } .dlg.qcard .qblock + .qblock { margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
 .dlg.qcard .q { margin-bottom:8px; } .dlg.qcard .row { margin-top:6px; } .dlg.qcard .row textarea { resize:vertical; }
+/* Conversations Teams (💬) : une ligne par chat, « à toi de répondre » / « à voir » / « à jour ». */
+#chatsbtn { padding:2px 8px; font-size:13px; line-height:1; color:var(--mute); white-space:nowrap; } #chatsbtn.on { border-color:var(--shell); }
+#chatsn { color:var(--waiting); font-weight:700; font-size:11px; margin-left:3px; }
+.chats { margin-top:14px; display:flex; flex-direction:column; gap:6px; max-width:1100px; }
+.chats .chead { margin-top:12px; font-weight:600; display:flex; gap:10px; align-items:baseline; } .chats .chead .tx { color:var(--mute); font-weight:400; font-size:12px; }
+.crow { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--line); border-radius:6px; padding:7px 10px; display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:2px 12px; align-items:start; }
+.crow.reply { border-left-color:var(--waiting); } .crow.unseen { border-left-color:var(--ask); } .crow.ok { opacity:.78; }
+.crow .ct { font-weight:600; overflow-wrap:anywhere; } .crow .ct .when { color:var(--mute); font-weight:400; font-size:12px; margin-left:8px; }
+.crow .cm { grid-column:1; font-size:13px; overflow-wrap:anywhere; } .crow .cm .who { color:var(--mute); } .crow .cm .who.ses { color:var(--ask); }
+.crow .cs { grid-column:1; font-size:12px; display:flex; flex-wrap:wrap; gap:4px 6px; align-items:baseline; margin-top:2px; } .crow .cs .tag { margin-left:0; }
+.crow .cs .tag.reply { color:var(--waiting); font-weight:600; } .crow .cs .tag.ses { color:var(--done); } .crow .cs .tag.wait { color:var(--ask); }
+.crow .cs button.chip { font:inherit; font-size:11px; padding:0 7px; border-radius:999px; border:1px solid var(--line); background:transparent; color:var(--ink); cursor:pointer; max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.crow .cs button.chip:hover { border-color:var(--shell); } .crow .cs .chip.gone { color:var(--mute); cursor:default; border:1px dashed var(--line); padding:0 7px; border-radius:999px; font-size:11px; }
+.crow .cb { grid-column:2; grid-row:1 / span 3; display:flex; gap:6px; align-items:center; white-space:nowrap; } .crow .cb button { font-size:12px; padding:2px 8px; }
+body.ro .crow .cb button { display:none; }
+@media (max-width: 820px) { .crow { grid-template-columns:minmax(0, 1fr); } .crow .cb { grid-column:1; grid-row:auto; margin-top:4px; } }
