@@ -12,6 +12,7 @@ function extract(name: string, sig: string): (...a: unknown[]) => any {
 }
 const chatGroups = extract('chatGroups', 'rows');
 const chatWho = extract('chatWho', 'm');
+const chatTargets = extract('chatTargets', 'items');
 const row = (o: Record<string, unknown>) => ({ chatId: 'c', lastAt: 1000, ball: null, unseen: false, sessions: [], ...o });
 
 describe('chatGroups', () => {
@@ -31,5 +32,13 @@ describe('chatWho', () => {
   test('toi, une session en ton nom, le collègue, une application', () => {
     expect([{ by: 'me', from: 'Alex' }, { by: 'session', from: 'Alex' }, { by: 'other', from: 'Camille MARTIN' }, { by: 'app', from: null }].map((m) => chatWho(m)))
       .toEqual(['toi', '🤖 une session, en ton nom', 'Camille MARTIN', 'une application']);
+  });
+});
+
+describe('chatTargets', () => {
+  test('sessions ouvertes avec terminal seulement, la plus récemment active d’abord', () => {
+    const items = [{ kind: 'open', sessionId: 'a', since: 1 }, { kind: 'closed', sessionId: 'b', since: 9 }, { kind: 'open', sessionId: 'c', since: 5, headless: true }, { kind: 'open', sessionId: 'd', since: 3 }, { kind: 'run', since: 8 }];
+    expect(chatTargets(items).map((i: any) => i.sessionId)).toEqual(['d', 'a']);
+    expect(chatTargets(null)).toEqual([]);
   });
 });

@@ -23,8 +23,9 @@ import { upload } from './upload.ts';
 import { addContent, exists, GUID, ieq, nowMs, psArray, psIntZero, psString, psTruthy, sleep, tryParseInt, tryParseUInt } from './util.ts';
 import { Watch } from './watch.ts';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { applyAction, conversationThread, conversationsView, markConversationSeen } from './teams-watcher.ts';
+import { applyAction, conversationThread, conversationsView, linkConversation, markConversationSeen, unlinkConversation } from './teams-watcher.ts';
 
 /** Identifiant de CE démarrage du serveur : la page sait ainsi qu'il a redémarré, même entre deux lectures. */
 const BOOT = `${Date.now().toString(36)}-${process.pid}`;
@@ -36,11 +37,11 @@ const PAGE: Record<string, [string, string]> = {
 const JSON_TYPE = 'application/json; charset=utf-8';
 const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/teams-conversations', '/api/teams-thread', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards']);
 const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy']);
-const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/teams-reply', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer']);
+const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/teams-reply', '/api/teams-link', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer']);
 const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/close', '/api/relaunch']);
 /** Routes d'un module optionnel : sans lui, elles n'existent pas (404, comme une route inconnue). */
 const LAUNCHER_ROUTES = new Set(['/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/order', '/api/launcher/cards', '/api/launcher/answer', '/api/test-launcher-alerts']);
-const TEAMS_ROUTES = new Set(['/api/teams-wait', '/api/teams-conversations', '/api/teams-seen', '/api/teams-thread', '/api/teams-reply']);
+const TEAMS_ROUTES = new Set(['/api/teams-wait', '/api/teams-conversations', '/api/teams-seen', '/api/teams-thread', '/api/teams-reply', '/api/teams-link']);
 const AUTOMATION_ROUTES = new Set(['/api/automations', '/api/automations/file', '/api/automations/order']);
 export const STALE_AFTER_SECONDS = 90;
 const FORBIDDEN_URL = ['<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN""http://www.w3.org/TR/html4/strict.dtd">',
@@ -370,11 +371,15 @@ export class Server {
     }
   }
 
-  /** Envoi d'une réponse Teams par le veilleur INSTALLÉ sur le poste (~/.claude/scripts/teams-watcher : c'est lui qui a
-   *  la configuration et le jeton) ; à défaut la copie du serveur, qui refuse faute de configuration. Texte sur stdin. */
-  #teamsSend(chatId: string, text: string): Promise<string | null> {
+  /** Le veilleur INSTALLÉ sur le poste (~/.claude/scripts/teams-watcher : c'est lui qui a la configuration et le jeton) ;
+   *  à défaut la copie du serveur, sans configuration (elle refuse d'envoyer et ne remet rien). */
+  #watcherScript(): string {
     const installed = join(this.cfg.claude, 'scripts', 'teams-watcher', 'teams-watcher.ts');
-    const script = exists(installed) ? installed : fileURLToPath(new URL('./teams-watcher.ts', import.meta.url));
+    return exists(installed) ? installed : fileURLToPath(new URL('./teams-watcher.ts', import.meta.url));
+  }
+  /** Envoi d'une réponse Teams par le veilleur. Texte sur stdin. */
+  #teamsSend(chatId: string, text: string): Promise<string | null> {
+    const script = this.#watcherScript();
     return new Promise((done) => {
       let err = '', over = false;
       const end = (v: string | null) => { if (!over) { over = true; clearTimeout(timer); done(v); } };
@@ -504,6 +509,26 @@ export class Server {
           const chatId = psString(pget(j, 'chatId')), text = psString(pget(j, 'text'));
           const err = chatId.length <= 240 && /^[\w:@.-]+$/.test(chatId) && text.trim() && text.length <= 8000
             ? await this.#teamsSend(chatId, text) : 'demande invalide';
+          this.d.teamsCache = { k: '', value: null };
+          body = JSON.stringify({ error: err });
+          break;
+        }
+        case '/api/teams-link': {                        // « Confier » / « Détacher » un fil (lot 11) : lien chat → session, remise par le veilleur
+          const j = await payload();
+          if (!isObjBody(j)) { status = 400; body = '{}'; break; }
+          const action = psString(pget(j, 'action')), chatId = psString(pget(j, 'chatId')), sid = psString(pget(j, 'sessionId'));
+          const dir = this.d.sf('teams-waits');
+          // Facultatifs : message de référence, consigne de l'utilisateur, remise unique (sans suivre la suite du fil).
+          const anchor = psString(pget(j, 'anchor')), note = psString(pget(j, 'note'));
+          const more = { ...(/^\d{6,24}$/.test(anchor) ? { anchor } : {}), ...(note.trim() ? { note } : {}), ...(psTruthy(pget(j, 'once')) ? { once: true } : {}) };
+          let err: string | null = 'demande invalide';
+          if (chatId.length <= 240 && /^[\w:@.-]+$/.test(chatId)) {
+            if (action === 'detach') err = unlinkConversation(dir, chatId, nowMs());
+            else if (action === 'attach' && sid === 'new') err = linkConversation(dir, chatId, randomUUID(), nowMs(), { fresh: true, ...more });
+            else if (action === 'attach' && /^[\w-]{1,80}$/.test(sid)) err = linkConversation(dir, chatId, sid, nowMs(), more);
+          }
+          // Une passe tout de suite, détachée : la session reçoit le fil sans attendre les 2 min (si une passe tourne déjà, à la suivante).
+          if (!err && action === 'attach') spawn(process.execPath, [this.#watcherScript()], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_TEAMS_WAITS_DIR: dir } }).unref();
           this.d.teamsCache = { k: '', value: null };
           body = JSON.stringify({ error: err });
           break;
