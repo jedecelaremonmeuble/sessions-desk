@@ -1855,33 +1855,33 @@ async function sendOrder(it, o) {
 // ── Après un redémarrage de Windows : sessions qui étaient ouvertes, à rouvrir d'un coup ──
 const rebootPick = new Map();       // sessionId -> coché ?
 async function reopenMany(ids) {
-  if (!ids.length) return say('aucune session cochée');
-  say('réouverture de ' + plural(ids.length, 'session', 'sessions') + '…');
+  if (!ids.length) return say(T('aucune session cochée', 'no session ticked'));
+  say(T('réouverture de ' + plural(ids.length, 'session', 'sessions') + '…', 'reopening ' + plural(ids.length, 'session', 'sessions') + '…'));
   try {
     const r = await (await fetch('/api/reopen-many', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ ids }) })).json();
-    say(r.error ? 'refusé : ' + r.error : plural(r.opened, 'onglet ouvert', 'onglets ouverts') + (r.skipped ? ' (' + r.skipped + ' ignorée(s))' : '') + ' — les sessions réapparaissent dans quelques secondes');
-  } catch { say('échec de la demande'); }
+    say(r.error ? T('refusé : ', 'refused: ') + r.error : T(plural(r.opened, 'onglet ouvert', 'onglets ouverts') + (r.skipped ? ' (' + r.skipped + ' ignorée(s))' : '') + ' — les sessions réapparaissent dans quelques secondes', plural(r.opened, 'tab opened', 'tabs opened') + (r.skipped ? ' (' + r.skipped + ' skipped)' : '') + ' — the sessions reappear in a few seconds'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   tick();
 }
-async function dismissReboot() { try { await post('/api/reboot-dismiss'); say('liste d\'avant le redémarrage oubliée'); } catch { say('échec de la demande'); } tick(); }
+async function dismissReboot() { try { await post('/api/reboot-dismiss'); say(T('liste d\'avant le redémarrage oubliée', 'pre-restart list dismissed')); } catch { say(T('échec de la demande', 'request failed')); } tick(); }
 function rebootPanel() {
   const rb = data.reboot; if (!rb) return null;
   const box = el('div', 'reboot');
-  box.append(el('div', 'rt', 'Windows a redémarré — ' + plural(rb.sessions.length, 'session était ouverte', 'sessions étaient ouvertes') + ' le ' + new Date(rb.at).toLocaleString('fr-FR')));
+  box.append(el('div', 'rt', T('Windows a redémarré — ' + plural(rb.sessions.length, 'session était ouverte', 'sessions étaient ouvertes') + ' le ' + new Date(rb.at).toLocaleString('fr-FR'), 'Windows restarted — ' + plural(rb.sessions.length, 'session was open', 'sessions were open') + ' on ' + new Date(rb.at).toLocaleString('en-GB'))));
   const ul = el('div', 'rl');
   for (const s of rb.sessions) {
     if (!rebootPick.has(s.sessionId)) rebootPick.set(s.sessionId, true);
     const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = rebootPick.get(s.sessionId); cb.onchange = () => rebootPick.set(s.sessionId, cb.checked);
-    lab.append(cb, el('span', null, s.title), el('span', 'rm', (s.pr ? 'PR #' + s.pr + ' · ' : '') + 'active il y a ' + ago(data.now - s.lastActivity)));
+    lab.append(cb, el('span', null, s.title), el('span', 'rm', (s.pr ? 'PR #' + s.pr + ' · ' : '') + T('active il y a ' + ago(data.now - s.lastActivity), 'active ' + ago(data.now - s.lastActivity) + ' ago')));
     ul.append(lab);
   }
   box.append(ul);
   const act = el('div', 'actions');
-  const b1 = el('button', 'primary', 'Rouvrir la sélection'); b1.onclick = () => reopenMany(rb.sessions.map(s => s.sessionId).filter(id => rebootPick.get(id)));
-  const b2 = el('button', null, 'Tout cocher / décocher'); b2.onclick = () => { const all = rb.sessions.every(s => rebootPick.get(s.sessionId)); rb.sessions.forEach(s => rebootPick.set(s.sessionId, !all)); renderDetail(true); };
-  const b3 = el('button', null, 'Ignorer'); b3.title = 'Ne plus proposer ces sessions (elles restent dans « Fermées, reprenables »)'; b3.onclick = () => dismissReboot();
+  const b1 = el('button', 'primary', T('Rouvrir la sélection', 'Reopen selected')); b1.onclick = () => reopenMany(rb.sessions.map(s => s.sessionId).filter(id => rebootPick.get(id)));
+  const b2 = el('button', null, T('Tout cocher / décocher', 'Tick / untick all')); b2.onclick = () => { const all = rb.sessions.every(s => rebootPick.get(s.sessionId)); rb.sessions.forEach(s => rebootPick.set(s.sessionId, !all)); renderDetail(true); };
+  const b3 = el('button', null, T('Ignorer', 'Dismiss')); b3.title = T('Ne plus proposer ces sessions (elles restent dans « Fermées, reprenables »)', 'Stop offering these sessions (they stay in "Closed, reopenable")'); b3.onclick = () => dismissReboot();
   act.append(b1, b2, b3); box.append(act);
-  box.append(el('div', 'hint', 'Un onglet Windows Terminal par session, chacune reprise où elle s’était arrêtée (claude --resume).'));
+  box.append(el('div', 'hint', T('Un onglet Windows Terminal par session, chacune reprise où elle s’était arrêtée (claude --resume).', 'One Windows Terminal tab per session, each resumed where it stopped (claude --resume).')));
   return box;
 }
 
@@ -1896,12 +1896,12 @@ function renderList() {
   const items = allItems().filter(it => (!favOnly || it.fav) && (!it.hidden || tokens.length) && tokens.every(t => tagMatch(it, t) ?? it.hay.includes(t)));
   $('favonly').className = favOnly ? 'on' : '';
   $('sortbtn').className = sortMode === 'created' ? 'on' : '';
-  $('sortbtn').title = sortMode === 'created' ? 'Trié par date de création (la plus récente d’abord) — clic : par dernière activité' : 'Trié par dernière activité — clic : par date de création';
+  $('sortbtn').title = sortMode === 'created' ? T('Trié par date de création (la plus récente d’abord) — clic : par dernière activité', 'Sorted by creation date (newest first) — click: by last activity') : T('Trié par dernière activité — clic : par date de création', 'Sorted by last activity — click: by creation date');
   const expandAll = tokens.length || favOnly;     // recherche ou filtre favoris : on cherche aussi dans les groupes repliés
   const list = $('list'); list.replaceChildren(); flat = [];
   if (data.reboot) {               // après un redémarrage de Windows : rappel en tête, la vue d'ensemble propose la réouverture
-    const b = el('div', 'rbanner', '↻ ' + plural(data.reboot.sessions.length, 'session ouverte', 'sessions ouvertes') + ' avant le redémarrage — rouvrir…');
-    b.title = 'Afficher la liste dans la vue d\'ensemble'; b.onclick = () => select(null); list.append(b);
+    const b = el('div', 'rbanner', T('↻ ' + plural(data.reboot.sessions.length, 'session ouverte', 'sessions ouvertes') + ' avant le redémarrage — rouvrir…', '↻ ' + plural(data.reboot.sessions.length, 'session open', 'sessions open') + ' before the restart — reopen…'));
+    b.title = T('Afficher la liste dans la vue d\'ensemble', 'Show the list in the overview'); b.onclick = () => select(null); list.append(b);
   }
   // Consultées récemment : raccourci en tête de liste. Pas pendant une recherche ou le filtre favoris (bruit),
   // et ces lignes n'entrent pas dans la navigation ↑ ↓ (la session y figure déjà dans son groupe d'état).
@@ -1911,16 +1911,16 @@ function renderList() {
     if (rec.length) {
       const isCollapsed = collapsed.has('recent');
       const head = el('div', 'grp');
-      head.append(el('span', 'car', isCollapsed ? '▸' : '▾'), el('span', null, 'Consultées récemment'), el('span', 'n', rec.length));
-      head.title = 'Les dernières sessions ouvertes dans cette page  ( b : revenir à la précédente )';
+      head.append(el('span', 'car', isCollapsed ? '▸' : '▾'), el('span', null, T('Consultées récemment', 'Recently viewed')), el('span', 'n', rec.length));
+      head.title = T('Les dernières sessions ouvertes dans cette page  ( b : revenir à la précédente )', 'The last sessions opened in this page  ( b: back to the previous one )');
       head.onclick = () => { collapsed.has('recent') ? collapsed.delete('recent') : collapsed.add('recent'); localStorage.setItem('cc.collapsed', JSON.stringify([...collapsed])); renderList(); };
       list.append(head);
       if (!isCollapsed) for (const r of rec) {
         const it = all.get(r.k);
         const row = el('div', 'row-s ' + (it.look || it.state) + (it.key === selected ? ' sel' : ''));
         const tt = el('span', 't'); if (it.fav) tt.append(el('span', 'star', '★ ')); tt.append(label(it));
-        row.append(el('span', 'dot'), tt, el('span', 'age', 'vue il y a ' + ago(Date.now() - r.at)));
-        row.append(el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : (it.kind === 'closed' ? 'fermée — terminal disparu' : LABEL[it.state]) + (it.lastPrompt ? ' · ' + it.lastPrompt : '')));
+        row.append(el('span', 'dot'), tt, el('span', 'age', T('vue il y a ' + ago(Date.now() - r.at), 'viewed ' + ago(Date.now() - r.at) + ' ago')));
+        row.append(el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : (it.kind === 'closed' ? T('fermée — terminal disparu', 'closed — terminal gone') : LABEL[it.state]) + (it.lastPrompt ? ' · ' + it.lastPrompt : '')));
         row.title = label(it); row.onclick = () => select(it.key); row.ondblclick = () => primary(it);
         list.append(row);
       }
@@ -1940,19 +1940,19 @@ function renderList() {
     const urgent = g.key === 'auto' ? rows.filter(it => live(it) || it.look === 'waiting' || it.look === 'ask') : g.auto ? rows.filter(it => live(it) || it.look === 'waiting') : [];
     const head = el('div', 'grp');
     const gTitle = g.key === 'auto' ? autoTitle(g.title, rows) : g.auto ? g.title + (autoGroupTitle(g.auto) ? ' — ' + autoGroupTitle(g.auto) : '') : g.title;
-    head.append(el('span', 'car', isCollapsed ? '▸' : '▾'), el('span', null, gTitle + (g.key === 'closed' && closedData.days ? ' · ' + closedData.days + ' j' : '')), el('span', 'n', rows.length));
-    if (g.auto) head.title = 'Passes du jour qui ont agi ou échoué, et la passe en cours. Les passes sans effet sont comptées ici sans ligne. Replié : seulement en cours et en échec.' + (g.auto.last ? '\nDernière passe : ' + g.auto.last.summary : '');
-    if (g.key === 'auto') head.title = 'Runs du lanceur depuis minuit et tout run en cours, plus les autres claude -p. Replié : seulement en cours, en échec et PR qui attend ta validation. L’historique long est dans la vue 🤖 ( l ).';
+    head.append(el('span', 'car', isCollapsed ? '▸' : '▾'), el('span', null, gTitle + (g.key === 'closed' && closedData.days ? T(' · ' + closedData.days + ' j', ' · ' + closedData.days + ' d') : '')), el('span', 'n', rows.length));
+    if (g.auto) head.title = T('Passes du jour qui ont agi ou échoué, et la passe en cours. Les passes sans effet sont comptées ici sans ligne. Replié : seulement en cours et en échec.', "Today's passes that acted or failed, and the running pass. Passes with no effect are counted here without a row. Collapsed: only running and failed.") + (g.auto.last ? T('\nDernière passe : ', '\nLast pass: ') + g.auto.last.summary : '');
+    if (g.key === 'auto') head.title = T('Runs du lanceur depuis minuit et tout run en cours, plus les autres claude -p. Replié : seulement en cours, en échec et PR qui attend ta validation. L’historique long est dans la vue 🤖 ( l ).', 'Launcher runs since midnight and any running run, plus the other claude -p. Collapsed: only running, failed and PRs waiting for your approval. The long history is in the 🤖 view ( l ).');
     if (g.key === 'todo' && rows.some(it => it.state === 'done' || it.state === 'ask')) {
-      const all = el('a', null, 'tout marquer vu'); all.href = '#'; all.style.textTransform = 'none'; all.style.letterSpacing = '0'; all.style.fontWeight = '400';
-      all.onclick = async e => { e.preventDefault(); e.stopPropagation(); try { await post('/api/ack?all=1'); say('sessions terminées marquées comme vues'); tick(); } catch {} };
+      const all = el('a', null, T('tout marquer vu', 'mark all seen')); all.href = '#'; all.style.textTransform = 'none'; all.style.letterSpacing = '0'; all.style.fontWeight = '400';
+      all.onclick = async e => { e.preventDefault(); e.stopPropagation(); try { await post('/api/ack?all=1'); say(T('sessions terminées marquées comme vues', 'finished sessions marked as seen')); tick(); } catch {} };
       head.insertBefore(all, head.lastChild);
     }
     if (g.key === 'closed' && !expandAll) {
       const merged = rows.filter(it => it.prInfo && it.prInfo.state === 'MERGED');
       if (merged.length) {
-        const a = el('a', 'lnk', 'masquer les ' + merged.length + ' à PR mergée'); a.href = '#';
-        a.title = 'Retire de la liste les sessions fermées dont la PR est mergée (réversible, transcripts intacts)';
+        const a = el('a', 'lnk', T('masquer les ' + merged.length + ' à PR mergée', 'hide the ' + merged.length + ' with a merged PR')); a.href = '#';
+        a.title = T('Retire de la liste les sessions fermées dont la PR est mergée (réversible, transcripts intacts)', 'Removes from the list the closed sessions whose PR is merged (reversible, transcripts untouched)');
         a.onclick = e => { e.preventDefault(); e.stopPropagation(); setHidden(merged, true); };
         head.insertBefore(a, head.lastChild);
       }
@@ -1961,32 +1961,32 @@ function renderList() {
     list.append(head);
     if (isCollapsed && !urgent.length) continue;
     if (!rows.length && g.auto) continue;
-    if (!rows.length) { const e = el('div', 'row-s empty'); e.append(el('span'), el('span', 'sub', 'rien à traiter')); e.style.cursor = 'default'; list.append(e); continue; }
+    if (!rows.length) { const e = el('div', 'row-s empty'); e.append(el('span'), el('span', 'sub', T('rien à traiter', 'nothing to handle'))); e.style.cursor = 'default'; list.append(e); continue; }
     for (const it of isCollapsed ? urgent : rows) {
       flat.push(it.key);
       const r = el('div', 'row-s ' + (it.look || it.state) + (it.kind === 'run' || it.kind === 'pass' ? ' run' : '') + (it.key === selected ? ' sel' : ''));
       r.dataset.key = it.key;
       const tt = el('span', 't'); if (it.fav) tt.append(el('span', 'star', '★ ')); tt.append(label(it));
       { const d = driftTag(it); if (d) tt.append(d); }
-      if (it.hidden) tt.append(el('span', 'tag hid', 'masquée'));
-      r.append(el('span', 'dot'), tt, el('span', 'age', (it.model ? modelName(it.model) + ' · ' : '') + (it.tokens ? ktok(it.tokens) + ' · ' : '') + (sortMode === 'created' ? 'créée il y a ' + ago(data.now - createdOf(it)) : ago(data.now - it.since))));
-      const merged = (closable(it) ? '✓ peut se fermer · ' : it.prInfo && it.prInfo.state === 'MERGED' ? 'PR mergée · ' : '') + (it.status === 'shell' && it.state !== 'shell' ? 'commande en arrière-plan · ' : '');
-      const sub = el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : it.kind === 'open' ? merged + (it.state === 'idle' ? (it.lastPrompt || it.name) : LABEL[it.state] + (it.lastPrompt ? ' · ' + it.lastPrompt : '')) : 'fermée · ' + merged + (it.lastPrompt || short(it.cwd)));
+      if (it.hidden) tt.append(el('span', 'tag hid', T('masquée', 'hidden')));
+      r.append(el('span', 'dot'), tt, el('span', 'age', (it.model ? modelName(it.model) + ' · ' : '') + (it.tokens ? ktok(it.tokens) + ' · ' : '') + (sortMode === 'created' ? T('créée il y a ' + ago(data.now - createdOf(it)), 'created ' + ago(data.now - createdOf(it)) + ' ago') : ago(data.now - it.since))));
+      const merged = (closable(it) ? T('✓ peut se fermer · ', '✓ can be closed · ') : it.prInfo && it.prInfo.state === 'MERGED' ? T('PR mergée · ', 'PR merged · ') : '') + (it.status === 'shell' && it.state !== 'shell' ? T('commande en arrière-plan · ', 'background command · ') : '');
+      const sub = el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : it.kind === 'open' ? merged + (it.state === 'idle' ? (it.lastPrompt || it.name) : LABEL[it.state] + (it.lastPrompt ? ' · ' + it.lastPrompt : '')) : T('fermée · ', 'closed · ') + merged + (it.lastPrompt || short(it.cwd)));
       r.append(sub);
       const chips = tagChips(it, 'tags'); if (chips) r.append(chips);
       const inb = teamsInboundOf(it);
-      if (inb) { const x = el('span', 'tw inb', '📥 demande Teams de ' + (inb.chatLabel || inb.from)); x.title = 'Session ouverte automatiquement pour un message reçu en direct sur Teams : elle propose une réponse, rien ne part sans toi'; r.append(x); }
+      if (inb) { const x = el('span', 'tw inb', T('📥 demande Teams de ' + (inb.chatLabel || inb.from), '📥 Teams request from ' + (inb.chatLabel || inb.from))); x.title = T('Session ouverte automatiquement pour un message reçu en direct sur Teams : elle propose une réponse, rien ne part sans toi', 'Session opened automatically for a direct message received on Teams: it suggests a reply, nothing is sent without you'); r.append(x); }
       const tws = teamsWaitsOf(it);
       if (tws.length) {
         const tw = el('span', 'tw' + (tws.some(w => w.status === 'replied') ? ' rep' : tws.some(w => w.alertedAt) ? ' alert' : ''), teamsWaitLine(tws[0], data.now, data.teams.reminders) + (tws.length > 1 ? ' · +' + (tws.length - 1) : ''));
-        tw.title = tws.map(w => teamsWaitLine(w, data.now, data.teams.reminders) + '\n  « ' + w.excerpt + ' »').join('\n');
+        tw.title = tws.map(w => teamsWaitLine(w, data.now, data.teams.reminders) + T('\n  « ' + w.excerpt + ' »', '\n  "' + w.excerpt + '"')).join('\n');
         r.append(tw);
       }
       const vals = validationsOf(it), vb = validationBadge(vals);
       if (vb) { const x = el('span', 'tw val' + (vals.refused || vals.unqualified ? ' ref' : vals.expected ? ' pre' : ''), vb); x.title = vals.items.filter(i => !i.withdrawn).map(i => validationLine(i, data.now) + '\n  ' + i.question).join('\n'); r.append(x); }
       if (canWrite && closable(it)) {                    // « peut se fermer » (inactive, tout est mergé) : ✕ la ferme sans ouvrir la session
-        const line = el('span', 'sug'), bx = el('button', 'sgo', '✕ Fermer');
-        bx.title = 'Inactive et tout est mergé : quitter la session (/exit, après confirmation) — la conversation reste reprenable depuis « Fermées »';
+        const line = el('span', 'sug'), bx = el('button', 'sgo', T('✕ Fermer', '✕ Close'));
+        bx.title = T('Inactive et tout est mergé : quitter la session (/exit, après confirmation) — la conversation reste reprenable depuis « Fermées »', 'Idle and everything is merged: quit the session (/exit, after confirmation) — the conversation stays reopenable from "Closed"');
         bx.onclick = e => { e.stopPropagation(); closeSession(it); };
         bx.ondblclick = e => e.stopPropagation();
         line.append(bx); r.append(line);
@@ -1995,21 +1995,21 @@ function renderList() {
       if (sg) {                                          // proposition de Claude Code : ▶ la lance sans ouvrir la session
         const line = el('span', 'sug'), cut = sg.endsWith('…');
         const go = el('button', 'sgo', '▶');
-        go.title = cut ? 'Coupée à l’écran : lancée telle que Claude Code l’a écrite (Tab puis Entrée dans le terminal)' : 'Lancer cette proposition (revérifiée à l’écran juste avant)';
+        go.title = cut ? T('Coupée à l’écran : lancée telle que Claude Code l’a écrite (Tab puis Entrée dans le terminal)', 'Cut off on screen: launched as Claude Code wrote it (Tab then Enter in the terminal)') : T('Lancer cette proposition (revérifiée à l’écran juste avant)', 'Launch this suggestion (checked again on screen just before)');
         go.onclick = e => { e.stopPropagation(); launchSuggestion(it, sg); };
         go.ondblclick = e => e.stopPropagation();
-        line.append(go, el('span', 'stx', '💡 ' + sg)); line.title = 'Proposition de Claude Code : ' + sg; r.append(line);
+        line.append(go, el('span', 'stx', '💡 ' + sg)); line.title = T('Proposition de Claude Code : ' + sg, 'Claude Code suggestion: ' + sg); r.append(line);
       }
-      r.title = label(it) + (it.model ? '\nmodèle : ' + it.model : '') + (it.tokens ? '\ncontexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens' : '');
+      r.title = label(it) + (it.model ? T('\nmodèle : ', '\nmodel: ') + it.model : '') + (it.tokens ? T('\ncontexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens', '\ncontext: ' + it.tokens.toLocaleString('en-GB') + ' tokens') : '');
       r.onclick = () => select(it.key);
       r.ondblclick = () => primary(it);
       list.append(r);
     }
   }
-  if (!flat.length && expandAll) list.append(el('div', 'grp', favOnly && !tokens.length ? 'Aucun favori — touche f sur une session' : 'Aucun résultat'));
+  if (!flat.length && expandAll) list.append(el('div', 'grp', favOnly && !tokens.length ? T('Aucun favori — touche f sur une session', 'No favourites — press f on a session') : T('Aucun résultat', 'No results')));
   const unread = data.notifs.filter(nf => nf.at > Number(localStorage.getItem('cc.notifSeen') || 0)).length; $('belln').textContent = unread ? unread : '';
   const todo = allItems().filter(it => TODO.includes(it.state)).length;
-  document.title = (todo ? '(' + todo + ') ' : '') + 'Sessions Claude Code';
+  document.title = (todo ? '(' + todo + ') ' : '') + T('Sessions Claude Code', 'Claude Code sessions');
   refreshHoverCard();
 }
 
@@ -2034,7 +2034,7 @@ function refreshHoverCard() {
   const c = hoverCardEl(); c.className = it.look || it.state || '';
   const sig = hoverKey + '\n' + reply + '\n' + (it.suggestion || '');
   if (c.dataset.sig !== sig) {                     // même contenu : on ne touche pas au DOM (pas de saut de défilement)
-    c.dataset.sig = sig; c.replaceChildren(el('div', 'hh', 'Dernier message de Claude'), el('div', 'hb', reply));
+    c.dataset.sig = sig; c.replaceChildren(el('div', 'hh', T('Dernier message de Claude', "Claude's last message")), el('div', 'hb', reply));
     if (it.suggestion) c.append(el('div', 'hs', '💡 ' + it.suggestion));
   }
   c.hidden = false;
@@ -2067,7 +2067,7 @@ function touchRecent(key) {
 function back() {                                  // revenir à la session consultée juste avant
   const keys = new Set(allItems().map(it => it.key));
   const prev = recent.find(r => r.k !== selected && keys.has(r.k));
-  if (!prev) { say('aucune autre session consultée récemment'); return; }
+  if (!prev) { say(T('aucune autre session consultée récemment', 'no other recently viewed session')); return; }
   if (selected) touchRecent(selected);
   select(prev.k, true); touchRecent(prev.k); renderList();
 }
@@ -2083,7 +2083,7 @@ function setPane(detail) {
 }
 function setMobileTitle(text, state) {
   const t = $('mtitle'); t.className = 'chip ' + (state || ''); t.replaceChildren(); if (state) t.append(el('span', 'dot')); t.append(el('span', 't', text));
-  document.title = (text.length > 60 ? text.slice(0, 59) + '…' : text) + ' — Sessions Claude Code';   // le menu de Précédent / Suivant liste les écrans par leur nom
+  document.title = (text.length > 60 ? text.slice(0, 59) + '…' : text) + T(' — Sessions Claude Code', ' — Claude Code sessions');   // le menu de Précédent / Suivant liste les écrans par leur nom
 }
 
 // ── Navigation : l'adresse dit l'écran ouvert ──────────────────────────────────────────────────────────────────────
@@ -2169,29 +2169,29 @@ function select(key, scroll) {
 const REMOTE = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 let canWrite = !REMOTE;
 function whoami() {
-  fetch('/api/whoami', { cache:'no-store' }).then(r => r.json()).then(w => { const was = canWrite; canWrite = !!w.write; document.body.classList.toggle('ro', !canWrite); if (canWrite && !was) say('écriture autorisée à distance (' + w.login + ')'); renderDetail(true); }).catch(() => {});
+  fetch('/api/whoami', { cache:'no-store' }).then(r => r.json()).then(w => { const was = canWrite; canWrite = !!w.write; document.body.classList.toggle('ro', !canWrite); if (canWrite && !was) say(T('écriture autorisée à distance (' + w.login + ')', 'remote writing allowed (' + w.login + ')')); renderDetail(true); }).catch(() => {});
 }
 if (REMOTE) { document.body.classList.add('ro', 'remote'); whoami(); }
 async function post(path) {
-  if (!canWrite) return { error: 'lecture seule à distance', code: 4 };
-  if (link.down) return { error: 'serveur injoignable — reconnexion en cours', code: 5 };
+  if (!canWrite) return { error: T('lecture seule à distance', 'read-only remotely'), code: 4 };
+  if (link.down) return { error: T('serveur injoignable — reconnexion en cours', 'server unreachable — reconnecting'), code: 5 };
   const r = await fetch(path, { method:'POST' }); return r.json();
 }
 async function openTab(it) {
-  say('ouverture de « ' + label(it) + ' »…');
+  say(T('ouverture de « ' + label(it) + ' »…', 'opening "' + label(it) + '"…'));
   try { const r = await post('/api/focus?pid=' + it.pid);
-    if (r.code === 0) { noTab.delete(it.key); say('onglet affiché'); }
-    else { noTab.add(it.key); say(r.code === 3 ? 'onglet introuvable — tu peux la relancer dans un nouvel onglet' : 'console de la session inaccessible — tu peux la relancer dans un nouvel onglet'); renderDetail(); } }
-  catch { say('échec de la demande'); }
+    if (r.code === 0) { noTab.delete(it.key); say(T('onglet affiché', 'tab shown')); }
+    else { noTab.add(it.key); say(r.code === 3 ? T('onglet introuvable — tu peux la relancer dans un nouvel onglet', 'tab not found — you can restart it in a new tab') : T('console de la session inaccessible — tu peux la relancer dans un nouvel onglet', 'session console unreachable — you can restart it in a new tab')); renderDetail(); } }
+  catch { say(T('échec de la demande', 'request failed')); }
 }
 const noTab = new Set();     // sessions dont l'onglet n'a pas pu être affiché : on propose la relance
 async function relaunch(it) {
   // Sans confirmation : rien ne se perd (session inactive, invite vide exigées par le serveur ; conversation reprise).
-  say('relance de « ' + label(it) + ' »…');
+  say(T('relance de « ' + label(it) + ' »…', 'restarting "' + label(it) + '"…'));
   relaunching = { key: it.key, until: Date.now() + 90000 };
   try { const r = await post('/api/relaunch?pid=' + it.pid);
-    if (r.error) { relaunching = null; say('non relancée : ' + r.error); } else { noTab.delete(it.key); say('relancée dans un nouvel onglet — elle réapparaît dans quelques secondes'); } }
-  catch { relaunching = null; say('échec de la demande'); }
+    if (r.error) { relaunching = null; say(T('non relancée : ', 'not restarted: ') + r.error); } else { noTab.delete(it.key); say(T('relancée dans un nouvel onglet — elle réapparaît dans quelques secondes', 'restarted in a new tab — it reappears in a few seconds')); } }
+  catch { relaunching = null; say(T('échec de la demande', 'request failed')); }
   tick();
 }
 // Entre la fermeture et la réapparition dans le nouvel onglet, la session n'est dans aucune liste pendant quelques
@@ -2200,35 +2200,35 @@ let relaunching = null;
 const awaitingRelaunch = key => !!relaunching && relaunching.key === key && Date.now() < relaunching.until;
 async function closeSession(it) {
   if (!it || it.kind !== 'open') return;
-  if (!confirm('Fermer « ' + label(it) + ' » ?\n\nLa conversation est conservée : elle passe dans « Fermées, reprenables ». L’onglet du terminal reste ouvert sur une invite PowerShell.')) return;
-  say('fermeture de « ' + label(it) + ' »…');
+  if (!confirm(T('Fermer « ' + label(it) + ' » ?\n\nLa conversation est conservée : elle passe dans « Fermées, reprenables ». L’onglet du terminal reste ouvert sur une invite PowerShell.', 'Close "' + label(it) + '"?\n\nThe conversation is kept: it moves to "Closed, reopenable". The terminal tab stays open on a PowerShell prompt.'))) return;
+  say(T('fermeture de « ' + label(it) + ' »…', 'closing "' + label(it) + '"…'));
   try {
     let r = await post('/api/close?pid=' + it.pid);
     if (r.needForce) {
-      if (!confirm(r.error + '.\n\nL’arrêter de force ? Le travail en cours dans ce tour sera perdu ; la conversation reste reprenable.')) { say('fermeture annulée'); return; }
+      if (!confirm(T(r.error + '.\n\nL’arrêter de force ? Le travail en cours dans ce tour sera perdu ; la conversation reste reprenable.', r.error + '.\n\nForce it to stop? The work in progress in this turn will be lost; the conversation stays reopenable.'))) { say(T('fermeture annulée', 'close cancelled')); return; }
       r = await post('/api/close?pid=' + it.pid + '&force=1');
     }
-    say(r.error ? 'non fermée : ' + r.error : (r.forced ? 'session arrêtée' : 'session fermée') + ' — reprenable depuis « Fermées »');
-  } catch { say('échec de la demande'); }
+    say(r.error ? T('non fermée : ', 'not closed: ') + r.error : T((r.forced ? 'session arrêtée' : 'session fermée') + ' — reprenable depuis « Fermées »', (r.forced ? 'session stopped' : 'session closed') + ' — reopenable from "Closed"'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   tick(); loadClosed();
 }
 // Masquer des sessions FERMÉES : elles sortent de la liste, des consultées et des compteurs ; la recherche les retrouve.
 let hiddenSet = new Set();
 async function setHidden(list, on) {
   list = list.filter(it => it && it.kind === 'closed'); if (!list.length) return;
-  if (on && list.length > 1 && !confirm('Masquer ' + list.length + ' sessions fermées ?\n\nElles restent trouvables par la recherche et peuvent être ré-affichées ; les transcripts ne sont pas touchés.')) return;
+  if (on && list.length > 1 && !confirm(T('Masquer ' + list.length + ' sessions fermées ?\n\nElles restent trouvables par la recherche et peuvent être ré-affichées ; les transcripts ne sont pas touchés.', 'Hide ' + list.length + ' closed sessions?\n\nThey can still be found by search and shown again; the transcripts are not touched.'))) return;
   for (const it of list) on ? hiddenSet.add(it.key) : hiddenSet.delete(it.key);
   if (on && list.some(it => it.key === selected)) select(null); else { renderList(); renderDetail(true); }
   try {
     await fetch('/api/hide', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ ids: list.map(it => it.key), on }) });
-    say(on ? (list.length > 1 ? list.length + ' sessions masquées' : 'session masquée') + ' — retrouvable par la recherche' : 'session ré-affichée');
-  } catch { say('échec de la demande'); }
+    say(on ? T((list.length > 1 ? list.length + ' sessions masquées' : 'session masquée') + ' — retrouvable par la recherche', (list.length > 1 ? list.length + ' sessions hidden' : 'session hidden') + ' — findable by search') : T('session ré-affichée', 'session shown again'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   tick();
 }
 async function toggleFav(it) {
   const on = !favs.has(it.key); on ? favs.add(it.key) : favs.delete(it.key);
   renderList(); renderDetail();
-  try { await post('/api/fav?id=' + it.sessionId + '&on=' + (on ? 1 : 0)); say(on ? 'ajoutée aux favoris' : 'retirée des favoris'); } catch { say('échec de la demande'); }
+  try { await post('/api/fav?id=' + it.sessionId + '&on=' + (on ? 1 : 0)); say(on ? T('ajoutée aux favoris', 'added to favourites') : T('retirée des favoris', 'removed from favourites')); } catch { say(T('échec de la demande', 'request failed')); }
 }
 // ── Pièces jointes : glisser-déposer n'importe où sur la page, coller une capture (Ctrl+V), bouton « Joindre » (téléphone).
 // Le fichier part au serveur dès qu'il est déposé (/api/upload, écrit sous ~/.claude/uploads) ; le message envoyé porte
@@ -2299,8 +2299,8 @@ function withAttachments(key, text) {
 }
 function clearAttachments(key) { for (const a of attList(key)) if (a.url) URL.revokeObjectURL(a.url); attachSets[key] = []; refreshAttach(key); }
 async function uploadFile(key, file) {
-  if (!canWrite) return say('lecture seule à distance');
-  if (file.size > ATT_MAX) return say('« ' + file.name + ' » non joint : trop gros (20 Mo au plus)');
+  if (!canWrite) return say(T('lecture seule à distance', 'read-only remotely'));
+  if (file.size > ATT_MAX) return say(T('« ' + file.name + ' » non joint : trop gros (20 Mo au plus)', '"' + file.name + '" not attached: too big (20 MB max)'));
   const img = /^image\//.test(file.type);
   const a = { name: file.name || (img ? 'capture.png' : 'fichier'), img, size: file.size, url: img ? URL.createObjectURL(file) : null, path: null };
   attList(key).push(a); refreshAttach(key);
@@ -2308,10 +2308,10 @@ async function uploadFile(key, file) {
     const r = await fetch('/api/upload', { method:'POST', headers:{ 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(a.name) }, body: file });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.path) throw new Error(j.error || 'code ' + r.status);
-    a.path = j.path; say('« ' + a.name + ' » joint');
+    a.path = j.path; say(T('« ' + a.name + ' » joint', '"' + a.name + '" attached'));
   } catch (e) {
     const l = attList(key), i = l.indexOf(a); if (i >= 0) l.splice(i, 1); if (a.url) URL.revokeObjectURL(a.url);
-    say('« ' + a.name + ' » non joint : ' + (e.message || 'échec de la demande'));
+    say(T('« ' + a.name + ' » non joint : ', '"' + a.name + '" not attached: ') + (e.message || T('échec de la demande', 'request failed')));
   }
   refreshAttach(key);
 }
@@ -2323,19 +2323,19 @@ function refreshAttach(key) { for (const bar of document.querySelectorAll('.atta
 function fillAttach(bar) {
   const key = bar.dataset.key; bar.replaceChildren();
   for (const a of attList(key)) {
-    const chip = el('div', 'achip' + (a.path ? '' : ' up')); chip.title = a.path || 'envoi en cours…';
+    const chip = el('div', 'achip' + (a.path ? '' : ' up')); chip.title = a.path || T('envoi en cours…', 'uploading…');
     if (a.url) { const im = el('img'); im.src = a.url; im.alt = ''; chip.append(im); } else chip.append(el('span', 'aic', '📄'));
-    chip.append(el('span', 'an', a.name), el('span', 'as', a.path ? Math.max(1, Math.round(a.size / 1024)) + ' Ko' : 'envoi…'));
-    const x = el('button', 'ax', '×'); x.title = 'Retirer (le message ne citera pas ce fichier)';
+    chip.append(el('span', 'an', a.name), el('span', 'as', a.path ? Math.max(1, Math.round(a.size / 1024)) + T(' Ko', ' KB') : T('envoi…', 'uploading…')));
+    const x = el('button', 'ax', '×'); x.title = T('Retirer (le message ne citera pas ce fichier)', 'Remove (the message will not mention this file)');
     x.onclick = () => { const l = attList(key), i = l.indexOf(a); if (i >= 0) l.splice(i, 1); if (a.url) URL.revokeObjectURL(a.url); refreshAttach(key); };
     chip.append(x); bar.append(chip);
   }
   const pick = el('input'); pick.type = 'file'; pick.multiple = true; pick.accept = ATT_ACCEPT; pick.hidden = true;
   pick.onchange = () => { for (const f of pick.files) uploadFile(key, f); pick.value = ''; };
-  const b = el('button', 'quick', '📎 Joindre'); b.type = 'button'; b.title = 'Joindre une capture ou un fichier — ou glisse-le sur la page, ou colle une capture (Ctrl+V)';
+  const b = el('button', 'quick', T('📎 Joindre', '📎 Attach')); b.type = 'button'; b.title = T('Joindre une capture ou un fichier — ou glisse-le sur la page, ou colle une capture (Ctrl+V)', 'Attach a screenshot or a file — or drag it onto the page, or paste a screenshot (Ctrl+V)');
   b.onclick = () => pick.click();
   bar.append(b, pick);
-  if (!attList(key).length) bar.append(el('span', 'ahint', 'glisser un fichier ou coller une capture (Ctrl+V)'));
+  if (!attList(key).length) bar.append(el('span', 'ahint', T('glisser un fichier ou coller une capture (Ctrl+V)', 'drag a file or paste a screenshot (Ctrl+V)')));
 }
 const activeAttach = () => { const bar = document.querySelector('#main .attach'); return bar && bar.dataset.key; };
 const dropFiles = dt => dt && [...(dt.items || [])].some(i => i.kind === 'file');
@@ -2349,7 +2349,7 @@ document.addEventListener('dragleave', e => { if (!e.relatedTarget) document.bod
 document.addEventListener('drop', e => {
   if (!dropFiles(e.dataTransfer)) return;
   e.preventDefault(); document.body.classList.remove('dropping');
-  const key = activeAttach(); if (!key) return say('ouvre une session (Répondre), une nouvelle session ou le message groupé pour joindre un fichier');
+  const key = activeAttach(); if (!key) return say(T('ouvre une session (Répondre), une nouvelle session ou le message groupé pour joindre un fichier', 'open a session (Reply), a new session or the group message to attach a file'));
   for (const f of e.dataTransfer.files) uploadFile(key, f);
 });
 document.addEventListener('paste', e => {
@@ -2363,16 +2363,16 @@ let sending = false;
 async function sendReply() {
   const it = selected && byKey(selected), inp = $('sendtext');
   if (!it || it.kind !== 'open' || !inp || sending) return;
-  if (link.down) return say('serveur injoignable — le message reste dans la zone, à renvoyer une fois reconnecté');
+  if (link.down) return say(T('serveur injoignable — le message reste dans la zone, à renvoyer une fois reconnecté', 'server unreachable — the message stays in the box, send it again once reconnected'));
   const akey = 'reply:' + it.key;
-  if (attBusy(akey)) return say('pièce jointe en cours d’envoi — un instant');
+  if (attBusy(akey)) return say(T('pièce jointe en cours d’envoi — un instant', 'attachment still uploading — one moment'));
   const text = withAttachments(akey, inp.value); if (!text) return;
   const queued = it.status === 'busy';
-  sending = true; inp.disabled = $('sendbtn').disabled = true; say((queued ? 'mise en file pour « ' : 'envoi à « ') + label(it) + ' »…');
+  sending = true; inp.disabled = $('sendbtn').disabled = true; say(T((queued ? 'mise en file pour « ' : 'envoi à « ') + label(it) + ' »…', (queued ? 'queueing for "' : 'sending to "') + label(it) + '"…'));
   try {
     const r = await (await fetch('/api/send?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ text }) })).json();
-    if (r.error) say('non envoyé : ' + r.error); else { draftSave(sessionStorage, it.key, ''); inp.value = ''; growArea(inp); clearAttachments(akey); say(queued ? 'mis en file pour « ' + label(it) + ' » — Claude Code le prendra dès qu’il peut' : 'envoyé à « ' + label(it) + ' »'); }
-  } catch { say('échec de la demande'); }
+    if (r.error) say(T('non envoyé : ', 'not sent: ') + r.error); else { draftSave(sessionStorage, it.key, ''); inp.value = ''; growArea(inp); clearAttachments(akey); say(queued ? T('mis en file pour « ' + label(it) + ' » — Claude Code le prendra dès qu’il peut', 'queued for "' + label(it) + '" — Claude Code will take it as soon as it can') : T('envoyé à « ' + label(it) + ' »', 'sent to "' + label(it) + '"')); }
+  } catch { say(T('échec de la demande', 'request failed')); }
   sending = false; tick();
 }
 // PROPOSITION DE PROMPT : le texte grisé que Claude Code affiche dans l'invite vide après un tour (Tab dans le
@@ -2391,12 +2391,12 @@ function renderSuggest(it, s) {
   if (changed) renderDetail();                           // placeholder de la zone de réponse
   if (!s) return;
   const cut = s.endsWith('…');
-  const go = el('button', 'primary', '▶ Lancer');
-  go.title = cut ? 'Accepte la proposition dans le terminal (Tab puis Entrée) : c’est son texte complet qui part, pas la version coupée' : 'Tape cette proposition dans la session et l’envoie (revérifiée à l’écran juste avant)';
+  const go = el('button', 'primary', T('▶ Lancer', '▶ Launch'));
+  go.title = cut ? T('Accepte la proposition dans le terminal (Tab puis Entrée) : c’est son texte complet qui part, pas la version coupée', 'Accepts the suggestion in the terminal (Tab then Enter): its full text is sent, not the cut-off version') : T('Tape cette proposition dans la session et l’envoie (revérifiée à l’écran juste avant)', 'Types this suggestion into the session and sends it (checked again on screen just before)');
   go.onclick = () => launchSuggestion(it, s);
-  const ed = el('button', null, '✎ Modifier'); ed.title = 'Recopie la proposition dans la zone de réponse  ( p )'; ed.onclick = () => fillSuggestion();
-  box.append(el('span', 'slabel', '💡 Proposition de Claude Code'), el('span', 'stext', s), go, ed);
-  if (cut) box.append(el('div', 'hint', 'Coupée à l’écran (…) : « Lancer » envoie son texte complet, que la page ne peut pas lire ; « Modifier » pour la réécrire.'));
+  const ed = el('button', null, T('✎ Modifier', '✎ Edit')); ed.title = T('Recopie la proposition dans la zone de réponse  ( p )', 'Copies the suggestion into the reply box  ( p )'); ed.onclick = () => fillSuggestion();
+  box.append(el('span', 'slabel', T('💡 Proposition de Claude Code', '💡 Claude Code suggestion')), el('span', 'stext', s), go, ed);
+  if (cut) box.append(el('div', 'hint', T('Coupée à l’écran (…) : « Lancer » envoie son texte complet, que la page ne peut pas lire ; « Modifier » pour la réécrire.', 'Cut off on screen (…): "Launch" sends its full text, which the page cannot read; "Edit" to rewrite it.')));
 }
 function fillSuggestion() {
   const inp = $('sendtext'); if (!inp || inp.disabled || !suggestion) return false;
@@ -2404,20 +2404,20 @@ function fillSuggestion() {
 }
 async function launchSuggestion(it, text) {
   if (!text || sending) return;
-  sending = true; say('lancement de la proposition dans « ' + label(it) + ' »…');
+  sending = true; say(T('lancement de la proposition dans « ' + label(it) + ' »…', 'launching the suggestion in "' + label(it) + '"…'));
   try {
     const r = await (await fetch('/api/send?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ text, suggestion: true }) })).json();
-    if (r.error) say('non lancée : ' + r.error); else say('proposition lancée dans « ' + label(it) + ' »');
-  } catch { say('échec de la demande'); }
+    if (r.error) say(T('non lancée : ', 'not launched: ') + r.error); else say(T('proposition lancée dans « ' + label(it) + ' »', 'suggestion launched in "' + label(it) + '"'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   sending = false; tick();
 }
 async function reopen(it) {
-  say('réouverture de « ' + label(it) + ' »…');
-  try { const r = await post('/api/reopen?id=' + it.sessionId); say(r.error ? 'refusé : ' + r.error : 'nouvel onglet ouvert — la session apparaît dans quelques secondes'); }
-  catch { say('échec de la demande'); }
+  say(T('réouverture de « ' + label(it) + ' »…', 'reopening "' + label(it) + '"…'));
+  try { const r = await post('/api/reopen?id=' + it.sessionId); say(r.error ? T('refusé : ', 'refused: ') + r.error : T('nouvel onglet ouvert — la session apparaît dans quelques secondes', 'new tab opened — the session appears in a few seconds')); }
+  catch { say(T('échec de la demande', 'request failed')); }
 }
 const resumeCmd = it => (it.cwd ? 'cd "' + it.cwd + '"; ' : '') + 'claude --dangerously-skip-permissions --resume ' + it.sessionId;
-async function copyCmd(it) { try { await navigator.clipboard.writeText(resumeCmd(it)); say('commande de reprise copiée'); } catch { say('copie refusée par le navigateur'); } }
+async function copyCmd(it) { try { await navigator.clipboard.writeText(resumeCmd(it)); say(T('commande de reprise copiée', 'resume command copied')); } catch { say(T('copie refusée par le navigateur', 'copy refused by the browser')); } }
 const primary = it => { touchRecent(it.key); if (it.kind === 'pass') return undefined; return it.kind === 'run' ? (!it.run.running && it.run.sessionId ? openRunConversation(it.run) : undefined) : it.kind === 'open' ? openTab(it) : reopen(it); };
 
 // ── Recherche dans les conversations ──
@@ -2439,7 +2439,7 @@ async function runFind(q) {
     const r = await (await fetch('/api/find?q=' + encodeURIComponent(q), { cache:'no-store' })).json();
     if (seq !== findSeq) return;                   // une frappe plus récente a relancé la recherche
     findRes = r; findQ = q; if (findMode) renderDetail(true);
-  } catch { if (seq === findSeq) say('recherche impossible'); }
+  } catch { if (seq === findSeq) say(T('recherche impossible', 'search failed')); }
 }
 // Surligne les mots cherchés, sans tenir compte des accents (le texte normalisé garde la longueur du texte).
 function highlight(text, q) {
@@ -2454,33 +2454,33 @@ function highlight(text, q) {
 }
 function snipEl(s, q) {
   const d = el('div', 'snip');
-  d.append(el('span', 'who', (s.role === 'user' ? '🧑 toi' : '🤖 Claude') + (s.at ? ' · ' + new Date(s.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '')), highlight(s.text, q));
+  d.append(el('span', 'who', (s.role === 'user' ? T('🧑 toi', '🧑 you') : '🤖 Claude') + (s.at ? ' · ' + new Date(s.at).toLocaleString(T('fr-FR', 'en-GB'), { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '')), highlight(s.text, q));
   return d;
 }
 function renderFind() {
   detailKey = '__find__'; const main = $('main'); main.replaceChildren();
-  main.append(el('div', 'dtitle', 'Dans les conversations — « ' + findQ + ' »'));
+  main.append(el('div', 'dtitle', T('Dans les conversations — « ' + findQ + ' »', 'In conversations — "' + findQ + '"')));
   const r = findRes;
-  if (!r) { main.append(el('div', 'meta', 'recherche…')); return; }
-  main.append(el('div', 'meta', (r.sessions || 0) + ' session' + (r.sessions > 1 ? 's' : '') + ' · ' + (r.total || 0) + ' message' + (r.total > 1 ? 's' : '') + ' · ' + r.ms + ' ms · ' + r.indexed + ' transcripts indexés' + (r.indexing ? ' — indexation en cours, résultats partiels' : '') + (r.sessions > r.hits.length ? ' · ' + r.hits.length + ' plus récentes affichées' : '')));
-  if (!r.hits.length) { main.append(el('h2', null, 'Aucun message ne contient tous ces mots')); return; }
+  if (!r) { main.append(el('div', 'meta', T('recherche…', 'searching…'))); return; }
+  main.append(el('div', 'meta', T((r.sessions || 0) + ' session' + (r.sessions > 1 ? 's' : '') + ' · ' + (r.total || 0) + ' message' + (r.total > 1 ? 's' : '') + ' · ' + r.ms + ' ms · ' + r.indexed + ' transcripts indexés' + (r.indexing ? ' — indexation en cours, résultats partiels' : '') + (r.sessions > r.hits.length ? ' · ' + r.hits.length + ' plus récentes affichées' : ''), (r.sessions || 0) + ' session' + (r.sessions > 1 ? 's' : '') + ' · ' + (r.total || 0) + ' message' + (r.total > 1 ? 's' : '') + ' · ' + r.ms + ' ms · ' + r.indexed + ' transcripts indexed' + (r.indexing ? ' — indexing in progress, partial results' : '') + (r.sessions > r.hits.length ? ' · ' + r.hits.length + ' most recent shown' : ''))));
+  if (!r.hits.length) { main.append(el('h2', null, T('Aucun message ne contient tous ces mots', 'No message contains all these words'))); return; }
   const box = el('div'); box.style.marginTop = '16px';
   for (const h of r.hits) {
     const it = byKey(h.sessionId); const st = it ? it.state : 'closed';
     const c = el('div', 'fhit ' + st + (it ? ' go' : ''));
     const t = el('div', 'ft'); t.append(el('span', 'dot'), el('span', null, (it ? label(it) : h.title) || h.sessionId.slice(0, 8)),
-      el('span', 'n', h.count + ' message' + (h.count > 1 ? 's' : '') + ' · ' + LABEL[st] + (it ? '' : ', hors liste')));
-    if (!it && !h.title) t.children[1].textContent = 'session sans titre (lancement automatique) · ' + h.sessionId.slice(0, 8);
-    if (it && it.hidden) t.children[1].append(el('span', 'tag hid', 'masquée'));
+      el('span', 'n', h.count + ' message' + (h.count > 1 ? 's' : '') + ' · ' + LABEL[st] + (it ? '' : T(', hors liste', ', not in the list'))));
+    if (!it && !h.title) t.children[1].textContent = T('session sans titre (lancement automatique) · ', 'untitled session (automatic launch) · ') + h.sessionId.slice(0, 8);
+    if (it && it.hidden) t.children[1].append(el('span', 'tag hid', T('masquée', 'hidden')));
     c.append(t);
     if (h.cwd) c.append(el('div', 'meta', short(h.cwd)));
     for (const s of h.snippets) c.append(snipEl(s, findQ));
-    if (it) { c.title = 'Ouvrir le détail de la session'; c.onclick = () => select(it.key, true); }
+    if (it) { c.title = T('Ouvrir le détail de la session', 'Open the session details'); c.onclick = () => select(it.key, true); }
     else {
       const a = el('div', 'actions');
-      const b1 = el('button', null, 'Rouvrir dans un nouvel onglet'); b1.onclick = () => reopen({ sessionId: h.sessionId, title: h.title });
+      const b1 = el('button', null, T('Rouvrir dans un nouvel onglet', 'Reopen in a new tab')); b1.onclick = () => reopen({ sessionId: h.sessionId, title: h.title });
       const fake = { sessionId: h.sessionId, cwd: h.cwd };
-      const b2 = el('button', null, 'Copier la commande de reprise'); b2.title = resumeCmd(fake); b2.onclick = () => copyCmd(fake);
+      const b2 = el('button', null, T('Copier la commande de reprise', 'Copy the resume command')); b2.title = resumeCmd(fake); b2.onclick = () => copyCmd(fake);
       a.append(b1, b2); c.append(a);
     }
     box.append(c);
@@ -2506,48 +2506,48 @@ function openBc() { findMode = false; newMode = false; boardMode = false; launch
 function closeBc() { bcMode = false; setPane(false); renderDetail(true); }
 function renderBc() {
   detailKey = '__bc__'; const main = $('main'); main.replaceChildren();
-  main.append(el('div', 'dtitle', 'Écrire à plusieurs sessions'),
-              el('div', 'meta', 'Le même message est tapé dans chaque session cochée, comme « Répondre » : seulement si elle est inactive et son invite vide (sinon elle est sautée). Chaque envoi est journalisé.'));
+  main.append(el('div', 'dtitle', T('Écrire à plusieurs sessions', 'Write to several sessions')),
+              el('div', 'meta', T('Le même message est tapé dans chaque session cochée, comme « Répondre » : seulement si elle est inactive et son invite vide (sinon elle est sautée). Chaque envoi est journalisé.', 'The same message is typed into each ticked session, like "Reply": only if it is idle and its prompt is empty (otherwise it is skipped). Each send is logged.')));
   const f = el('div'); f.id = 'bcform';
-  const tx = promptArea('bc-text'); tx.maxLength = 4000; tx.autocomplete = 'off'; tx.placeholder = 'ex. « rebase sur origin/master et dis-moi où tu en es »';
+  const tx = promptArea('bc-text'); tx.maxLength = 4000; tx.autocomplete = 'off'; tx.placeholder = T('ex. « rebase sur origin/master et dis-moi où tu en es »', 'e.g. "rebase on origin/master and tell me where you are"');
   const list = el('div', 'bclist'); list.id = 'bc-list';
   const quick = el('div', 'actions');
-  const qa = el('button', null, 'Toutes'); qa.onclick = () => { bcEligible().forEach(it => bcPick.add(it.key)); fillBc(); };
-  const qn = el('button', null, 'Aucune'); qn.onclick = () => { bcPick.clear(); fillBc(); };
-  const qc = el('button', null, 'Celles qui peuvent se fermer'); qc.onclick = () => { bcPick.clear(); bcEligible().filter(closable).forEach(it => bcPick.add(it.key)); fillBc(); };
+  const qa = el('button', null, T('Toutes', 'All')); qa.onclick = () => { bcEligible().forEach(it => bcPick.add(it.key)); fillBc(); };
+  const qn = el('button', null, T('Aucune', 'None')); qn.onclick = () => { bcPick.clear(); fillBc(); };
+  const qc = el('button', null, T('Celles qui peuvent se fermer', 'Those that can be closed')); qc.onclick = () => { bcPick.clear(); bcEligible().filter(closable).forEach(it => bcPick.add(it.key)); fillBc(); };
   quick.append(qa, qn, qc);
-  const go = el('button', 'primary', 'Envoyer'); go.id = 'bc-go'; go.onclick = () => sendBc();
-  const cancel = el('button', null, 'Fermer'); cancel.onclick = () => closeBc();
+  const go = el('button', 'primary', T('Envoyer', 'Send')); go.id = 'bc-go'; go.onclick = () => sendBc();
+  const cancel = el('button', null, T('Fermer', 'Close')); cancel.onclick = () => closeBc();
   const acts = el('div', 'actions'); acts.append(go, cancel);
   const pick = el('div'); pick.append(quick, list);
-  f.append(el('label', null, 'Message'), tx, el('label', null, 'Pièces jointes'), attachBar('bc'), el('label', null, 'Sessions'), pick, acts, el('div', 'hint', 'Ctrl+Entrée envoie · Échap ferme'));
+  f.append(el('label', null, 'Message'), tx, el('label', null, T('Pièces jointes', 'Attachments')), attachBar('bc'), el('label', null, 'Sessions'), pick, acts, el('div', 'hint', T('Ctrl+Entrée envoie · Échap ferme', 'Ctrl+Enter sends · Esc closes')));
   main.append(f); fillBc(); tx.focus();
 }
 function fillBc() {
   const list = $('bc-list'); if (!list) return; list.replaceChildren();
   const el2 = bcEligible().sort((a, b) => b.since - a.since);
   for (const k of [...bcPick]) if (!el2.some(it => it.key === k)) bcPick.delete(k);
-  if (!el2.length) { list.append(el('div', 'empty', 'Aucune session inactive pour l’instant.')); }
+  if (!el2.length) { list.append(el('div', 'empty', T('Aucune session inactive pour l’instant.', 'No idle session for now.'))); }
   for (const it of el2) {
     const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = bcPick.has(it.key); cb.onchange = () => cb.checked ? bcPick.add(it.key) : bcPick.delete(it.key);
     lab.append(cb, el('span', null, label(it)), el('span', 'rm', LABEL[it.state] + ' · ' + ago(data.now - it.since))); list.append(lab);
   }
-  const go = $('bc-go'); if (go) go.textContent = 'Envoyer à ' + plural(bcPick.size, 'session', 'sessions');
-  list.onchange = () => { if ($('bc-go')) $('bc-go').textContent = 'Envoyer à ' + plural(bcPick.size, 'session', 'sessions'); };
+  const go = $('bc-go'); if (go) go.textContent = T('Envoyer à ' + plural(bcPick.size, 'session', 'sessions'), 'Send to ' + plural(bcPick.size, 'session', 'sessions'));
+  list.onchange = () => { if ($('bc-go')) $('bc-go').textContent = T('Envoyer à ' + plural(bcPick.size, 'session', 'sessions'), 'Send to ' + plural(bcPick.size, 'session', 'sessions')); };
 }
 async function sendBc() {
   const tx = $('bc-text'); if (!tx || bcSending) return;
-  if (attBusy('bc')) return say('pièce jointe en cours d’envoi — un instant');
+  if (attBusy('bc')) return say(T('pièce jointe en cours d’envoi — un instant', 'attachment still uploading — one moment'));
   const text = withAttachments('bc', tx.value); const targets = bcEligible().filter(it => bcPick.has(it.key));
-  if (!text) return say('message vide'); if (!targets.length) return say('aucune session cochée');
-  if (!confirm('Taper « ' + text + ' » dans ' + plural(targets.length, 'session', 'sessions') + ' ?\n\n' + targets.map(it => '• ' + label(it)).join('\n'))) return;
-  bcSending = true; $('bc-go').disabled = true; say('envoi à ' + plural(targets.length, 'session', 'sessions') + '…');
+  if (!text) return say(T('message vide', 'empty message')); if (!targets.length) return say(T('aucune session cochée', 'no session ticked'));
+  if (!confirm(T('Taper « ' + text + ' » dans ' + plural(targets.length, 'session', 'sessions') + ' ?\n\n', 'Type "' + text + '" into ' + plural(targets.length, 'session', 'sessions') + '?\n\n') + targets.map(it => '• ' + label(it)).join('\n'))) return;
+  bcSending = true; $('bc-go').disabled = true; say(T('envoi à ' + plural(targets.length, 'session', 'sessions') + '…', 'sending to ' + plural(targets.length, 'session', 'sessions') + '…'));
   try {
     const r = await (await fetch('/api/send-many', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ pids: targets.map(it => it.pid), text }) })).json();
     const ok = r.results.filter(x => !x.error), ko = r.results.filter(x => x.error);
-    say(plural(ok.length, 'envoi', 'envois') + (ko.length ? ' · ' + ko.length + ' sauté(s) : ' + ko.map(x => (x.title || x.pid) + ' (' + x.error + ')').join(', ') : ''));
+    say(T(plural(ok.length, 'envoi', 'envois'), plural(ok.length, 'send', 'sends')) + (ko.length ? T(' · ' + ko.length + ' sauté(s) : ', ' · ' + ko.length + ' skipped: ') + ko.map(x => (x.title || x.pid) + ' (' + x.error + ')').join(', ') : ''));
     if (!ko.length) { tx.value = ''; growArea(tx); bcPick.clear(); clearAttachments('bc'); }
-  } catch { say('échec de la demande'); }
+  } catch { say(T('échec de la demande', 'request failed')); }
   bcSending = false; if ($('bc-go')) $('bc-go').disabled = false; tick();
 }
 // ── Tags choisis à la création : posés comme une correction à la main (lot 3), avant le démarrage de la session ──
@@ -2564,28 +2564,28 @@ function parseNewTag(text, vocab) {
   for (const a of ['domaine', 'outil']) {
     if (axis && axis !== a) continue;
     const v = lists[a].find(x => tagSlug(x) === tagSlug(raw)); if (v) return { axis: a, v };
-    if (axis) return { error: a + ' hors liste : ' + raw };
+    if (axis) return { error: T(a + ' hors liste : ' + raw, a + ' not in the list: ' + raw) };
   }
   const f = tagSlug(raw);
-  return isFonction(f) ? { axis: 'fonction', v: f } : { error: 'fonction : 1 à 5 mots, 3 à 40 caractères' };
+  return isFonction(f) ? { axis: 'fonction', v: f } : { error: T('fonction : 1 à 5 mots, 3 à 40 caractères', 'fonction: 1 to 5 words, 3 to 40 characters') };
 }
 function addNewTag() {
   const ti = $('nf-tag'); if (!ti) return true;
   const t = parseNewTag(ti.value, tagVocab || {}); if (!t) return true;
   if (t.error) { say(t.error); return false; }
-  if (!newTags.some(x => x.axis === t.axis && x.v === t.v)) { if (newTags.length >= 8) { say('8 tags au plus'); return false; } newTags.push(t); }
+  if (!newTags.some(x => x.axis === t.axis && x.v === t.v)) { if (newTags.length >= 8) { say(T('8 tags au plus', '8 tags at most')); return false; } newTags.push(t); }
   ti.value = ''; drawNewTags(); return true;
 }
 function drawNewTags() {
   const box = $('nf-tags'), ti = $('nf-tag'); if (!box || !ti) return;
   box.replaceChildren();
   for (const t of newTags) {
-    const c = el('span', 'chip ' + t.axis, t.v + ' ×'); c.title = t.axis + ' : ' + t.v + '\nclic : retirer';
+    const c = el('span', 'chip ' + t.axis, t.v + ' ×'); c.title = T(t.axis + ' : ' + t.v + '\nclic : retirer', t.axis + ': ' + t.v + '\nclick: remove');
     c.onclick = () => { newTags = newTags.filter(x => x !== t); drawNewTags(); ti.focus(); };
     box.append(c);
   }
   box.append(ti);
-  ti.placeholder = newTags.length ? '' : 'facultatif — ex. Téléphonie, contact-center, power-dial';
+  ti.placeholder = newTags.length ? '' : T('facultatif — ex. Téléphonie, contact-center, power-dial', 'optional — e.g. Téléphonie, contact-center, power-dial');
 }
 function newTagOptions(dl) {
   const v = tagVocab || {}, used = new Set(newTags.map(t => t.axis + ':' + t.v)), fn = new Map();
@@ -2598,21 +2598,21 @@ function newTagOptions(dl) {
 function renderNew() {
   detailKey = '__new__'; const main = $('main'); main.replaceChildren();
   const fork = newFork;
-  main.append(el('div', 'dtitle', fork ? 'Nouvelle session à partir de « ' + (fork.title || fork.sessionId.slice(0, 8)) + ' »' : newPrefill ? 'Nouvelle session — ' + newPrefill.title : 'Nouvelle session'),
-              el('div', 'meta', 'S’ouvre dans un nouvel onglet de la fenêtre Windows Terminal la plus récente, puis apparaît dans la liste.'));
-  if (fork) main.append(el('div', 'banner', 'La nouvelle session repart de TOUTE la conversation de « ' + (fork.title || fork.sessionId) + ' » (claude --resume ' + fork.sessionId.slice(0, 8) + '… --fork-session) : elle a son propre identifiant, la session d’origine continue de son côté sans rien voir de la suite. Le contexte hérité compte dans la fenêtre de la nouvelle session.'));
+  main.append(el('div', 'dtitle', T(fork ? 'Nouvelle session à partir de « ' + (fork.title || fork.sessionId.slice(0, 8)) + ' »' : newPrefill ? 'Nouvelle session — ' + newPrefill.title : 'Nouvelle session', fork ? 'New session from "' + (fork.title || fork.sessionId.slice(0, 8)) + '"' : newPrefill ? 'New session — ' + newPrefill.title : 'New session')),
+              el('div', 'meta', T('S’ouvre dans un nouvel onglet de la fenêtre Windows Terminal la plus récente, puis apparaît dans la liste.', 'Opens in a new tab of the most recent Windows Terminal window, then appears in the list.')));
+  if (fork) main.append(el('div', 'banner', T('La nouvelle session repart de TOUTE la conversation de « ' + (fork.title || fork.sessionId) + ' » (claude --resume ' + fork.sessionId.slice(0, 8) + '… --fork-session) : elle a son propre identifiant, la session d’origine continue de son côté sans rien voir de la suite. Le contexte hérité compte dans la fenêtre de la nouvelle session.', 'The new session starts from the WHOLE conversation of "' + (fork.title || fork.sessionId) + '" (claude --resume ' + fork.sessionId.slice(0, 8) + '… --fork-session): it has its own id, the original session goes on by itself without seeing what follows. The inherited context counts in the context window of the new session.')));
   const f = el('div'); f.id = 'newform';
-  const cwd = el('select'); cwd.id = 'nf-cwd'; cwd.append(el('option', null, 'chargement des dossiers…')); cwd.disabled = true;
-  if (newPrefill) main.append(el('div', 'banner', 'Premier message prérempli par le lanceur : relis-le, ajuste-le, choisis le dossier du dépôt de la PR, puis « Lancer ». Rien n’est lancé ni mergé d’ici.'));
+  const cwd = el('select'); cwd.id = 'nf-cwd'; cwd.append(el('option', null, T('chargement des dossiers…', 'loading folders…'))); cwd.disabled = true;
+  if (newPrefill) main.append(el('div', 'banner', T('Premier message prérempli par le lanceur : relis-le, ajuste-le, choisis le dossier du dépôt de la PR, puis « Lancer ». Rien n’est lancé ni mergé d’ici.', 'First message prefilled by the launcher: read it, adjust it, choose the folder of the PR repository, then "Launch". Nothing is launched or merged from here.')));
   const pr = el('textarea'); pr.id = 'nf-prompt'; pr.maxLength = 20000; pr.spellcheck = true;
   if (newPrefill) { pr.value = newPrefill.prompt; pr.rows = 8; }
-  pr.placeholder = 'Facultatif — ex. « /cadrage HD-123456 » ou « regarde pourquoi … »';
+  pr.placeholder = T('Facultatif — ex. « /cadrage HD-123456 » ou « regarde pourquoi … »', 'Optional — e.g. "/code-review" or "look at why …"');
   // Modèle : un groupe de boutons (un seul actif) plutôt qu'une liste ; « Autre… » ouvre la saisie libre pour un
   // identifiant complet (ex. claude-opus-5-5[1m]). Le champ #nf-model reste la valeur envoyée par launchNew.
   const mo = el('input'); mo.id = 'nf-model'; mo.autocomplete = 'off'; mo.spellcheck = false;
-  mo.placeholder = 'identifiant complet — ex. claude-opus-5-5[1m]'; mo.value = localStorage.getItem('cc.newmodel') || '';
-  const MODELS = [['', 'Par défaut', 'celui de ta config'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku'], ['fable', 'Fable']];
-  const mg = el('div', 'nf-seg'); mg.setAttribute('role', 'radiogroup'); mg.setAttribute('aria-label', 'Modèle');
+  mo.placeholder = T('identifiant complet — ex. claude-opus-5-5[1m]', 'full id — e.g. claude-opus-5-5[1m]'); mo.value = localStorage.getItem('cc.newmodel') || '';
+  const MODELS = [['', T('Par défaut', 'Default'), T('celui de ta config', 'the one in your config')], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku'], ['fable', 'Fable']];
+  const mg = el('div', 'nf-seg'); mg.setAttribute('role', 'radiogroup'); mg.setAttribute('aria-label', T('Modèle', 'Model'));
   const segs = [];
   const pickModel = (key, focus) => {
     const other = key === '*';
@@ -2620,7 +2620,7 @@ function renderNew() {
     for (const b of segs) { const on = b.dataset.k === key; b.classList.toggle('sel', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1; }
     mo.hidden = !other; if (other && focus) mo.focus();
   };
-  for (const [k, lab, tip] of [...MODELS, ['*', 'Autre…', 'saisir un identifiant de modèle complet']]) {
+  for (const [k, lab, tip] of [...MODELS, ['*', T('Autre…', 'Other…'), T('saisir un identifiant de modèle complet', 'type a full model id')]]) {
     const b = el('button', null, lab); b.type = 'button'; b.dataset.k = k; b.setAttribute('role', 'radio'); if (tip) b.title = tip;
     b.onclick = () => pickModel(k, true);
     b.onkeydown = e => {                                    // flèches : comme un groupe de radios
@@ -2632,7 +2632,7 @@ function renderNew() {
   pickModel(MODELS.some(([k]) => k === mo.value) ? mo.value : '*', false);
   const mbox = el('div', 'nf-model'); mbox.append(mg, mo);
   const br = el('input'); br.id = 'nf-branch'; br.autocomplete = 'off'; br.spellcheck = false;
-  br.placeholder = 'facultatif — ex. feat/ma-branche : worktree neuf sur origin/master';
+  br.placeholder = T('facultatif — ex. feat/ma-branche : worktree neuf sur origin/master', 'optional — e.g. feat/my-branch: new worktree on origin/master');
   const tbox = el('div', 'nf-tags'); tbox.id = 'nf-tags';
   const ti = el('input'); ti.id = 'nf-tag'; ti.setAttribute('list', 'nf-tagopts'); ti.autocomplete = 'off'; ti.spellcheck = false;
   const tdl = el('datalist'); tdl.id = 'nf-tagopts';
@@ -2645,43 +2645,43 @@ function renderNew() {
   ti.oninput = e => { if ((!e.inputType || e.inputType === 'insertReplacementText') && ti.value) { if (addNewTag()) newTagOptions(tdl); } };
   tbox.onclick = e => { if (e.target === tbox) ti.focus(); };
   tbox.append(ti);                   // drawNewTags le retrouve par son id et place les puces devant
-  const go = el('button', 'primary', 'Lancer'); go.id = 'nf-go'; go.onclick = () => launchNew();
-  const cancel = el('button', null, 'Annuler'); cancel.onclick = () => closeNew();
+  const go = el('button', 'primary', T('Lancer', 'Launch')); go.id = 'nf-go'; go.onclick = () => launchNew();
+  const cancel = el('button', null, T('Annuler', 'Cancel')); cancel.onclick = () => closeNew();
   const acts = el('div', 'actions'); acts.append(go, cancel);
-  f.append(el('label', null, 'Dossier'), cwd, el('label', null, 'Premier message'), pr,
-           el('div', 'hint', 'Envoyé tel quel à la session dès son démarrage. Vide : la session attend ta première demande.'),
-           el('label', null, 'Pièces jointes'), attachBar('new'),
+  f.append(el('label', null, T('Dossier', 'Folder')), cwd, el('label', null, T('Premier message', 'First message')), pr,
+           el('div', 'hint', T('Envoyé tel quel à la session dès son démarrage. Vide : la session attend ta première demande.', 'Sent as is to the session as soon as it starts. Empty: the session waits for your first request.')),
+           el('label', null, T('Pièces jointes', 'Attachments')), attachBar('new'),
            el('label', null, 'Tags'), tbox, tdl,
-           el('div', 'hint', 'Entrée ajoute · clic sur un tag le retire. Domaine et outil : listes fermées ; sinon le mot devient une fonction (power-dial). Posés comme une correction à la main : l’étiqueteur ne les retire jamais.'),
-           el('label', null, 'Modèle'), mbox,
-           el('label', null, 'Branche neuve'), br,
-           el('div', 'hint', 'Remplie : l’onglet récupère origin/master, crée la branche dans un worktree neuf (.claude\\worktrees\\<dernier segment>) et y lance la session, au même sous-dossier. Vide : session dans le dossier choisi.'),
-           acts, el('div', 'hint', 'Ctrl+Entrée lance · Échap annule'));
+           el('div', 'hint', T('Entrée ajoute · clic sur un tag le retire. Domaine et outil : listes fermées ; sinon le mot devient une fonction (power-dial). Posés comme une correction à la main : l’étiqueteur ne les retire jamais.', 'Enter adds · click a tag to remove it. Domain and tool: fixed lists; otherwise the word becomes a function (power-dial). Set as a manual correction: the tagger never removes them.')),
+           el('label', null, T('Modèle', 'Model')), mbox,
+           el('label', null, T('Branche neuve', 'New branch')), br,
+           el('div', 'hint', T('Remplie : l’onglet récupère origin/master, crée la branche dans un worktree neuf (.claude\\worktrees\\<dernier segment>) et y lance la session, au même sous-dossier. Vide : session dans le dossier choisi.', 'Filled: the tab fetches origin/master, creates the branch in a new worktree (.claude\\worktrees\\<last segment>) and starts the session there, in the same subfolder. Empty: session in the chosen folder.')),
+           acts, el('div', 'hint', T('Ctrl+Entrée lance · Échap annule', 'Ctrl+Enter launches · Esc cancels')));
   main.append(f); drawNewTags(); loadTagVocab(); pr.focus();
   fetch('/api/folders', { cache:'no-store' }).then(r => r.json()).then(r => {
     if (!newMode || !$('nf-cwd')) return;
     cwd.replaceChildren(); const last = localStorage.getItem('cc.newcwd');
-    for (const d of r.folders || []) { const o = el('option', null, (short(d.path) || d.path) + '   —   il y a ' + ago(Date.now() - d.last) + ' · ' + d.count + ' session' + (d.count > 1 ? 's' : '')); o.value = d.path; o.title = d.path; cwd.append(o); }
-    if (!cwd.options.length) { cwd.append(el('option', null, 'aucun dossier récent trouvé')); return; }
+    for (const d of r.folders || []) { const o = el('option', null, (short(d.path) || d.path) + T('   —   il y a ' + ago(Date.now() - d.last), '   —   ' + ago(Date.now() - d.last) + ' ago') + ' · ' + d.count + ' session' + (d.count > 1 ? 's' : '')); o.value = d.path; o.title = d.path; cwd.append(o); }
+    if (!cwd.options.length) { cwd.append(el('option', null, T('aucun dossier récent trouvé', 'no recent folder found'))); return; }
     const want = fork && fork.cwd ? fork.cwd.replace(/\\+$/, '').toLowerCase() : null, same = want && [...cwd.options].find(o => o.value.toLowerCase() === want);
     if (same) cwd.value = same.value;
     else if (last && [...cwd.options].some(o => o.value === last)) cwd.value = last;
     cwd.disabled = false;
-  }).catch(() => { cwd.replaceChildren(el('option', null, 'liste des dossiers indisponible')); });
+  }).catch(() => { cwd.replaceChildren(el('option', null, T('liste des dossiers indisponible', 'folder list unavailable'))); });
 }
 async function launchNew() {
   const cwd = $('nf-cwd'), pr = $('nf-prompt'), mo = $('nf-model'), br = $('nf-branch');
   if (!cwd || cwd.disabled || launching) return;
-  if (attBusy('new')) return say('pièce jointe en cours d’envoi — un instant');
+  if (attBusy('new')) return say(T('pièce jointe en cours d’envoi — un instant', 'attachment still uploading — one moment'));
   // Premier message : passé par fichier au lancement (pas tapé) — les retours à la ligne y sont gardés, pièces en fin.
   const refs = withAttachments('new', ''), prompt = [pr.value.trim(), refs].filter(Boolean).join('\n\n');
   if (!addNewTag()) return;          // un tag tapé mais pas encore validé part avec la session — ou bloque s'il est invalide
-  launching = true; $('nf-go').disabled = true; say('lancement d’une nouvelle session…');
+  launching = true; $('nf-go').disabled = true; say(T('lancement d’une nouvelle session…', 'starting a new session…'));
   try {
     const r = await (await fetch('/api/new', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ cwd: cwd.value, prompt, model: mo.value.trim(), branch: br.value.trim(), forkFrom: newFork ? newFork.sessionId : '', tags: newTags }) })).json();
-    if (r.error) say('non lancée : ' + r.error);
-    else { clearAttachments('new'); localStorage.setItem('cc.newcwd', cwd.value); localStorage.setItem('cc.newmodel', mo.value.trim()); say(br.value.trim() ? 'onglet ouvert : création du worktree puis lancement (suivre dans l’onglet)' : 'nouvel onglet ouvert — la session apparaît dans quelques secondes'); launching = false; closeNew(); return; }
-  } catch { say('échec de la demande'); }
+    if (r.error) say(T('non lancée : ', 'not launched: ') + r.error);
+    else { clearAttachments('new'); localStorage.setItem('cc.newcwd', cwd.value); localStorage.setItem('cc.newmodel', mo.value.trim()); say(br.value.trim() ? T('onglet ouvert : création du worktree puis lancement (suivre dans l’onglet)', 'tab opened: creating the worktree then launching (follow in the tab)') : T('nouvel onglet ouvert — la session apparaît dans quelques secondes', 'new tab opened — the session appears in a few seconds')); launching = false; closeNew(); return; }
+  } catch { say(T('échec de la demande', 'request failed')); }
   launching = false; if ($('nf-go')) $('nf-go').disabled = false;
 }
 
