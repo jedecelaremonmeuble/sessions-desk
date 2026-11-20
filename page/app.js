@@ -980,7 +980,7 @@ function launcherGroup(runs, waiting, open, since) {
       : OK.test(r.outcome || '') && r.verdict !== 'a-reprendre' ? 'done' : 'idle';
     const sessionId = (s && s.sessionId) || r.liveSessionId || r.sessionId || null;
     items.push({ kind:'run', key:'run:' + r.dir, run:r, wait:w, look, sessionId, scripted: SCRIPTED.includes(r.phase) && !sessionId,
-      title: 'HD-' + r.hd + ' · ' + r.phase + (r.title ? ' — ' + r.title : ''), outcome: r.running ? 'en cours' : o,
+      title: 'HD-' + r.hd + ' · ' + r.phase + (r.title ? ' — ' + r.title : ''), outcome: r.running ? T('en cours', 'running') : o,
       at: r.at, since: r.running || r.minutes == null ? r.at : r.at + Math.round(r.minutes * 60000),
       model: (s && s.model) || r.model || null, tokens: (s && s.tokens) || r.tokens || null, reply: (s && s.reply) || r.reply || null,
       pid: r.pid || null, cwd: s ? s.cwd : null,
@@ -1077,7 +1077,7 @@ function automationGroups(autos, open, keep) {
       const s = (open || []).find(x => x.headless && (x.sessionId === a.running.sessionId || (a.running.pid && x.pid === a.running.pid))) || null;
       if (s) absorbed.add(s.sessionId);
       items.push({ kind:'pass', key:'pass:' + a.id + ':' + a.running.run, auto:a, pass:null, running:true, look:'busy', sessionId:a.running.sessionId,
-        title:name + ' · passe en cours', at:a.running.at, since:a.running.at, model:s ? s.model || null : null, tokens:s ? s.tokens || null : null, reply:s ? s.reply || null : null });
+        title:name + T(' · passe en cours', ' · pass running'), at:a.running.at, since:a.running.at, model:s ? s.model || null : null, tokens:s ? s.tokens || null : null, reply:s ? s.reply || null : null });
     }
     let shown = 0;
     for (const p of a.passes || []) {
@@ -1093,9 +1093,9 @@ let passKeep = null;      // passe qu'un lien de notification demande d'ouvrir, 
 const autoGroup = () => automationGroups(autoData ? autoData.automations : [], data ? data.sessions : [], [selected, passKeep]);
 // Groupes de la liste : ceux de la page, plus un par automate, juste avant « Fermées ».
 const groupList = () => { const ag = autoGroup().groups; if (!ag.length) return GROUPS; const i = GROUPS.findIndex(g => g.key === 'closed'); return GROUPS.slice(0, i).concat(ag, GROUPS.slice(i)); };
-const PASS_FR = { ok:'a agi', nothing:'rien à faire', 'dry-run':'à blanc', conflict:'conflit', rejected:'refusée', failed:'échec', unknown:'issue inconnue' };
+const PASS_FR = { ok:T('a agi', 'acted'), nothing:T('rien à faire', 'nothing to do'), 'dry-run':T('à blanc', 'dry run'), conflict:T('conflit', 'conflict'), rejected:T('refusée', 'rejected'), failed:T('échec', 'failed'), unknown:T('issue inconnue', 'unknown outcome') };
 function passSub(it) {
-  if (it.running) return ['travaille' + (it.at ? ' depuis ' + ago(Date.now() - it.at) : ''), it.reply ? lastLine(it.reply) : null].filter(Boolean).join(' · ');
+  if (it.running) return [T('travaille' + (it.at ? ' depuis ' + ago(Date.now() - it.at) : ''), 'working' + (it.at ? ' for ' + ago(Date.now() - it.at) : '')), it.reply ? lastLine(it.reply) : null].filter(Boolean).join(' · ');
   const p = it.pass;
   return [p.summary, p.minutes != null ? (p.minutes < 1 ? '< 1 min' : Math.round(p.minutes) + ' min') : null, p.costUsd != null ? money(p.costUsd) : null].filter(Boolean).join(' · ');
 }
@@ -1103,31 +1103,31 @@ function passSub(it) {
 // sans effet du jour.
 function autoGroupTitle(a) {
   const parts = [];
-  if (a.running) parts.push('en cours');
-  if (a.last) parts.push('dernière il y a ' + ago(Date.now() - a.last.at) + (a.last.quiet ? ' : ' + a.last.summary : ''));
-  else if (!a.present) parts.push('historique absent');
-  if (a.quietToday) parts.push(a.quietToday + ' sans effet aujourd’hui');
+  if (a.running) parts.push(T('en cours', 'running'));
+  if (a.last) parts.push(T('dernière il y a ' + ago(Date.now() - a.last.at) + (a.last.quiet ? ' : ' + a.last.summary : ''), 'last ' + ago(Date.now() - a.last.at) + ' ago' + (a.last.quiet ? ': ' + a.last.summary : '')));
+  else if (!a.present) parts.push(T('historique absent', 'no history'));
+  if (a.quietToday) parts.push(T(a.quietToday + ' sans effet aujourd’hui', a.quietToday + ' with no effect today'));
   return parts.length ? parts.join(' · ') : '';
 }
 // automationCard est PURE (testée par server/test/automations-page.test.ts) : la carte d'un automate dans la vue
 // d'ensemble — couleur, résumé de la dernière passe, et les lignes « dernière passe », « prochaine », « 7 jours »,
 // « dernier échec ».
 function automationCard(a, now) {
-  const fr = { ok:'a agi', nothing:'rien à faire', 'dry-run':'à blanc', conflict:'conflit', rejected:'refusée', failed:'échec', unknown:'issue inconnue' };
-  const since = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') : Math.floor(m / 1440) + ' j'; };
+  const fr = { ok:T('a agi', 'acted'), nothing:T('rien à faire', 'nothing to do'), 'dry-run':T('à blanc', 'dry run'), conflict:T('conflit', 'conflict'), rejected:T('refusée', 'rejected'), failed:T('échec', 'failed'), unknown:T('issue inconnue', 'unknown outcome') };
+  const since = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') : Math.floor(m / 1440) + T(' j', ' d'); };
   const usd = v => (Math.round(v * 100) / 100).toLocaleString('fr-FR') + ' $';
   const l = a.last, w = a.week || {};
   const look = a.running ? 'busy' : !a.present || !l ? 'idle' : l.level === 'error' ? 'waiting' : l.level === 'warn' || a.late ? 'ask' : 'done';
   const lines = [];
-  if (!a.present) lines.push(['historique', 'introuvable — l’automate a-t-il déjà tourné ? (chemin dans la configuration du poste)']);
-  if (a.running) lines.push(['en cours', 'depuis ' + since(now - a.running.at)]);
-  if (l) lines.push(['dernière passe', 'il y a ' + since(now - l.at) + ' · ' + (fr[l.status] || l.status) + (l.dryRun && l.status !== 'dry-run' ? ' (à blanc)' : '')]);
-  if (a.late) lines.push(['en retard', (l ? 'aucune passe depuis ' + since(now - l.at) : 'aucune passe') + ' — la tâche planifiée tourne toutes les ' + a.everyMinutes + ' min']);
-  else if (a.next && !a.running) lines.push(['prochaine', 'dans ' + since(a.next - now)]);
-  if (w.count) lines.push(['7 jours', [w.count + (w.count > 1 ? ' passes' : ' passe'), w.failures ? w.failures + (w.failures > 1 ? ' échecs' : ' échec') : 'aucun échec',
-    w.warnings ? w.warnings + (w.warnings > 1 ? ' alertes' : ' alerte') : null, w.costUsd != null ? usd(w.costUsd) + ' (' + usd(w.costAvg) + ' par passe)' : null].filter(Boolean).join(' · ')]);
-  if (w.lastFailure) lines.push(['dernier échec', 'il y a ' + since(now - w.lastFailure.at) + ' : ' + w.lastFailure.summary]);
-  return { look, title:(a.icon ? a.icon + ' ' : '') + a.label, summary: l ? l.summary : a.running ? 'première passe en cours' : 'aucune passe sur 8 jours', lines };
+  if (!a.present) lines.push([T('historique', 'history'), T('introuvable — l’automate a-t-il déjà tourné ? (chemin dans la configuration du poste)', 'not found — has the automation ever run? (path in the configuration of this machine)')]);
+  if (a.running) lines.push([T('en cours', 'running'), T('depuis ' + since(now - a.running.at), 'for ' + since(now - a.running.at))]);
+  if (l) lines.push([T('dernière passe', 'last pass'), T('il y a ' + since(now - l.at), since(now - l.at) + ' ago') + ' · ' + (fr[l.status] || l.status) + (l.dryRun && l.status !== 'dry-run' ? T(' (à blanc)', ' (dry run)') : '')]);
+  if (a.late) lines.push([T('en retard', 'late'), (l ? T('aucune passe depuis ' + since(now - l.at), 'no pass for ' + since(now - l.at)) : T('aucune passe', 'no pass')) + T(' — la tâche planifiée tourne toutes les ' + a.everyMinutes + ' min', ' — the scheduled task runs every ' + a.everyMinutes + ' min')]);
+  else if (a.next && !a.running) lines.push([T('prochaine', 'next'), T('dans ' + since(a.next - now), 'in ' + since(a.next - now))]);
+  if (w.count) lines.push([T('7 jours', '7 days'), [w.count + (w.count > 1 ? ' passes' : T(' passe', ' pass')), w.failures ? w.failures + (w.failures > 1 ? T(' échecs', ' failures') : T(' échec', ' failure')) : T('aucun échec', 'no failure'),
+    w.warnings ? w.warnings + (w.warnings > 1 ? T(' alertes', ' warnings') : T(' alerte', ' warning')) : null, w.costUsd != null ? usd(w.costUsd) + T(' (' + usd(w.costAvg) + ' par passe)', ' (' + usd(w.costAvg) + ' per pass)') : null].filter(Boolean).join(' · ')]);
+  if (w.lastFailure) lines.push([T('dernier échec', 'last failure'), T('il y a ' + since(now - w.lastFailure.at) + ' : ' + w.lastFailure.summary, since(now - w.lastFailure.at) + ' ago: ' + w.lastFailure.summary)]);
+  return { look, title:(a.icon ? a.icon + ' ' : '') + a.label, summary: l ? l.summary : a.running ? T('première passe en cours', 'first pass running') : T('aucune passe sur 8 jours', 'no pass in 8 days'), lines };
 }
 function automationSection() {
   const list = autoData ? autoData.automations : []; if (!list.length) return null;
@@ -1138,7 +1138,7 @@ function automationSection() {
     const h = el('div', 'qhead'); h.append(el('b', null, v.title)); c.append(h);
     const sm = el('div', 'asum', v.summary);
     const it = a.running ? allItems().find(x => x.kind === 'pass' && x.running && x.auto.id === a.id) : a.last && allItems().find(x => x.key === 'pass:' + a.id + ':' + a.last.run);
-    if (it) { sm.classList.add('lnk'); sm.title = 'Ouvrir cette passe'; sm.onclick = () => select(it.key, true); }
+    if (it) { sm.classList.add('lnk'); sm.title = T('Ouvrir cette passe', 'Open this pass'); sm.onclick = () => select(it.key, true); }
     c.append(sm);
     const dl = el('dl'); for (const [k, x] of v.lines) dl.append(el('dt', null, k), el('dd', null, x)); c.append(dl);
     const ob = automationOrders(a); if (ob) c.append(ob);
@@ -1152,7 +1152,7 @@ function automationOrders(a) {
   const box = el('div', 'actions');
   for (const o of a.orders) {
     const b = el('button', null, '▶ ' + o.label);
-    b.title = 'Lancer maintenant : ' + o.label + (a.week && a.week.costAvg != null ? ' — coût moyen d’une passe sur 7 jours : ' + money(a.week.costAvg) : '');
+    b.title = T('Lancer maintenant : ', 'Run now: ') + o.label + (a.week && a.week.costAvg != null ? T(' — coût moyen d’une passe sur 7 jours : ', ' — average cost of a pass over 7 days: ') + money(a.week.costAvg) : '');
     b.onclick = e => { e.stopPropagation(); runAutomationOrder(a, o); };
     box.append(b);
   }
@@ -1161,12 +1161,12 @@ function automationOrders(a) {
 async function runAutomationOrder(a, o) {
   if (!canWrite) return;
   if (o.confirm && !confirm(o.confirm)) return;
-  say((a.icon ? a.icon + ' ' : '') + a.label + ' : ' + o.label + '…');
+  say((a.icon ? a.icon + ' ' : '') + a.label + T(' : ', ': ') + o.label + '…');
   try {
     const r = await fetch('/api/automations/order', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ id: a.id, order: o.id }) });
     const j = await r.json().catch(() => ({}));
-    say(j.error ? 'refusé : ' + j.error : j.done ? a.label + ' : terminé' + (j.output ? ' — ' + j.output : '') : a.label + ' : passe lancée — elle apparaît dans son groupe dès que sa session démarre');
-  } catch { say('échec de la demande'); }
+    say(j.error ? T('refusé : ', 'refused: ') + j.error : j.done ? a.label + T(' : terminé', ': done') + (j.output ? ' — ' + j.output : '') : a.label + T(' : passe lancée — elle apparaît dans son groupe dès que sa session démarre', ': pass started — it shows up in its group as soon as its session starts'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   setTimeout(loadAutomations, 3000); setTimeout(loadAutomations, 15000);
 }
 // Notification d'échec (cloche ou notification Windows ?pass=<automate>:<passe>) : la passe, si elle est du jour.
@@ -1174,7 +1174,7 @@ let pendingPass = new URLSearchParams(location.search).get('pass');
 function openPass(ref) {
   passKeep = 'pass:' + ref;
   const it = byKey(passKeep);
-  if (!it) { say('passe introuvable dans la liste (d’avant minuit ?)'); return; }
+  if (!it) { say(T('passe introuvable dans la liste (d’avant minuit ?)', 'pass not found in the list (from before midnight?)')); return; }
   if (launchMode) closeLauncher();
   select(it.key, true);
 }
@@ -1184,7 +1184,7 @@ async function openPassFile(it, name) {
   if (passFile === key) { passFile = null; passFileText = null; return renderDetail(true); }
   passFile = key; passFileText = name.endsWith('.png') ? null : '…'; renderDetail(true);
   if (name.endsWith('.png')) return;
-  try { const r = await fetch(passFileUrl(it, name), { cache:'no-store' }); passFileText = r.ok ? await r.text() : '(illisible : ' + r.status + ')'; } catch { passFileText = '(illisible)'; }
+  try { const r = await fetch(passFileUrl(it, name), { cache:'no-store' }); passFileText = r.ok ? await r.text() : T('(illisible : ' + r.status + ')', '(unreadable: ' + r.status + ')'); } catch { passFileText = T('(illisible)', '(unreadable)'); }
   if (passFile === key) renderDetail(true);
 }
 const passFileUrl = (it, name) => '/api/automations/file?id=' + encodeURIComponent(it.auto.id) + '&run=' + encodeURIComponent(it.pass.run) + '&name=' + encodeURIComponent(name);
@@ -1197,7 +1197,7 @@ function renderPassDetail(it, force) {
     const head = el('div'); head.id = 'head'; const body = el('div'); body.id = 'body'; main.append(head, body);
     if (p) { const card = el('div', 'rcard ' + it.look); card.append(el('div', 'rtitle', p.summary)); body.append(card); }
     if (p && p.files && p.files.length && a.files) {
-      body.append(el('h2', null, 'Fichiers de la passe'));
+      body.append(el('h2', null, T('Fichiers de la passe', 'Pass files')));
       const fl = el('div', 'lf');
       for (const f of p.files) { const b = el('button', 'quick' + (passFile === it.key + '/' + f ? ' on' : ''), f); b.onclick = () => openPassFile(it, f); fl.append(b); }
       body.append(fl);
@@ -1208,38 +1208,38 @@ function renderPassDetail(it, force) {
         else body.append(el('pre', 'lview', passFileText));
       }
     }
-    if (it.sessionId) { body.append(el('h2', null, 'Conversation complète'), convPane()); applyConvView(it); }
-    else body.append(el('div', 'empty', it.running ? 'Session de la passe pas encore repérée.' : 'Passe sans session Claude : pas de conversation (voir son résumé et ses fichiers).'));
+    if (it.sessionId) { body.append(el('h2', null, T('Conversation complète', 'Full conversation')), convPane()); applyConvView(it); }
+    else body.append(el('div', 'empty', it.running ? T('Session de la passe pas encore repérée.', 'Session of the pass not found yet.') : T('Passe sans session Claude : pas de conversation (voir son résumé et ses fichiers).', 'Pass without a Claude session: no conversation (see its summary and files).')));
   }
   const head = $('head'); head.replaceChildren(); head.className = it.look;
   head.append(el('div', 'dtitle', it.title));
-  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), it.running ? 'travaille · depuis ' + ago(Date.now() - it.at) : (PASS_FR[p.status] || p.status) + ' · il y a ' + ago(Date.now() - it.since));
-  if (p && p.dryRun && p.status !== 'dry-run') chip.append(el('span', 'tag cl', 'à blanc'));
+  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), it.running ? T('travaille · depuis ' + ago(Date.now() - it.at), 'working · for ' + ago(Date.now() - it.at)) : (PASS_FR[p.status] || p.status) + T(' · il y a ' + ago(Date.now() - it.since), ' · ' + ago(Date.now() - it.since) + ' ago'));
+  if (p && p.dryRun && p.status !== 'dry-run') chip.append(el('span', 'tag cl', T('à blanc', 'dry run')));
   head.append(chip);
-  if (it.model) head.append(el('span', 'tok', '  ·  modèle : ' + modelName(it.model)));
-  if (it.tokens) head.append(el('span', 'tok', '  ·  contexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens'));
-  head.append(el('div', 'meta', [(a.icon ? a.icon + ' ' : '') + a.label, 'lancée le ' + new Date(it.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
+  if (it.model) head.append(el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)));
+  if (it.tokens) head.append(el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString('fr-FR') + ' tokens'));
+  head.append(el('div', 'meta', [(a.icon ? a.icon + ' ' : '') + a.label, T('lancée le ', 'started ') + new Date(it.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
     p && p.minutes != null ? (p.minutes < 1 ? '< 1 min' : Math.round(p.minutes) + ' min') : null, p && p.costUsd != null ? money(p.costUsd) : null, it.sessionId].filter(Boolean).join(' · ')));
   const actions = el('div', 'actions');
   if (!it.running && it.sessionId && canWrite) {
-    const b = el('button', 'primary', '↻ Reprendre dans un onglet'); b.title = 'claude --resume ' + it.sessionId + ' — pour l’inspecter ou la questionner ; l’automate ne la reprend pas';
+    const b = el('button', 'primary', T('↻ Reprendre dans un onglet', '↻ Resume in a tab')); b.title = 'claude --resume ' + it.sessionId + T(' — pour l’inspecter ou la questionner ; l’automate ne la reprend pas', ' — to inspect or question it; the automation does not resume it');
     b.onclick = () => openPassConversation(it); actions.append(b);
   }
   const ob = automationOrders(a); if (ob) for (const b of [...ob.children]) actions.append(b);
   head.append(actions);
 }
 async function openPassConversation(it) {
-  if (!confirm('Rouvrir la conversation de cette passe (' + it.auto.label + ') dans un nouvel onglet (claude --resume) ?\n\nPour l’inspecter ou la questionner. L’automate ne la reprend pas.')) return;
-  try { const x = await post('/api/reopen?id=' + it.sessionId); say(x.error ? 'refusé : ' + x.error : 'onglet ouvert — la session apparaît dans quelques secondes'); } catch { say('échec de la demande'); }
+  if (!confirm(T('Rouvrir la conversation de cette passe (' + it.auto.label + ') dans un nouvel onglet (claude --resume) ?\n\nPour l’inspecter ou la questionner. L’automate ne la reprend pas.', 'Reopen the conversation of this pass (' + it.auto.label + ') in a new tab (claude --resume)?\n\nTo inspect or question it. The automation does not resume it.'))) return;
+  try { const x = await post('/api/reopen?id=' + it.sessionId); say(x.error ? T('refusé : ', 'refused: ') + x.error : T('onglet ouvert — la session apparaît dans quelques secondes', 'tab opened — the session shows up in a few seconds')); } catch { say(T('échec de la demande', 'request failed')); }
 }
 // Enchaînement des phases d'une demande, du premier au dernier run ; au-delà de 5, seules les 5 dernières.
 const phaseChain = phases => (phases.length > 5 ? ['…'].concat(phases.slice(-5)) : phases).map(p => RUN_FR[p] || p).join(' → ');
-const RUN_FR = { diagnostic:'diagnostic', suite:'suite', dev:'dev', relecture:'relecture', recette:'recette', reprise:'reprise', relance:'relance', reveil:'réveil', go:'go', merge:'merge', production:'production', doc:'doc' };
+const RUN_FR = { diagnostic:'diagnostic', suite:T('suite', 'follow-up'), dev:'dev', relecture:T('relecture', 'review'), recette:T('recette', 'testing'), reprise:T('reprise', 'rework'), relance:T('relance', 'restart'), reveil:T('réveil', 'wake-up'), go:'go', merge:'merge', production:'production', doc:'doc' };
 function runSub(it) {
   const r = it.run, multi = it.runCount > 1;
   const tail = multi ? [phaseChain(it.phases), it.runCount + ' runs' + (it.costTotal != null ? ' · ' + money(it.costTotal) : '')] : [];
-  if (r.running) return ['travaille' + (r.at ? ' depuis ' + ago(Date.now() - r.at) : '')].concat(tail, it.reply ? [lastLine(it.reply)] : []).join(' · ');
-  return [it.wait && STAGE_FR[it.wait.stage] ? STAGE_FR[it.wait.stage] : null, it.outcome || null, it.scripted ? 'étape scriptée' : null]
+  if (r.running) return [T('travaille' + (r.at ? ' depuis ' + ago(Date.now() - r.at) : ''), 'working' + (r.at ? ' for ' + ago(Date.now() - r.at) : ''))].concat(tail, it.reply ? [lastLine(it.reply)] : []).join(' · ');
+  return [it.wait && STAGE_FR[it.wait.stage] ? STAGE_FR[it.wait.stage] : null, it.outcome || null, it.scripted ? T('étape scriptée', 'scripted step') : null]
     .concat(multi ? tail : [r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.costUsd != null ? money(r.costUsd) : null]).filter(Boolean).join(' · ') || '—';
 }
 // ── Résultat d'un run : ce que le lanceur a CONSTATÉ, lu dans ses propres fichiers — report.json (production : verdict,
@@ -1249,18 +1249,18 @@ function runResult(report, verdict) {
   if (report && typeof report === 'object' && report.verdict) {
     const live = report.verdict === 'in-production';
     const lines = [[report.mergeSha ? 'merge ' + String(report.mergeSha).slice(0, 10) : null,
-      report.files != null ? report.files + ' fichier' + (report.files > 1 ? 's' : '') : null,
+      report.files != null ? report.files + T(' fichier', ' file') + (report.files > 1 ? 's' : '') : null,
       Array.isArray(report.sides) && report.sides.length ? report.sides.join(' + ') : null].filter(Boolean).join(' · ')].filter(Boolean);
     for (const d of Array.isArray(report.deployments) ? report.deployments : [])
       lines.push(String(d.name || '?').replace(/-deployment$/, '') + ' ' + (d.tag || '?') + ' · '
-        + (d.carries && d.rolledOut ? 'déployé' : d.carries ? 'pas encore déployé partout' : 'ne porte pas le correctif') + (d.reason ? ' (' + d.reason + ')' : ''));
-    return { look: live ? 'done' : 'ask', title: live ? '🚀 En production' : '⏳ Pas encore en production (' + report.verdict + ')', lines,
+        + (d.carries && d.rolledOut ? T('déployé', 'deployed') : d.carries ? T('pas encore déployé partout', 'not deployed everywhere yet') : T('ne porte pas le correctif', 'does not carry the fix')) + (d.reason ? ' (' + d.reason + ')' : ''));
+    return { look: live ? 'done' : 'ask', title: live ? T('🚀 En production', '🚀 In production') : T('⏳ Pas encore en production (' + report.verdict + ')', '⏳ Not in production yet (' + report.verdict + ')'), lines,
       pr: Number(report.pr) > 0 ? Number(report.pr) : null };
   }
   if (verdict && typeof verdict === 'object' && verdict.verdict) {
     const v = String(verdict.verdict).toLowerCase(), n = Array.isArray(verdict.steps) ? verdict.steps.length : 0;
-    const t = v === 'ok' ? ['done', '✅ Recette OK'] : v === 'ko' ? ['waiting', '❌ Recette KO'] : ['ask', '❔ Recette non concluante'];
-    return { look: t[0], title: t[1] + (n ? ' · ' + n + ' étape' + (n > 1 ? 's' : '') : ''), lines: verdict.summary ? [String(verdict.summary)] : [], pr: null };
+    const t = v === 'ok' ? ['done', T('✅ Recette OK', '✅ Testing OK')] : v === 'ko' ? ['waiting', T('❌ Recette KO', '❌ Testing failed')] : ['ask', T('❔ Recette non concluante', '❔ Testing inconclusive')];
+    return { look: t[0], title: t[1] + (n ? ' · ' + n + T(' étape', ' step') + (n > 1 ? 's' : '') : ''), lines: verdict.summary ? [String(verdict.summary)] : [], pr: null };
   }
   return null;
 }
@@ -1314,7 +1314,7 @@ async function viewRunFile(it, name) {
 async function openRunFile(it, name, quiet) {
   const key = it.run.dir + '/' + name;
   runFile = key; runFileText = name.endsWith('.png') ? null : '…'; if (!quiet) renderDetail(true);
-  if (!name.endsWith('.png')) { try { runFileText = await (await fetch('/api/launcher/file?path=' + encodeURIComponent(it.run.dir + '\\' + name), { cache:'no-store' })).text(); } catch { runFileText = '(illisible)'; } if (runFile === key) renderDetail(true); }
+  if (!name.endsWith('.png')) { try { runFileText = await (await fetch('/api/launcher/file?path=' + encodeURIComponent(it.run.dir + '\\' + name), { cache:'no-store' })).text(); } catch { runFileText = T('(illisible)', '(unreadable)'); } if (runFile === key) renderDetail(true); }
 }
 // Détail d'un run : en-tête (statut, modèle, coût, tours, PR), fichiers du run, conversation (suivie en direct pendant le run).
 function renderRunDetail(it, force) {
@@ -1342,14 +1342,14 @@ function renderRunDetail(it, force) {
     const ob = el('div', 'orders'); ob.id = 'orders'; body.append(ob); renderOrders(it);
     // Frise des runs de la demande (du plus récent au plus ancien) : un clic affiche ce run (fichiers, conversation).
     if (it.runs && it.runs.length > 1) {
-      body.append(el('h2', null, 'Runs de HD-' + r.hd + ' (' + it.runs.length + (it.costTotal != null ? ' · ' + money(it.costTotal) : '') + ')'));
+      body.append(el('h2', null, T('Runs de HD-' + r.hd, 'Runs of HD-' + r.hd) + ' (' + it.runs.length + (it.costTotal != null ? ' · ' + money(it.costTotal) : '') + ')'));
       const sp = runSpan(it.runs, Date.now());
       if (sp) body.append(el('div', 'rspan', [(RUN_FR[sp.from] || sp.from) + ' ' + hhmm(sp.fromAt) + ' → ' + (RUN_FR[sp.to] || sp.to) + ' ' + hhmm(sp.toAt),
-        dur(sp.totalMin) + (sp.running ? ' jusqu’ici' : ' de bout en bout'), dur(sp.workMin) + ' de travail du lanceur', dur(sp.waitMin) + ' d’attente (feu vert, file, déploiement)',
+        dur(sp.totalMin) + (sp.running ? T(' jusqu’ici', ' so far') : T(' de bout en bout', ' end to end')), dur(sp.workMin) + T(' de travail du lanceur', ' of launcher work'), dur(sp.waitMin) + T(' d’attente (feu vert, file, déploiement)', ' of waiting (go-ahead, queue, deployment)'),
         it.costTotal != null ? money(it.costTotal) : null].filter(Boolean).join(' · ')));
       const fr = el('div', 'lf runs-hd');
       for (const x of it.runs) {
-        const xr = x.run, o = xr.running ? 'en cours' : x.outcome || '—';
+        const xr = x.run, o = xr.running ? T('en cours', 'running') : x.outcome || '—';
         const b = el('button', 'quick ' + x.look + (xr.dir === r.dir ? ' on' : ''),
           [new Date(xr.at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }), RUN_FR[xr.phase] || xr.phase, o,
            xr.minutes != null ? Math.round(xr.minutes) + ' min' : null, xr.costUsd != null ? money(xr.costUsd) : null].filter(Boolean).join(' · '));
@@ -1360,9 +1360,9 @@ function renderRunDetail(it, force) {
       body.append(fr);
     }
     if (r.files && r.files.length) {
-      body.append(el('h2', null, 'Fichiers du run'));
+      body.append(el('h2', null, T('Fichiers du run', 'Run files')));
       const fl = el('div', 'lf');
-      for (const f of r.files) { const b = el('button', 'quick' + (runFile === r.dir + '/' + f.name ? ' on' : ''), f.name); b.title = Math.max(1, Math.round(f.size / 1024)) + ' Ko'; b.onclick = () => viewRunFile(it, f.name); fl.append(b); }
+      for (const f of r.files) { const b = el('button', 'quick' + (runFile === r.dir + '/' + f.name ? ' on' : ''), f.name); b.title = Math.max(1, Math.round(f.size / 1024)) + T(' Ko', ' KB'); b.onclick = () => viewRunFile(it, f.name); fl.append(b); }
       body.append(fl);
       if (runFile && runFile.startsWith(r.dir + '/')) {
         const name = runFile.slice(r.dir.length + 1);
@@ -1371,8 +1371,8 @@ function renderRunDetail(it, force) {
         else body.append(el('pre', 'lview', runFileText));
       }
     }
-    if (it.sessionId) { body.append(el('h2', null, 'Conversation complète'), convPane()); applyConvView(it); }
-    else body.append(el('div', 'empty', it.scripted ? 'Étape scriptée du lanceur : aucune session Claude, donc pas de conversation (voir ses fichiers).' : 'Conversation introuvable : identifiant de session inconnu pour ce run.'));
+    if (it.sessionId) { body.append(el('h2', null, T('Conversation complète', 'Full conversation')), convPane()); applyConvView(it); }
+    else body.append(el('div', 'empty', it.scripted ? T('Étape scriptée du lanceur : aucune session Claude, donc pas de conversation (voir ses fichiers).', 'Scripted launcher step: no Claude session, so no conversation (see its files).') : T('Conversation introuvable : identifiant de session inconnu pour ce run.', 'Conversation not found: unknown session id for this run.')));
   }
   // L'étape de la demande change sans changement de run (ordre pris, livraison démarrée) : le corps n'est pas reconstruit,
   // le bloc « Piloter » doit suivre quand même — sinon « Livrer la PR » reste offert alors que la livraison tourne.
@@ -1385,43 +1385,43 @@ function renderRunDetail(it, force) {
     } }
   const head = $('head'); head.replaceChildren(); head.className = it.look;
   head.append(el('div', 'dtitle', it.title));
-  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), (r.running ? 'travaille · depuis ' + ago(Date.now() - r.at) : (it.outcome || 'terminé') + ' · il y a ' + ago(Date.now() - it.since)));
+  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), (r.running ? T('travaille · depuis ' + ago(Date.now() - r.at), 'working · for ' + ago(Date.now() - r.at)) : (it.outcome || T('terminé', 'done')) + T(' · il y a ' + ago(Date.now() - it.since), ' · ' + ago(Date.now() - it.since) + ' ago')));
   if (it.wait && STAGE_FR[it.wait.stage]) chip.append(el('span', 'tag cl', STAGE_FR[it.wait.stage]));
   head.append(chip);
-  if (it.model) head.append(el('span', 'tok', '  ·  modèle : ' + modelName(it.model)));
-  if (it.tokens) head.append(el('span', 'tok', '  ·  contexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens'));
-  const meta = el('div', 'meta', ['🤖 lanceur · ' + (RUN_FR[r.phase] || r.phase), 'lancé le ' + new Date(r.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
-    r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + ' tours' : null, r.costUsd != null ? (Math.round(r.costUsd * 100) / 100).toLocaleString('fr-FR') + ' $' : null,
+  if (it.model) head.append(el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)));
+  if (it.tokens) head.append(el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString('fr-FR') + ' tokens'));
+  const meta = el('div', 'meta', [T('🤖 lanceur · ', '🤖 launcher · ') + (RUN_FR[r.phase] || r.phase), T('lancé le ', 'started ') + new Date(r.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
+    r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + T(' tours', ' turns') : null, r.costUsd != null ? (Math.round(r.costUsd * 100) / 100).toLocaleString('fr-FR') + ' $' : null,
     it.pid ? 'pid ' + it.pid : null, it.sessionId].filter(Boolean).join(' · '));
   const a = prLink(it); if (a) meta.append(' · ', a);
   head.append(meta);
   if (r.detail) head.append(el('div', 'meta', r.detail));
-  if (it.wait && it.wait.detail) head.append(el('div', 'meta', 'Demande : ' + it.wait.detail));
+  if (it.wait && it.wait.detail) head.append(el('div', 'meta', T('Demande : ', 'Request: ') + it.wait.detail));
   head.append(hdBlock(r.hd));
   const actions = el('div', 'actions');
-  if (!r.running && r.sessionId) { const b = el('button', 'primary', '↻ Reprendre dans un onglet'); b.title = 'claude --resume ' + r.sessionId + ' — pour l’inspecter ou la questionner ; le lanceur ne la reprend pas'; b.onclick = () => openRunConversation(r); actions.append(b); }
-  const bl = el('button', null, 'Vue 🤖 Lanceur'); bl.onclick = () => openLauncher(); actions.append(bl);
+  if (!r.running && r.sessionId) { const b = el('button', 'primary', T('↻ Reprendre dans un onglet', '↻ Resume in a tab')); b.title = 'claude --resume ' + r.sessionId + T(' — pour l’inspecter ou la questionner ; le lanceur ne la reprend pas', ' — to inspect or question it; the launcher does not resume it'); b.onclick = () => openRunConversation(r); actions.append(b); }
+  const bl = el('button', null, T('Vue 🤖 Lanceur', '🤖 Launcher view')); bl.onclick = () => openLauncher(); actions.append(bl);
   head.append(actions);
   head.append(el('div', 'banner', runBanner(!!r.running, !!(it.sessionId || r.sessionId))));
 }
 // La DEMANDE derrière un run (en-tête du détail) : demandeur, date, type, statut, assigné, client, liens Teams et
 // de tickets, début de la description — lue par GET /api/launcher/hd (commande de lecture des tickets du lanceur), gardée
 // ici par HD (l'en-tête se redessine toutes les 2 s ; le serveur garde 5 min). hdParts est PURE (testée par le .ps1).
-const HD_STATUS_FR = { New:'Nouveau', Open:'Ouvert', InProgress:'En cours', Pending:'En attente', Waiting:'En attente', Resolved:'Résolu', Closed:'Fermé' };
-const HD_KIND_FR = { Bug:'🐞 Bug', Idee:'💡 Idée' };
-const HD_PRIO_FR = { Low:'basse', Medium:'moyenne', High:'haute', Urgent:'urgente' };
+const HD_STATUS_FR = { New:T('Nouveau', 'New'), Open:T('Ouvert', 'Open'), InProgress:T('En cours', 'In progress'), Pending:T('En attente', 'Pending'), Waiting:T('En attente', 'Waiting'), Resolved:T('Résolu', 'Resolved'), Closed:T('Fermé', 'Closed') };
+const HD_KIND_FR = { Bug:'🐞 Bug', Idee:T('💡 Idée', '💡 Idea') };
+const HD_PRIO_FR = { Low:T('basse', 'low'), Medium:T('moyenne', 'medium'), High:T('haute', 'high'), Urgent:T('urgente', 'urgent') };
 function hdParts(h) {
   const when = h.createdAt ? new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(h.createdAt) ? h.createdAt : h.createdAt + 'Z') : null;
   return [
     h.kind ? (HD_KIND_FR[h.kind] || h.kind) : null,
     h.status ? (HD_STATUS_FR[h.status] || h.status) : null,
-    h.requester ? 'demandée par ' + h.requester : null,
-    when && !isNaN(when) ? 'le ' + when.toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : null,
-    h.domain ? 'domaine ' + h.domain : null,
-    h.severity ? 'sévérité ' + h.severity : null,
-    h.priority ? 'priorité ' + (HD_PRIO_FR[h.priority] || h.priority) : null,
-    h.assignee ? 'assignée à ' + h.assignee : null,
-    h.clients ? h.clients + (h.clients > 1 ? ' clients liés' : ' client lié') : null,
+    h.requester ? T('demandée par ', 'requested by ') + h.requester : null,
+    when && !isNaN(when) ? T('le ', 'on ') + when.toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : null,
+    h.domain ? T('domaine ', 'domain ') + h.domain : null,
+    h.severity ? T('sévérité ', 'severity ') + h.severity : null,
+    h.priority ? T('priorité ', 'priority ') + (HD_PRIO_FR[h.priority] || h.priority) : null,
+    h.assignee ? T('assignée à ', 'assigned to ') + h.assignee : null,
+    h.clients ? h.clients + (h.clients > 1 ? T(' clients liés', ' linked clients') : T(' client lié', ' linked client')) : null,
   ].filter(Boolean);
 }
 const hdInfo = {};                              // hd → { at, value } | { at, loading }
@@ -1430,18 +1430,18 @@ function hdBlock(hd) {
   const c = hdInfo[hd];
   if (!c || (!c.loading && Date.now() - c.at > (c.value.error ? 60000 : 300000))) {
     hdInfo[hd] = { at: Date.now(), loading: true, value: c && c.value };
-    fetch('/api/launcher/hd?hd=' + encodeURIComponent(hd), { cache:'no-store' }).then(x => x.json()).catch(() => ({ error: 'serveur injoignable' }))
+    fetch('/api/launcher/hd?hd=' + encodeURIComponent(hd), { cache:'no-store' }).then(x => x.json()).catch(() => ({ error: T('serveur injoignable', 'server unreachable') }))
       .then(v => { hdInfo[hd] = { at: Date.now(), value: v }; renderDetail(); });
   }
   const h = hdInfo[hd].value;
-  if (!h) { box.append(el('span', 'mute', '📨 Demande HD-' + hd + ' : lecture…')); return box; }
-  if (h.error) { box.append(el('span', 'mute', '📨 Demande HD-' + hd + ' : ' + h.error)); return box; }
-  const line = el('div', 'hdl'); line.append(el('b', null, '📨 Demande'), ' · ' + hdParts(h).join(' · '));
+  if (!h) { box.append(el('span', 'mute', T('📨 Demande HD-' + hd + ' : lecture…', '📨 Request HD-' + hd + ': loading…'))); return box; }
+  if (h.error) { box.append(el('span', 'mute', T('📨 Demande HD-' + hd + ' : ', '📨 Request HD-' + hd + ': ') + h.error)); return box; }
+  const line = el('div', 'hdl'); line.append(el('b', null, T('📨 Demande', '📨 Request')), ' · ' + hdParts(h).join(' · '));
   const link = (txt, url) => { const a = el('a', null, txt); a.href = url; a.target = '_blank'; a.rel = 'noopener'; return a; };
   if (ui().ticketUrl) line.append(' · ', link((ui().ticketLabel || 'Ticket') + ' ↗', ui().ticketUrl + h.hd));
   if (h.teamsUrl) line.append(' · ', link('Teams ↗', h.teamsUrl));
   box.append(line);
-  if (h.description) { const d = el('div', 'hdd', h.description); d.title = 'Début de la description de la demande'; box.append(d); }
+  if (h.description) { const d = el('div', 'hdd', h.description); d.title = T('Début de la description de la demande', 'Start of the request description'); box.append(d); }
   return box;
 }
 // Bandeau du détail d'un run : il ne parle de conversation (ni de « Reprendre ») que si le run en a une — une étape
@@ -1450,15 +1450,15 @@ function hdBlock(hd) {
 // (étiqueteur de sessions, automates divers) sont comptés à part — sinon l'étiqueteur passait pour un run en cours.
 function autoTitle(base, rows) {
   const runs = rows.filter(it => it.kind === 'run'), nAuto = rows.length - runs.length;
-  const parts = runs.length ? [runs.filter(it => it.run.running).length + ' en cours', runs.length + ' HD aujourd’hui'] : [];
-  if (nAuto) parts.push(nAuto + (nAuto > 1 ? ' automates' : ' automate'));
+  const parts = runs.length ? [runs.filter(it => it.run.running).length + T(' en cours', ' running'), runs.length + T(' HD aujourd’hui', ' HD today')] : [];
+  if (nAuto) parts.push(nAuto + (nAuto > 1 ? T(' automates', ' automations') : T(' automate', ' automation')));
   return parts.length ? base + ' — ' + parts.join(' · ') : base;
 }
 function runBanner(running, conv) {
-  if (running) return conv ? 'Run du lanceur en cours (claude -p, sans terminal) : on ne lui écrit pas — les ordres se donnent une fois le run terminé. La conversation défile en direct.'
-    : 'Étape scriptée du lanceur en cours : pas de session Claude ni de conversation ; les ordres se donnent une fois l’étape terminée.';
-  return conv ? 'Run du lanceur terminé. « Reprendre » rouvre sa conversation dans un onglet, sans rien changer pour le lanceur ; « Piloter » lui donne un ordre.'
-    : 'Étape scriptée du lanceur terminée : pas de session Claude ni de conversation à reprendre ; « Piloter » donne un ordre au lanceur.';
+  if (running) return conv ? T('Run du lanceur en cours (claude -p, sans terminal) : on ne lui écrit pas — les ordres se donnent une fois le run terminé. La conversation défile en direct.', 'Launcher run in progress (claude -p, no terminal): you do not write to it — orders are given once the run is over. The conversation scrolls live.')
+    : T('Étape scriptée du lanceur en cours : pas de session Claude ni de conversation ; les ordres se donnent une fois l’étape terminée.', 'Scripted launcher step in progress: no Claude session and no conversation; orders are given once the step is over.');
+  return conv ? T('Run du lanceur terminé. « Reprendre » rouvre sa conversation dans un onglet, sans rien changer pour le lanceur ; « Piloter » lui donne un ordre.', 'Launcher run over. "Resume" reopens its conversation in a tab, without changing anything for the launcher; "Control" gives it an order.')
+    : T('Étape scriptée du lanceur terminée : pas de session Claude ni de conversation à reprendre ; « Piloter » donne un ordre au lanceur.', 'Scripted launcher step over: no Claude session and no conversation to resume; "Control" gives the launcher an order.');
 }
 
 // ── Piloter le lanceur depuis le détail d'un run : go + consigne, livrer la PR (confirmation), relire,
@@ -1484,13 +1484,13 @@ function deliveringWait(it) { const w = ((it.runs || []).find(x => x.wait) || {}
 function deliveringNote(stage, since, mergeAt, now) {
   if (stage !== 'delivering') return null;
   const min = t => Math.max(0, Math.round((now - t) / 60000));
-  const head = '🚀 Livraison ' + (since ? 'demandée à ' + hhmm(since) + ' — ' : '') + (mergeAt ? 'en cours depuis ' + min(mergeAt) + ' min' : 'le lanceur la prend à sa prochaine passe');
-  return head + '. Rebase sur master, contrôles rejoués (20 à 40 min), puis squash-merge : rien à refaire ici, l’ordre est pris.';
+  const head = T('🚀 Livraison ', '🚀 Delivery ') + (since ? T('demandée à ' + hhmm(since) + ' — ', 'requested at ' + hhmm(since) + ' — ') : '') + (mergeAt ? T('en cours depuis ' + min(mergeAt) + ' min', 'running for ' + min(mergeAt) + ' min') : T('le lanceur la prend à sa prochaine passe', 'the launcher takes it on its next pass'));
+  return head + T('. Rebase sur master, contrôles rejoués (20 à 40 min), puis squash-merge : rien à refaire ici, l’ordre est pris.', '. Rebase on master, checks replayed (20 to 40 min), then squash-merge: nothing to redo here, the order is taken.');
 }
 // ── Décision de la Tech (carte ✅ posée par le lanceur sous sa dernière note, `techDecision` de son state.json) :
 // tranchée ICI comme sur la carte. decisionForm et decideBody sont PURES ; le
 // lanceur refait toutes les gardes (ordre « decide ») et pose la note de trace qui ferme la carte.
-const DECISION_KIND_FR = { validation:'✅ Validation Tech', cadrage:'📐 Ouvrir un cadrage', doc:'📝 Mémoire de domaine' };
+const DECISION_KIND_FR = { validation:T('✅ Validation Tech', '✅ Tech validation'), cadrage:T('📐 Ouvrir un cadrage', '📐 Open a scoping'), doc:T('📝 Mémoire de domaine', '📝 Domain memory') };
 function decisionForm(d) {
   let qs = [];
   try { qs = JSON.parse(d.questionsJson || '[]'); } catch { qs = []; }
@@ -1498,7 +1498,7 @@ function decisionForm(d) {
   const main = qs.find(q => q && q.id === 'decision') || { question:'', options:[] };
   const opts = q => (q.options || []).map(o => ({ id: String(o.id), label: String(o.label || o.id), recommended: !!o.recommended }));
   return {
-    title: DECISION_KIND_FR[d.kind] || '✅ Décision de la Tech',
+    title: DECISION_KIND_FR[d.kind] || T('✅ Décision de la Tech', '✅ Tech decision'),
     question: String(main.question || ''),
     choices: qs.filter(q => q && q.id !== 'decision').map(q => ({ id: String(q.id), header: String(q.header || q.id), question: String(q.question || ''), options: opts(q) })),
     decisions: opts(main).map(o => ({ ...o, needsText: d.kind === 'validation' && o.id === 'non' })),
@@ -1507,9 +1507,9 @@ function decisionForm(d) {
 function decideBody(hd, d, decision, picks, text) {
   const f = decisionForm(d);
   const dec = f.decisions.find(x => x.id === decision);
-  if (!dec) return { error: 'décision inconnue' };
+  if (!dec) return { error: T('décision inconnue', 'unknown decision') };
   const t = String(text || '').replace(/\s+/g, ' ').trim();
-  if (dec.needsText && !t) return { error: '« ' + dec.label + ' » demande un motif : il est dit au demandeur' };
+  if (dec.needsText && !t) return { error: T('« ' + dec.label + ' » demande un motif : il est dit au demandeur', '"' + dec.label + '" needs a reason: it is told to the requester') };
   const choices = {};
   for (const c of f.choices) { const v = picks && picks[c.id]; if (v && c.options.some(o => o.id === v)) choices[c.id] = v; }
   return { hd: String(hd), order: 'decide', value: decision, choices, text: t };
@@ -1523,17 +1523,17 @@ function renderDecision(box, it, d) {
     for (const c of f.choices) { const r = c.options.find(o => o.recommended); if (r) decideUi.picks[c.id] = r.id; }
   }
   const card = el('div', 'orderform decision');
-  card.append(el('div', null, f.title + ' — en attente depuis ' + (d.since ? ago(Date.now() - d.since) : '?')));
+  card.append(el('div', null, f.title + T(' — en attente depuis ', ' — waiting for ') + (d.since ? ago(Date.now() - d.since) : '?')));
   if (f.question) card.append(el('div', 'meta', f.question));
   for (const c of f.choices) {
     const line = el('div', 'meta'); line.append(c.header + ' — ' + c.question + ' ');
-    const sel = el('select'); sel.append(el('option', null, '— choisir —')); sel.firstChild.value = '';
-    for (const o of c.options) { const op = el('option', null, o.label + (o.recommended ? ' (recommandé)' : '')); op.value = o.id; if (decideUi.picks[c.id] === o.id) op.selected = true; sel.append(op); }
+    const sel = el('select'); sel.append(el('option', null, T('— choisir —', '— choose —'))); sel.firstChild.value = '';
+    for (const o of c.options) { const op = el('option', null, o.label + (o.recommended ? T(' (recommandé)', ' (recommended)') : '')); op.value = o.id; if (decideUi.picks[c.id] === o.id) op.selected = true; sel.append(op); }
     sel.onchange = () => { decideUi.picks[c.id] = sel.value; };
     line.append(sel); card.append(line);
   }
   const ta = el('textarea'); ta.value = decideUi.text; ta.maxLength = 2000; ta.rows = 2;
-  ta.placeholder = 'Consigne (Lancer), motif (Ne pas faire : obligatoire, dit au demandeur) ou texte « Autre »';
+  ta.placeholder = T('Consigne (Lancer), motif (Ne pas faire : obligatoire, dit au demandeur) ou texte « Autre »', 'Instruction (Start), reason (Do not do: required, told to the requester) or "Other" text');
   ta.oninput = () => { decideUi.text = ta.value; };
   card.append(ta);
   const a = el('div', 'actions');
@@ -1542,7 +1542,7 @@ function renderDecision(box, it, d) {
     b.onclick = () => { const body = decideBody(hd, d, dec.id, decideUi.picks, decideUi.text); if (body.error) { orderUi.result = { ok: false, text: '⛔ ' + body.error }; renderOrders(it); return; } sendOrder(it, body); };
     a.append(b);
   }
-  card.append(a, el('div', 'hint', 'Ordre « decide ' + hd + ' … » — rejouée comme un clic sur la carte ; une note visible le dit au demandeur et ferme la carte.'));
+  card.append(a, el('div', 'hint', T('Ordre « decide ' + hd + ' … » — rejouée comme un clic sur la carte ; une note visible le dit au demandeur et ferme la carte.', 'Order "decide ' + hd + ' …" — replayed as a click on the card; a visible note tells the requester and closes the card.')));
   box.append(card);
 }
 // ── Cartes de questions du lanceur (module « launcher », clé cardsApi — server/src/cards.ts) : ce que l'orchestrateur
@@ -1551,7 +1551,7 @@ function renderDecision(box, it, d) {
 // sont visibles ; rien ne part avant « Envoyer les réponses ». La réponse passe par la commande des cartes : dans le
 // ticket, c'est un clic de l'opérateur sur la carte. cardRuns, withCards, cardForm et cardAnswers sont PURES
 // (testées par server/test/page-cards.test.ts).
-const CARD_FR = { arbitrage:'⚖️ Question pour toi', question:'❓ Question pour toi', validation:'✅ Validation — lancer le développement ?', cadrage:'📐 Ouvrir un cadrage ?', doc:'📝 Mémoire de domaine' };
+const CARD_FR = { arbitrage:T('⚖️ Question pour toi', '⚖️ Question for you'), question:T('❓ Question pour toi', '❓ Question for you'), validation:T('✅ Validation — lancer le développement ?', '✅ Validation — start the development?'), cadrage:T('📐 Ouvrir un cadrage ?', '📐 Open a scoping?'), doc:T('📝 Mémoire de domaine', '📝 Domain memory') };
 // Le DERNIER run d'une demande dont une carte attend, quand il est antérieur à `since` (minuit) : la liste ne garde
 // que les runs du jour, et la carte se traite depuis le détail d'un run.
 function cardRuns(runs, cards, since) {
@@ -1569,7 +1569,7 @@ function withCards(items, cards) {
 function cardForm(card) {
   const qs = Array.isArray(card && card.questions) ? card.questions.filter(q => q && q.id != null) : [];
   return {
-    id: String(card.id), title: CARD_FR[card.flavor] || CARD_FR[card.kind] || 'Question pour toi', neighbours: Number(card.neighbours) || 0,
+    id: String(card.id), title: CARD_FR[card.flavor] || CARD_FR[card.kind] || T('Question pour toi', 'Question for you'), neighbours: Number(card.neighbours) || 0,
     questions: qs.map(q => {
       const options = (Array.isArray(q.options) ? q.options : []).map(o => ({ id: String(o.id), label: String(o.label || o.id), description: String(o.description || ''), recommended: !!o.recommended }));
       options.sort((a, b) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
@@ -1586,15 +1586,15 @@ function cardAnswers(card, picks, others) {
     let selected = ((picks && picks[q.id]) || []).filter(v => known.has(v));
     if (!q.multi) selected = selected.slice(0, 1);
     const other = String((others && others[q.id]) || '').trim();
-    if (other.length > 2000) return { error: '« ' + q.header + ' » : 2 000 caractères au plus' };
+    if (other.length > 2000) return { error: T('« ' + q.header + ' » : 2 000 caractères au plus', '"' + q.header + '": 2,000 characters at most') };
     if (selected.length || other) answers.push({ questionId: q.id, selected, other: other || null }); else missing.push(q.header);
   }
-  if (!answers.length) return { error: 'Réponds à au moins une question' };
+  if (!answers.length) return { error: T('Réponds à au moins une question', 'Answer at least one question') };
   const dec = f.questions.find(q => q.required);
   if (dec) {
     const a = answers.find(x => x.questionId === dec.id);
-    if (!a || a.selected.length !== 1) return { error: 'Choisis la décision : ' + dec.options.map(o => o.label).join(' / ') };
-    if (card.flavor === 'validation' && a.selected[0] === 'non' && !a.other) return { error: '« Ne pas faire » demande un motif : il est dit au demandeur' };
+    if (!a || a.selected.length !== 1) return { error: T('Choisis la décision : ', 'Choose the decision: ') + dec.options.map(o => o.label).join(' / ') };
+    if (card.flavor === 'validation' && a.selected[0] === 'non' && !a.other) return { error: T('« Ne pas faire » demande un motif : il est dit au demandeur', 'Declining needs a reason: it is told to the requester') };
   }
   return { answers, missing };
 }
@@ -1620,7 +1620,7 @@ function renderCard(box, it, card) {
   if (cardUi.key !== key) cardUi = { key, picks: {}, others: {}, busy: false };
   const c = el('div', 'dlg qcard');
   const since = card.postedAt ? Date.parse(String(card.postedAt).replace(/Z?$/, 'Z')) : 0;
-  c.append(el('div', 'tabs', f.title + (card.addressee ? ' · ' + card.addressee : '') + (since ? ' · posée il y a ' + ago(Date.now() - since) : '')));
+  c.append(el('div', 'tabs', f.title + (card.addressee ? ' · ' + card.addressee : '') + (since ? T(' · posée il y a ' + ago(Date.now() - since), ' · asked ' + ago(Date.now() - since) + ' ago') : '')));
   for (const q of f.questions) {
     const blk = el('div', 'qblock');
     blk.append(el('div', 'q', q.header + ' — ' + q.question));
@@ -1629,7 +1629,7 @@ function renderCard(box, it, card) {
       for (const o of q.options) {
         const on = (cardUi.picks[q.id] || []).includes(o.id);
         const b = el('button', 'opt' + (on ? ' sel' : '')); b.type = 'button'; b.disabled = cardUi.busy;
-        b.append(el('span', 'n', on ? '✔' : (q.options.indexOf(o) + 1) + '.'), el('span', null, o.label + (o.recommended ? ' (recommandé)' : '')));
+        b.append(el('span', 'n', on ? '✔' : (q.options.indexOf(o) + 1) + '.'), el('span', null, o.label + (o.recommended ? T(' (recommandé)', ' (recommended)') : '')));
         if (o.description) b.append(el('span', 'd', o.description));
         b.onclick = () => {
           const cur = cardUi.picks[q.id] || [];
@@ -1639,28 +1639,28 @@ function renderCard(box, it, card) {
         os.append(b);
       }
       blk.append(os);
-      if (q.multi) blk.append(el('div', 'hint', 'Plusieurs réponses possibles.'));
+      if (q.multi) blk.append(el('div', 'hint', T('Plusieurs réponses possibles.', 'Several answers allowed.')));
     }
     const row = el('div', 'row'); const ta = el('textarea'); ta.rows = q.open ? 2 : 1; ta.maxLength = 2000; ta.value = cardUi.others[q.id] || ''; ta.disabled = cardUi.busy;
-    ta.placeholder = q.open ? 'Ta réponse…' : q.required ? 'Consigne pour le développement (Lancer), ou motif (Ne pas faire : obligatoire, dit au demandeur)' : 'Autre réponse, ou une précision (facultatif)';
+    ta.placeholder = q.open ? T('Ta réponse…', 'Your answer…') : q.required ? T('Consigne pour le développement (Lancer), ou motif (Ne pas faire : obligatoire, dit au demandeur)', 'Instruction for the development (Start), or reason (Do not do: required, told to the requester)') : T('Autre réponse, ou une précision (facultatif)', 'Other answer, or a detail (optional)');
     ta.oninput = () => { cardUi.others[q.id] = ta.value; };
     row.append(ta); blk.append(row);
     c.append(blk);
   }
   const a = el('div', 'row');
-  const go = el('button', 'primary', 'Envoyer les réponses'); go.disabled = cardUi.busy || !canWrite;
+  const go = el('button', 'primary', T('Envoyer les réponses', 'Send the answers')); go.disabled = cardUi.busy || !canWrite;
   go.onclick = () => sendCard(it, card);
   a.append(go); c.append(a);
-  c.append(el('div', 'hint', 'La réponse part dans le ticket sous ton nom, comme un clic sur la carte, et la carte se ferme : une question laissée vide reste sans réponse.'
-    + (f.neighbours ? ' ' + plural(f.neighbours, 'autre carte reste ouverte', 'autres cartes restent ouvertes') + ' sous la même note.' : '')));
+  c.append(el('div', 'hint', T('La réponse part dans le ticket sous ton nom, comme un clic sur la carte, et la carte se ferme : une question laissée vide reste sans réponse.', 'The answer goes into the ticket under your name, like a click on the card, and the card closes: a question left empty stays unanswered.')
+    + (f.neighbours ? ' ' + T(plural(f.neighbours, 'autre carte reste ouverte', 'autres cartes restent ouvertes') + ' sous la même note.', plural(f.neighbours, 'other card stays open', 'other cards stay open') + ' under the same note.') : '')));
   box.append(c);
 }
 // Le message après « Envoyer les réponses » — PURE. L'orchestrateur prévenu dit ce qu'il a fait de la réponse
 // (`launcher` : travail mis en file, suite signalée…) ; une commande qui ne le dit pas garde la phrase d'avant.
 function cardAnsweredText(hd, missing, j) {
   const said = j && typeof j.launcher === 'string' && j.launcher.trim() ? j.launcher.trim() : '';
-  return '✅ Réponse enregistrée dans HD-' + hd + (missing.length ? ' — sans réponse : ' + missing.join(', ') : '') + '. '
-    + (said ? said.charAt(0).toUpperCase() + said.slice(1) + (/[.!?]$/.test(said) ? '' : '.') : 'Le lanceur la lit à sa prochaine passe.');
+  return T('✅ Réponse enregistrée dans HD-' + hd, '✅ Answer saved in HD-' + hd) + (missing.length ? T(' — sans réponse : ', ' — unanswered: ') + missing.join(', ') : '') + '. '
+    + (said ? said.charAt(0).toUpperCase() + said.slice(1) + (/[.!?]$/.test(said) ? '' : '.') : T('Le lanceur la lit à sa prochaine passe.', 'The launcher reads it on its next pass.'));
 }
 async function sendCard(it, card) {
   if (!canWrite || cardUi.busy) return;
@@ -1674,16 +1674,16 @@ async function sendCard(it, card) {
     const j = await r.json().catch(() => ({}));
     done = !!(r.ok && (j.ok === true || j.gone));
     res = r.ok && j.ok === true ? { ok: true, text: cardAnsweredText(hd, body.missing, j) }
-      : { ok: false, text: '⛔ ' + (j.error || 'réponse refusée (' + r.status + ')') };
-  } catch { res = { ok: false, text: '⛔ serveur injoignable' }; }
+      : { ok: false, text: '⛔ ' + (j.error || T('réponse refusée (' + r.status + ')', 'answer refused (' + r.status + ')')) };
+  } catch { res = { ok: false, text: T('⛔ serveur injoignable', '⛔ server unreachable') }; }
   cardUi.busy = false;
   if (done && runData) { runData.cards = (runData.cards || []).filter(c => !(String(c.hd) === hd && String(c.id) === String(card.id))); cardUi = { key: null, picks: {}, others: {}, busy: false }; renderList(); }
   say(res.text.split('\n')[0]);
   if (orderUi.key !== key) return;
   orderUi.result = res; renderOrders(it); setTimeout(loadRuns, 3000);
 }
-const ORDER_FR = { go:'▶ Feu vert (go)', merge:'🚀 Livrer la PR', review:'🔎 Relire la PR', 'recette-skip':'⏭ Sauter la recette', rework:'🔁 Reprendre la PR',
-  adopt:'🔎 Relire les commits ajoutés, puis livrer', retry:'↻ Relancer la livraison', session:'🧑‍💻 Reprendre en session' };
+const ORDER_FR = { go:T('▶ Feu vert (go)', '▶ Go-ahead (go)'), merge:T('🚀 Livrer la PR', '🚀 Ship the PR'), review:T('🔎 Relire la PR', '🔎 Review the PR'), 'recette-skip':T('⏭ Sauter la recette', '⏭ Skip testing'), rework:T('🔁 Reprendre la PR', '🔁 Rework the PR'),
+  adopt:T('🔎 Relire les commits ajoutés, puis livrer', '🔎 Review the added commits, then ship'), retry:T('↻ Relancer la livraison', '↻ Restart the delivery'), session:T('🧑‍💻 Reprendre en session', '🧑‍💻 Resume in a session') };
 // Livraison refusée (lot 1 des livraisons refusées) : la NATURE du refus, publiée par le
 // lanceur (stages.json → waiting.refusalKind), remplace « Livrer la PR » par la suite qui a un sens. Commits ajoutés après
 // les contrôles ⇒ les relire ici, puis livrer CE sha (merge --adopt-head) ; panne technique ⇒ relancer. Conflit,
@@ -1708,13 +1708,13 @@ function resumePrompt(hd, pr, kind, reason) {
 // Ce que dit l'en-tête du bloc de relecture (PURE, testée par le .ps1) : commits ajoutés, ou PR réécrite (rebase,
 // force-push) dont il faut tout relire, ou rien à relire (la PR porte de nouveau la tête contrôlée).
 function diffHeadline(d) {
-  if (!d || d.error) return '⛔ ' + ((d && d.error) || 'diff illisible');
-  if (d.merged || d.state === 'closed') return 'La PR n’est plus ouverte (' + (d.merged ? 'mergée' : 'fermée') + ') : rien à livrer.';
-  if (!d.changed) return 'La PR porte de nouveau le commit contrôlé par le lanceur : rien à relire, la livraison simple suffit.';
+  if (!d || d.error) return '⛔ ' + ((d && d.error) || T('diff illisible', 'unreadable diff'));
+  if (d.merged || d.state === 'closed') return T('La PR n’est plus ouverte (' + (d.merged ? 'mergée' : 'fermée') + ') : rien à livrer.', 'The PR is no longer open (' + (d.merged ? 'merged' : 'closed') + '): nothing to ship.');
+  if (!d.changed) return T('La PR porte de nouveau le commit contrôlé par le lanceur : rien à relire, la livraison simple suffit.', 'The PR carries the commit checked by the launcher again: nothing to review, a plain delivery is enough.');
   const n = (d.commits || []).length, files = (d.files || []).length;
-  const what = n + ' commit' + (n > 1 ? 's' : '') + ' · ' + files + ' fichier' + (files > 1 ? 's' : '');
-  return d.rewritten ? '⚠️ La PR a été réécrite (rebase ou force-push) depuis les contrôles : c’est TOUTE la PR qui est à relire — ' + what + '.'
-    : 'Arrivé sur la PR après les contrôles du lanceur, lu par personne : ' + what + '.';
+  const what = n + ' commit' + (n > 1 ? 's' : '') + ' · ' + files + T(' fichier', ' file') + (files > 1 ? 's' : '');
+  return d.rewritten ? T('⚠️ La PR a été réécrite (rebase ou force-push) depuis les contrôles : c’est TOUTE la PR qui est à relire — ' + what + '.', '⚠️ The PR was rewritten (rebase or force-push) since the checks: the WHOLE PR needs a review — ' + what + '.')
+    : T('Arrivé sur la PR après les contrôles du lanceur, lu par personne : ' + what + '.', 'Added to the PR after the launcher checks, read by nobody: ' + what + '.');
 }
 let orderUi = { key: null, open: null, text: '', busy: false, result: null, diff: null };
 function renderOrders(it) {
@@ -1729,7 +1729,7 @@ function renderOrders(it) {
   if (stage === 'delivering') {
     const mr = (it.runs || []).map(x => x.run).filter(x => x.phase === 'merge' && (!wait.since || x.at >= wait.since - 60000)).sort((a, b) => b.at - a.at)[0];
     const note = el('div', 'banner delivering', deliveringNote(stage, wait.since, mr ? mr.at : null, Date.now()));
-    if (mr && mr.dir !== r.dir) { const b = el('button', 'quick', 'Voir le run de livraison'); b.onclick = () => { const head = (it.runs.find(i => i.run.running) || it.runs[0]).run.dir; if (mr.dir === head) runPick.delete(it.key); else runPick.set(it.key, mr.dir); runFile = null; renderDetail(true); }; note.append(' ', b); }
+    if (mr && mr.dir !== r.dir) { const b = el('button', 'quick', T('Voir le run de livraison', 'See the delivery run')); b.onclick = () => { const head = (it.runs.find(i => i.run.running) || it.runs[0]).run.dir; if (mr.dir === head) runPick.delete(it.key); else runPick.set(it.key, mr.dir); runFile = null; renderDetail(true); }; note.append(' ', b); }
     box.append(note);
   }
   if (r.running) return;
@@ -1741,15 +1741,15 @@ function renderOrders(it) {
   const list = deliveryOrders(runOrders(r.phase, stage, pr).filter(o => !((dec || cards.some(c => c.kind === 'validation')) && o === 'go')), wait ? wait.refusalKind : null);
   const noToken = !!(runData && runData.cardsToken === 'absent' && (r.files || []).some(f => f.name === 'questions.json'));
   if (!list.length && !dec && !cards.length && !noToken) return;
-  box.append(el('h2', null, 'Piloter HD-' + hd));
+  box.append(el('h2', null, T('Piloter HD-' + hd, 'Control HD-' + hd)));
   for (const c of cards) renderCard(box, it, c);
-  if (noToken) box.append(el('div', 'meta', 'Ce run a posé des questions : pour y répondre ici, range le jeton des cartes sur ce poste. En attendant, elles se traitent dans le ticket.'));
+  if (noToken) box.append(el('div', 'meta', T('Ce run a posé des questions : pour y répondre ici, range le jeton des cartes sur ce poste. En attendant, elles se traitent dans le ticket.', 'This run asked questions: to answer them here, store the cards token on this machine. Meanwhile, they are handled in the ticket.')));
   if (dec) renderDecision(box, it, dec);
   const row = el('div', 'actions');
   for (const o of list) {
     if (o === 'verdict') {
-      row.append(el('span', 'meta', 'Verdict du diagnostic :'));
-      for (const v of ['ok', 'partiel', 'faux']) { const b = el('button', orderUi.open === 'verdict:' + v ? 'primary' : null, v); b.disabled = orderUi.busy; b.onclick = () => { orderUi.open = orderUi.open === 'verdict:' + v ? null : 'verdict:' + v; renderOrders(it); }; row.append(b); }
+      row.append(el('span', 'meta', T('Verdict du diagnostic :', 'Diagnosis verdict:')));
+      for (const v of ['ok', 'partiel', 'faux']) { const b = el('button', orderUi.open === 'verdict:' + v ? 'primary' : null, T(v, { ok:'ok', partiel:'partial', faux:'wrong' }[v])); b.disabled = orderUi.busy; b.onclick = () => { orderUi.open = orderUi.open === 'verdict:' + v ? null : 'verdict:' + v; renderOrders(it); }; row.append(b); }
       continue;
     }
     const b = el('button', orderUi.open === o ? 'primary' : null, ORDER_FR[o]); b.disabled = orderUi.busy;
@@ -1764,29 +1764,29 @@ function renderOrders(it) {
   if (open === 'go' || (open && open.startsWith('verdict:'))) {
     const f = el('div', 'orderform');
     const ta = el('textarea'); ta.value = orderUi.text; ta.maxLength = 2000; ta.rows = 3;
-    ta.placeholder = open === 'go' ? 'Consigne pour la session de développement (facultatif) — ex. « charge les agents à part, comme dans AppointmentEndpointSetup »' : 'Commentaire (facultatif)';
+    ta.placeholder = open === 'go' ? T('Consigne pour la session de développement (facultatif) — ex. « charge les agents à part, comme dans AppointmentEndpointSetup »', 'Instruction for the development session (optional) — e.g. "load the agents separately, as in AppointmentEndpointSetup"') : T('Commentaire (facultatif)', 'Comment (optional)');
     ta.oninput = () => { orderUi.text = ta.value; };
     const v = open.startsWith('verdict:') ? open.slice(8) : null;
-    const go = el('button', 'primary', v ? 'Noter « ' + v + ' »' : 'Envoyer le feu vert'); go.disabled = orderUi.busy;
+    const go = el('button', 'primary', v ? T('Noter « ' + v + ' »', 'Record "' + { ok:'ok', partiel:'partial', faux:'wrong' }[v] + '"') : T('Envoyer le feu vert', 'Send the go-ahead')); go.disabled = orderUi.busy;
     go.onclick = () => sendOrder(it, v ? { order: 'verdict', value: v, text: orderUi.text } : { order: 'go', text: orderUi.text });
-    const cancel = el('button', null, 'Annuler'); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
+    const cancel = el('button', null, T('Annuler', 'Cancel')); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
     const a = el('div', 'actions'); a.append(go, cancel);
-    f.append(ta, a, el('div', 'hint', v ? 'Ordre « verdict ' + hd + ' ' + v + ' » — noté à la prochaine passe.' : 'Ordre « go ' + hd + ' » — correctif en file, toujours en PR à relire (jamais de merge automatique).'));
+    f.append(ta, a, el('div', 'hint', v ? T('Ordre « verdict ' + hd + ' ' + v + ' » — noté à la prochaine passe.', 'Order "verdict ' + hd + ' ' + v + '" — recorded on the next pass.') : T('Ordre « go ' + hd + ' » — correctif en file, toujours en PR à relire (jamais de merge automatique).', 'Order "go ' + hd + '" — fix queued, always as a PR to review (never an automatic merge).')));
     box.append(f);
   } else if (open === 'adopt') {
     box.append(adoptForm(it, hd, pr));
   } else if (open === 'merge' || open === 'retry') {
     const f = el('div', 'orderform confirm');
-    if (open === 'retry') f.append(el('div', 'meta', 'La livraison précédente a échoué pour une raison technique, sans rapport avec la PR : ' + ((it.wait && it.wait.detail) || '') ));
-    f.append(el('div', null, '🚀 Livrer ' + (pr ? 'la PR #' + pr : 'la PR du lanceur') + ' de HD-' + hd + ' : rebase sur master, contrôles rejoués (20 à 40 min), puis squash-merge — elle part en PRODUCTION.'));
-    const link = prLink(it); if (link) { const m = el('div', 'meta'); m.append('Relire avant : ', link); f.append(m); }
-    const ok = el('button', 'primary', 'Confirmer la livraison'); ok.disabled = orderUi.busy; ok.onclick = () => sendOrder(it, { order: 'merge', confirm: true });
-    const cancel = el('button', null, 'Annuler'); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
+    if (open === 'retry') f.append(el('div', 'meta', T('La livraison précédente a échoué pour une raison technique, sans rapport avec la PR : ', 'The previous delivery failed for a technical reason, unrelated to the PR: ') + ((it.wait && it.wait.detail) || '') ));
+    f.append(el('div', null, T('🚀 Livrer ' + (pr ? 'la PR #' + pr : 'la PR du lanceur') + ' de HD-' + hd + ' : rebase sur master, contrôles rejoués (20 à 40 min), puis squash-merge — elle part en PRODUCTION.', '🚀 Ship ' + (pr ? 'PR #' + pr : 'the launcher PR') + ' of HD-' + hd + ': rebase on master, checks replayed (20 to 40 min), then squash-merge — it goes to PRODUCTION.')));
+    const link = prLink(it); if (link) { const m = el('div', 'meta'); m.append(T('Relire avant : ', 'Review first: '), link); f.append(m); }
+    const ok = el('button', 'primary', T('Confirmer la livraison', 'Confirm the delivery')); ok.disabled = orderUi.busy; ok.onclick = () => sendOrder(it, { order: 'merge', confirm: true });
+    const cancel = el('button', null, T('Annuler', 'Cancel')); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
     const a = el('div', 'actions'); a.append(ok, cancel); f.append(a);
     box.append(f);
   }
-  if (cardUi.busy) box.append(el('div', 'meta', 'Réponse en cours d’envoi…'));
-  if (orderUi.busy) box.append(el('div', 'meta', 'Ordre en cours de transmission au lanceur…'));
+  if (cardUi.busy) box.append(el('div', 'meta', T('Réponse en cours d’envoi…', 'Sending the answer…')));
+  if (orderUi.busy) box.append(el('div', 'meta', T('Ordre en cours de transmission au lanceur…', 'Sending the order to the launcher…')));
   else if (orderUi.result) box.append(el('pre', 'orderres ' + (orderUi.result.ok ? 'ok' : 'ko'), orderUi.result.text));
 }
 // « J'ai relu, livrer » : le diff est relu à chaque ouverture (jamais un cache) — le sha envoyé est celui affiché.
@@ -1794,14 +1794,14 @@ async function toggleAdopt(it) {
   if (orderUi.open === 'adopt') { orderUi.open = null; renderOrders(it); return; }
   const key = it.key; orderUi.open = 'adopt'; orderUi.diff = { loading: true }; renderOrders(it);
   let d;
-  try { const r = await fetch('/api/launcher/delivery-diff?hd=' + encodeURIComponent(String(it.run.hd))); d = await r.json().catch(() => ({ error: 'réponse illisible (' + r.status + ')' })); }
-  catch { d = { error: 'lanceur injoignable' }; }
+  try { const r = await fetch('/api/launcher/delivery-diff?hd=' + encodeURIComponent(String(it.run.hd))); d = await r.json().catch(() => ({ error: T('réponse illisible (' + r.status + ')', 'unreadable answer (' + r.status + ')') })); }
+  catch { d = { error: T('lanceur injoignable', 'launcher unreachable') }; }
   if (orderUi.key !== key || orderUi.open !== 'adopt') return;
   orderUi.diff = d; renderOrders(it);
 }
 function adoptForm(it, hd, pr) {
   const f = el('div', 'orderform confirm adopt'), d = orderUi.diff || {};
-  if (d.loading) { f.append(el('div', 'meta', 'Lecture du diff auprès du lanceur…')); return f; }
+  if (d.loading) { f.append(el('div', 'meta', T('Lecture du diff auprès du lanceur…', 'Reading the diff from the launcher…'))); return f; }
   f.append(el('div', null, diffHeadline(d)));
   if (!d.error && d.changed) {
     const ul = el('ul', 'commits');
@@ -1816,25 +1816,25 @@ function adoptForm(it, hd, pr) {
       det.append(sum);
       const pre = el('pre', 'diff');
       for (const line of String(x.patch || '').split('\n')) pre.append(el('span', line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : line.startsWith('@@') ? 'hunk' : null, line + '\n'));
-      if (x.patchTruncated || !x.patch) pre.append(el('span', 'hunk', x.patch ? '… (tronqué — voir la PR)' : '(pas de diff texte : binaire, renommage ou trop gros)'));
+      if (x.patchTruncated || !x.patch) pre.append(el('span', 'hunk', x.patch ? T('… (tronqué — voir la PR)', '… (truncated — see the PR)') : T('(pas de diff texte : binaire, renommage ou trop gros)', '(no text diff: binary, rename or too large)')));
       det.append(pre); f.append(det);
     }
-    if (d.truncated) f.append(el('div', 'meta', '⚠️ Diff tronqué : la suite est sur la PR.'));
+    if (d.truncated) f.append(el('div', 'meta', T('⚠️ Diff tronqué : la suite est sur la PR.', '⚠️ Diff truncated: the rest is on the PR.')));
   }
-  const link = prLink(it); if (link) { const m = el('div', 'meta'); m.append('Sur GitHub : ', link); f.append(m); }
+  const link = prLink(it); if (link) { const m = el('div', 'meta'); m.append(T('Sur GitHub : ', 'On GitHub: '), link); f.append(m); }
   const a = el('div', 'actions');
   if (!d.error && d.changed && !d.merged && d.state !== 'closed' && /^[0-9a-f]{40}$/.test(d.prHead || '')) {
-    const ok = el('button', 'primary', '✅ J’ai relu, livrer'); ok.disabled = orderUi.busy;
+    const ok = el('button', 'primary', T('✅ J’ai relu, livrer', '✅ Reviewed, ship')); ok.disabled = orderUi.busy;
     ok.onclick = () => sendOrder(it, { order: 'merge', confirm: true, adoptHead: d.prHead });
     a.append(ok);
   } else if (!d.error && !d.changed && !d.merged && d.state !== 'closed') {
-    const ok = el('button', 'primary', '🚀 Livrer'); ok.disabled = orderUi.busy; ok.onclick = () => sendOrder(it, { order: 'merge', confirm: true }); a.append(ok);
+    const ok = el('button', 'primary', T('🚀 Livrer', '🚀 Ship')); ok.disabled = orderUi.busy; ok.onclick = () => sendOrder(it, { order: 'merge', confirm: true }); a.append(ok);
   }
-  const again = el('button', null, '↻ Relire le diff'); again.onclick = () => { orderUi.open = null; toggleAdopt(it); };
-  const cancel = el('button', null, 'Annuler'); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
+  const again = el('button', null, T('↻ Relire le diff', '↻ Review the diff again')); again.onclick = () => { orderUi.open = null; toggleAdopt(it); };
+  const cancel = el('button', null, T('Annuler', 'Cancel')); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
   a.append(again, cancel); f.append(a);
-  f.append(el('div', 'hint', 'Ordre « merge ' + hd + ' --adopt-head ' + (d.prHead ? String(d.prHead).slice(0, 10) + '…' : '<sha>') + ' »'
-    + ' — seul ce commit est adopté : si la PR bouge encore, nouveau refus avec le nouveau diff. Rebase, contrôles rejoués (20 à 40 min), puis squash-merge en PRODUCTION.'));
+  f.append(el('div', 'hint', T('Ordre « merge ' + hd + ' --adopt-head ' + (d.prHead ? String(d.prHead).slice(0, 10) + '…' : '<sha>') + ' »'
+    + ' — seul ce commit est adopté : si la PR bouge encore, nouveau refus avec le nouveau diff. Rebase, contrôles rejoués (20 à 40 min), puis squash-merge en PRODUCTION.', 'Order "merge ' + hd + ' --adopt-head ' + (d.prHead ? String(d.prHead).slice(0, 10) + '…' : '<sha>') + '"' + ' — only this commit is adopted: if the PR moves again, a new refusal with the new diff. Rebase, checks replayed (20 to 40 min), then squash-merge to PRODUCTION.')));
   return f;
 }
 async function sendOrder(it, o) {
@@ -1844,8 +1844,8 @@ async function sendOrder(it, o) {
   try {
     const r = await fetch('/api/launcher/order', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ hd: String(it.run.hd), ...o }) });
     const j = await r.json().catch(() => ({}));
-    res = !r.ok || j.error ? { ok: false, text: '⛔ ' + (j.error || 'ordre refusé (' + r.status + ')') } : { ok: true, text: '✅ ' + (j.message || 'ordre transmis') };
-  } catch { res = { ok: false, text: '⛔ lanceur injoignable' }; }
+    res = !r.ok || j.error ? { ok: false, text: '⛔ ' + (j.error || T('ordre refusé (' + r.status + ')', 'order refused (' + r.status + ')')) } : { ok: true, text: '✅ ' + (j.message || T('ordre transmis', 'order sent')) };
+  } catch { res = { ok: false, text: T('⛔ lanceur injoignable', '⛔ launcher unreachable') }; }
   if (orderUi.key !== key) return;
   orderUi.busy = false; orderUi.result = res; if (res.ok) { orderUi.open = null; orderUi.text = ''; }
   say(res.text.split('\n')[0]);
