@@ -14,6 +14,9 @@ body.resizing { cursor:col-resize; user-select:none; }
 .sidehead .row { display:flex; align-items:baseline; gap:8px; }
 h1 { font-size:16px; margin:0; } h2 { font-size:13px; margin:22px 0 8px; color:var(--mute); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
 #live { color:var(--mute); font-size:11px; margin-left:auto; text-align:right; } #live.down { color:var(--waiting); font-weight:600; }
+/* Santé du relais d'accès distant : discret quand il va, voyant (et cliquable pour le relancer) quand il manque. */
+.relaybtn { flex:none; font-size:11px; padding:1px 6px; line-height:18px; align-self:center; margin-left:6px; opacity:.55; }
+.relaybtn.ko { opacity:1; color:var(--waiting); border-color:var(--waiting); font-weight:600; }
 .qrow { display:flex; gap:6px; margin-top:10px; } #favonly, #sortbtn, #bell { padding:4px 9px; color:var(--mute); white-space:nowrap; } #belln { color:var(--waiting); font-weight:700; font-size:11px; margin-left:3px; }
 .notif { display:grid; grid-template-columns:14px 150px minmax(0, 1fr); gap:2px 8px; padding:8px 12px; background:var(--card); border:1px solid var(--line); border-radius:6px; cursor:pointer; }
 .notif:hover { border-color:var(--mute); } .notif .when { color:var(--mute); font-size:12px; } .notif .nt { font-weight:600; } .notif .nx { grid-column:3; color:var(--mute); font-size:12px; overflow-wrap:anywhere; }
