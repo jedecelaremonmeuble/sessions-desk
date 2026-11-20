@@ -24,6 +24,19 @@ export const SHELL_RESUME: Record<string, (cwd: string, resume: string) => strin
 };
 
 /** Nettoyage d'une ligne envoyée : ni saut de ligne, ni tabulation, ni caractère de contrôle. */
+/** Claude Code jusqu'à la 2.1.328 incluse ne garde, d'un long texte tapé d'un bloc, que le DERNIER morceau lu
+ *  (environ 800 caractères) : le début disparaît sans erreur, et la session reçoit une consigne amputée. Corrigé en
+ *  2.1.329 (le texte arrive en entier, sous forme de collage). Mesuré sur l'historique des envois : aucune perte
+ *  au-dessous de 700 caractères, perte systématique au-delà de ~800 sur ces versions. */
+export const OLD_CC_MAX_LINE = 700;
+const FIRST_FULL_INPUT_VERSION = [2, 1, 329];
+/** Vrai si cette version de Claude Code tronque une saisie longue ; version inconnue ou illisible : faux (on ne bloque pas à l'aveugle). */
+export function truncatesLongInput(version: unknown): boolean {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(typeof version === 'string' ? version : '');
+  if (!m) return false;
+  for (let i = 0; i < 3; i++) { const d = Number(m[i + 1]) - FIRST_FULL_INPUT_VERSION[i]!; if (d) return d < 0; }
+  return false;
+}
 export function cleanLine(text: string): string { return text.replace(/[\r\n\t]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, ''); }
 
 function alive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } }
@@ -61,6 +74,8 @@ export class Actions {
     if (line.length > 4000) return 'message trop long (4 000 caractères au plus)';
     const sess = await this.session(pid);
     if (!sess) return 'session introuvable';
+    if (line.length > OLD_CC_MAX_LINE && truncatesLongInput(sess.version))
+      return `message trop long pour cette session : Claude Code ${psString(sess.version)} n'en recevrait que la fin (${OLD_CC_MAX_LINE} caractères au plus) — relance la session pour la mettre à jour, ou raccourcis le message`;
     const queued = allowBusy && !suggested && ieq(sess.status, 'busy');
     if (!ieq(sess.status, 'idle') && !ieq(sess.status, 'shell') && !queued) return `la session n'est pas inactive (statut ${psString(sess.status)})`;
     if (suggested) {
