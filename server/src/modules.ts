@@ -38,7 +38,7 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 
-export interface LauncherModule { root: string; cli: string; python: string; ticketApi: string }
+export interface LauncherModule { root: string; cli: string; python: string; ticketApi: string; cardsApi: string }
 /** Ce que la page affiche et qui dépend du poste : préfixe de chemin à ne pas répéter, adresses des PR et des tickets. */
 export interface UiConfig { pathPrefix: string; prUrl: string; ticketUrl: string; ticketLabel: string }
 export const NO_UI: UiConfig = { pathPrefix: '', prUrl: '', ticketUrl: '', ticketLabel: '' };
@@ -120,7 +120,7 @@ export function parseModules(raw: unknown, env: PathEnv): Modules {
   const out: Modules = { ...NO_MODULES };
   out.automations = parseAutomations(m.automations, env);
   const l = obj(m.launcher); const root = l ? absPath(l.root, env) : '';
-  if (l && root) out.launcher = { root, cli: absPath(l.cli, env), python: typeof l.python === 'string' && l.python.trim() ? l.python.trim() : 'python', ticketApi: absPath(l.ticketApi, env) };
+  if (l && root) out.launcher = { root, cli: absPath(l.cli, env), python: typeof l.python === 'string' && l.python.trim() ? l.python.trim() : 'python', ticketApi: absPath(l.ticketApi, env), cardsApi: absPath(l.cardsApi, env) };
   out.teams = obj(m.teams)?.enabled === true;
   const pat = ticketPattern(obj(m.tickets)?.pattern); if (pat) out.tickets = { pattern: pat };
   const q = obj(m.quota); const file = q ? absPath(q.file, env) : ''; if (file) out.quota = { file };

@@ -13,6 +13,7 @@ import { Actions } from './actions.ts';
 import { Automations } from './automations.ts';
 import type { Config } from './config.ts';
 import { startGitRefresh } from './gitpr.ts';
+import { answerCard, lookupCards } from './cards.ts';
 import { Launcher, lookupDeliveryDiff, lookupHd, runLauncherOrder } from './launcher.ts';
 import { promptDraft } from './prompt.ts';
 import { Search } from './search.ts';
@@ -33,12 +34,12 @@ const PAGE: Record<string, [string, string]> = {
   '/app.css': ['app.css', 'text/css; charset=utf-8'],
 };
 const JSON_TYPE = 'application/json; charset=utf-8';
-const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file']);
+const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards']);
 const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy']);
-const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/launcher/order', '/api/automations/order']);
+const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer']);
 const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/close', '/api/relaunch']);
 /** Routes d'un module optionnel : sans lui, elles n'existent pas (404, comme une route inconnue). */
-const LAUNCHER_ROUTES = new Set(['/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/order', '/api/test-launcher-alerts']);
+const LAUNCHER_ROUTES = new Set(['/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/order', '/api/launcher/cards', '/api/launcher/answer', '/api/test-launcher-alerts']);
 const TEAMS_ROUTES = new Set(['/api/teams-wait']);
 const AUTOMATION_ROUTES = new Set(['/api/automations', '/api/automations/file', '/api/automations/order']);
 export const STALE_AFTER_SECONDS = 90;
@@ -423,6 +424,7 @@ export class Server {
         case '/api/launcher': { let h = parseIntZero(q.get('hours')); if (h <= 0) h = 48; body = JSON.stringify(await this.launcher.view(Math.min(24 * 30, h))); break; }
         case '/api/launcher/hd': body = JSON.stringify(await lookupHd(q.get('hd') ?? '', process.env, this.cfg.modules.launcher)); break;
         case '/api/launcher/delivery-diff': body = JSON.stringify(await lookupDeliveryDiff(q.get('hd') ?? '', process.env, this.cfg.modules.launcher)); break;
+        case '/api/launcher/cards': body = JSON.stringify(await lookupCards(q.get('hd') ?? '', process.env, this.cfg.modules.launcher)); break;
         case '/api/launcher/file': {
           const f = this.launcher.file(q.get('path') ?? '');
           if (f.status !== 404) res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -473,6 +475,14 @@ export class Server {
           if (!isObjBody(j)) { status = 400; body = '{}'; break; }
           this.launcher.invalidate();
           body = JSON.stringify(await runLauncherOrder(j, process.env, this.cfg.modules.launcher));
+          break;
+        }
+        case '/api/launcher/answer': {                   // réponse à une carte de questions de l'orchestrateur (cards.ts)
+          const j = await payload();
+          if (!isObjBody(j)) { status = 400; body = '{}'; break; }
+          const r = await answerCard(j, process.env, this.cfg.modules.launcher);
+          if (r.ok === true || r.gone) { this.launcher.cards.drop(String((j as Record<string, unknown>).hd), String((j as Record<string, unknown>).card)); this.launcher.invalidate(); }
+          body = JSON.stringify(r);
           break;
         }
         case '/api/find': { const qq = q.get('q') ?? ''; body = JSON.stringify(this.search.find(qq.slice(0, Math.min(200, qq.length)))); break; }

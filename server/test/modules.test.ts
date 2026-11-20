@@ -26,7 +26,7 @@ describe('fichier de configuration', () => {
     writeFileSync(f, '\ufeff' + JSON.stringify({ modules: { launcher: { root: '%LOCALAPPDATA%\\orchestrateur', cli: '~\\outils\\cli.py' }, teams: { enabled: true },
       tickets: { pattern: 'ABC-\\d{4}' }, quota: { file: '%localappdata%\\orchestrateur\\usage.json' } } }));
     const m = loadModules(f, env);
-    expect(m).toEqual({ launcher: { root: 'C:\\Users\\moi\\AppData\\Local\\orchestrateur', cli: 'C:\\Users\\moi\\outils\\cli.py', python: 'python', ticketApi: '' }, teams: true,
+    expect(m).toEqual({ launcher: { root: 'C:\\Users\\moi\\AppData\\Local\\orchestrateur', cli: 'C:\\Users\\moi\\outils\\cli.py', python: 'python', ticketApi: '', cardsApi: '' }, teams: true,
       tickets: { pattern: 'ABC-\\d{4}' }, quota: { file: 'C:\\Users\\moi\\AppData\\Local\\orchestrateur\\usage.json' }, automations: [] });
     expect(modulesView(m)).toEqual({ launcher: true, teams: true, tickets: true, quota: true, automations: false });
   });
@@ -35,7 +35,7 @@ describe('fichier de configuration', () => {
     const m = parseModules({ modules: { launcher: { root: 'relatif\\dossier' }, teams: { enabled: 'oui' }, tickets: { pattern: '(' }, quota: { file: 'C:\\q.json' } } }, env);
     expect(m).toEqual({ launcher: null, teams: false, tickets: null, quota: { file: 'C:\\q.json' }, automations: [] });
     // Lanceur sans commande : la vue marche, les ordres disent pourquoi ils ne partent pas.
-    expect(parseModules({ modules: { launcher: { root: 'C:\\l', python: ' py ' } } }, env).launcher).toEqual({ root: 'C:\\l', cli: '', python: 'py', ticketApi: '' });
+    expect(parseModules({ modules: { launcher: { root: 'C:\\l', python: ' py ' } } }, env).launcher).toEqual({ root: 'C:\\l', cli: '', python: 'py', ticketApi: '', cardsApi: '' });
   });
 
   test('motif de ticket : refusé s\'il ne compile pas ou accepte le vide', () => {

@@ -3,6 +3,7 @@
     "launcher": {
       "root": "%LOCALAPPDATA%\\my-orchestrator",
       "cli": "C:\\path\\to\\orchestrator.py",
+      "cardsApi": "C:\\path\\to\\cards.py",
       "python": "python"
     },
     "teams": { "enabled": true },
