@@ -19,8 +19,15 @@
 //       ]
 //     },
 //     "ui": { "pathPrefix": "C:\\code\\mon-depot", "prUrl": "https://github.com/moi/depot/pull/", "ticketUrl": "https://tickets.example.com/t/", "ticketLabel": "Ticket" },
-//     "claudeArgs": "--model opus"
+//     "claudeArgs": "--model opus",
+//     "delays": { "notifyAfterSeconds": 15, "notifyDoneAfterMinutes": 3, "closedDays": 14 },
+//     "tailscaleExe": "C:\\Program Files\\Tailscale\\tailscale.exe"
 //   }
+//
+// - ui.quota : { "warn": 75, "alert": 90 } — seuils (en %) du quota hebdomadaire : orange, puis rouge + alerte.
+// - delays : notification d'une session qui attend (s), d'une session terminée après un long tour (min), fenêtre
+//   des sessions fermées (jours). Les options --notify-after, --notify-done-after, --closed-days passent avant.
+// - tailscaleExe : chemin de tailscale.exe ("" : pas d'accès distant). L'option --tailscale passe avant.
 //
 // - ui.models : coût relatif de chaque modèle, pour que la page dise d'un coup d'œil qu'une session coûte plus cher.
 //   `match` = morceau de l'identifiant du modèle (« fable », « claude-opus-5-5 » ; la première entrée qui correspond
@@ -47,19 +54,23 @@ import { isAbsolute, join } from 'node:path';
 
 export interface LauncherModule { root: string; cli: string; python: string; ticketApi: string; cardsApi: string }
 /** Ce que la page affiche et qui dépend du poste : préfixe de chemin à ne pas répéter, adresses des PR et des tickets. */
-export interface UiConfig { pathPrefix: string; prUrl: string; ticketUrl: string; ticketLabel: string; language: '' | 'en' | 'fr'; models: ModelCost[] }
-/** Coût relatif d'un modèle : `cost` = multiplicateur par rapport au modèle de référence (cost 1). */
-export interface ModelCost { match: string; label: string; cost: number; note: string }
+export interface UiConfig { pathPrefix: string; prUrl: string; ticketUrl: string; ticketLabel: string; language: '' | 'en' | 'fr'; models: ModelCost[]; quota: QuotaLevels }
+/** Seuils du quota hebdomadaire (en %) : `warn` = orange, `alert` = rouge + alerte du lanceur. */
+export interface QuotaLevels { warn: number; alert: number }
+export const DEFAULT_QUOTA: QuotaLevels = Object.freeze({ warn: 75, alert: 90 });
+/** Coût relatif d'un modèle : `cost` = multiplicateur par rapport au modèle de référence (cost 1). `offer` : proposé
+ *  dans le formulaire « Nouvelle session » (`match` est alors passé tel quel à `claude --model`). */
+export interface ModelCost { match: string; label: string; cost: number; note: string; offer: boolean }
 /** Table par défaut : tarifs publics de l'API Anthropic (entrée / sortie, par million de tokens), relatifs à Opus.
  *  Sur un abonnement, le même rapport vaut pour la vitesse à laquelle le quota s'épuise. */
 export const DEFAULT_MODELS: readonly ModelCost[] = Object.freeze([
-  { match: 'fable', label: 'Fable', cost: 2, note: '8 $ / 40 $' },
-  { match: 'mythos', label: 'Mythos', cost: 2, note: '8 $ / 40 $' },
-  { match: 'opus', label: 'Opus', cost: 1, note: '4 $ / 20 $' },
-  { match: 'sonnet', label: 'Sonnet', cost: 0.5, note: '2 $ / 10 $' },
-  { match: 'haiku', label: 'Haiku', cost: 0.025, note: '0,10 $ / 0,50 $' },
+  { match: 'opus', label: 'Opus', cost: 1, note: '4 $ / 20 $', offer: true },
+  { match: 'sonnet', label: 'Sonnet', cost: 0.5, note: '2 $ / 10 $', offer: true },
+  { match: 'haiku', label: 'Haiku', cost: 0.025, note: '0,10 $ / 0,50 $', offer: true },
+  { match: 'fable', label: 'Fable', cost: 2, note: '8 $ / 40 $', offer: true },
+  { match: 'mythos', label: 'Mythos', cost: 2, note: '8 $ / 40 $', offer: false },
 ]);
-export const NO_UI: UiConfig = { pathPrefix: '', prUrl: '', ticketUrl: '', ticketLabel: '', language: '', models: [...DEFAULT_MODELS] };
+export const NO_UI: UiConfig = { pathPrefix: '', prUrl: '', ticketUrl: '', ticketLabel: '', language: '', models: [...DEFAULT_MODELS], quota: { ...DEFAULT_QUOTA } };
 /** Ordre « Lancer maintenant » d'un automate : `python <cli> <args…>`. `confirm` non vide ⇒ la page demande avant. */
 export interface AutomationOrder { id: string; label: string; args: string[]; confirm: string }
 export interface AutomationDef {
@@ -155,7 +166,7 @@ export function parseUi(raw: unknown, env: PathEnv): UiConfig {
   const label = typeof u.ticketLabel === 'string' ? u.ticketLabel.trim().slice(0, 30) : '';
   // language : langue de la page sur ce poste ('en' ou 'fr') ; vide = celle du navigateur. Un choix fait dans la page l'emporte.
   const language = u.language === 'en' || u.language === 'fr' ? u.language : '';
-  return { pathPrefix: absPath(u.pathPrefix, env), prUrl: httpUrl(u.prUrl), ticketUrl: httpUrl(u.ticketUrl), ticketLabel: label, language, models: parseModels(u.models) };
+  return { pathPrefix: absPath(u.pathPrefix, env), prUrl: httpUrl(u.prUrl), ticketUrl: httpUrl(u.ticketUrl), ticketLabel: label, language, models: parseModels(u.models), quota: parseQuotaLevels(u.quota) };
 }
 
 /** `ui.models` : 30 entrées au plus ; une entrée sans `match` ou sans coût positif est ignorée. Liste absente,
@@ -168,9 +179,34 @@ export function parseModels(v: unknown): ModelCost[] {
     const o = obj(e); if (!o) continue;
     const match = txt(o.match, 60).toLowerCase(), cost = Number(o.cost);
     if (!match || !Number.isFinite(cost) || cost <= 0 || cost > 1000) continue;
-    out.push({ match, label: txt(o.label, 30) || match, cost, note: txt(o.note, 120) });
+    out.push({ match, label: txt(o.label, 30) || match, cost, note: txt(o.note, 120), offer: o.offer !== false });
   }
   return out.length ? out : [...DEFAULT_MODELS];
+}
+
+/** `ui.quota` : { "warn": 75, "alert": 90 } — entiers de 1 à 100, `warn` < `alert` ; sinon les valeurs par défaut. */
+export function parseQuotaLevels(v: unknown): QuotaLevels {
+  const o = obj(v); const pct = (x: unknown, d: number): number => (typeof x === 'number' && Number.isInteger(x) && x >= 1 && x <= 100 ? x : d);
+  const warn = pct(o?.warn, DEFAULT_QUOTA.warn), alert = pct(o?.alert, DEFAULT_QUOTA.alert);
+  return warn < alert ? { warn, alert } : { ...DEFAULT_QUOTA };
+}
+
+/** Délais du serveur (clé `delays`) : chacun facultatif ; l'option de même rôle en ligne de commande passe avant. */
+export interface Delays { notifyAfterSeconds?: number; notifyDoneAfterMinutes?: number; closedDays?: number }
+export function parseDelays(raw: unknown): Delays {
+  const o = obj(obj(raw)?.delays); if (!o) return {};
+  const n = (x: unknown, max: number): number | undefined => (typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= max ? x : undefined);
+  const out: Delays = {};
+  const a = n(o.notifyAfterSeconds, 3600), b = n(o.notifyDoneAfterMinutes, 24 * 60), c = n(o.closedDays, 365);
+  if (a !== undefined) out.notifyAfterSeconds = a;
+  if (b !== undefined) out.notifyDoneAfterMinutes = b;
+  if (c !== undefined) out.closedDays = c;
+  return out;
+}
+/** Clé `tailscaleExe` : chemin absolu de tailscale.exe, ou "" pour couper l'accès distant. Absente ou invalide ⇒ undefined. */
+export function parseTailscale(raw: unknown, env: PathEnv): string | undefined {
+  const v = obj(raw)?.tailscaleExe; if (v === '') return ''; if (typeof v !== 'string') return undefined;
+  return absPath(v, env) || undefined;
 }
 
 /** Options passées à `claude` au lancement d'une session : une ligne de 200 caractères au plus, sans « ; » (qui
@@ -183,9 +219,11 @@ export function claudeArgsOk(v: unknown): string | null {
 export const parseClaudeArgs = (raw: unknown): string => claudeArgsOk(obj(raw)?.claudeArgs) ?? '';
 
 /** Fichier de configuration du poste, lu une fois : `modules`, `ui` et `claudeArgs`. */
-export function loadSettings(file: string, env: PathEnv): { modules: Modules; ui: UiConfig; claudeArgs: string } {
+export interface Settings { modules: Modules; ui: UiConfig; claudeArgs: string; delays: Delays; tailscaleExe?: string }
+export function loadSettings(file: string, env: PathEnv): Settings {
   let raw: unknown;
-  try { const text = readFileSync(file, 'utf8'); raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch { return { modules: { ...NO_MODULES }, ui: { ...NO_UI }, claudeArgs: '' }; }
-  return { modules: parseModules(raw, env), ui: parseUi(raw, env), claudeArgs: parseClaudeArgs(raw) };
+  try { const text = readFileSync(file, 'utf8'); raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch { return { modules: { ...NO_MODULES }, ui: { ...NO_UI }, claudeArgs: '', delays: {} }; }
+  const ts = parseTailscale(raw, env);
+  return { modules: parseModules(raw, env), ui: parseUi(raw, env), claudeArgs: parseClaudeArgs(raw), delays: parseDelays(raw), ...(ts !== undefined ? { tailscaleExe: ts } : {}) };
 }
 export const loadModules = (file: string, env: PathEnv): Modules => loadSettings(file, env).modules;

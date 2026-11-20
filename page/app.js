@@ -92,6 +92,8 @@ const ui = () => (data && data.ui) || {};
 // dont `match` figure dans l'identifiant. Repère : l'entrée à 1 (Opus par défaut).
 const modelCost = m => { if (!m) return null; const id = m.toLowerCase(); return (ui().models || []).find(e => id.includes(e.match)) || null; };
 const costRef = () => ((ui().models || []).find(e => e.cost === 1) || { label: T('la référence', 'the reference') }).label;
+// Seuils du quota (ui.quota du poste, 75 / 90 % par défaut) : orange à `warn`, rouge à `alert`.
+const qLevel = (pct, low) => { const q = ui().quota || { warn: 75, alert: 90 }; return pct >= q.alert ? 'waiting' : pct >= q.warn ? 'ask' : low; };
 const costFactor = c => '×' + c.toLocaleString(LOCALE, { maximumFractionDigits: c < 0.1 ? 3 : 2 });
 /** Pastille du modèle, colorée par coût : orange plein = plus cher que la référence, discrète = référence, verte = moins
  *  cher, pointillée = inconnu de la table. `compact` (liste) : nom + multiplicateur seuls ; sinon « vs <référence> ». */
@@ -149,10 +151,10 @@ function quotaView(q, now) {
   v.models = (q.limits || []).filter(l => l.model && l.pct != null).map(l => {
     const reset = l.resetsAt && l.resetsAt > now ? l.resetsAt : null;
     return { name: l.model, pct: l.pct, reset, elapsed: reset ? Math.min(100, Math.max(0, 100 * (now - (reset - WEEK)) / WEEK)) : v.elapsed ?? null,
-             level: v.expired ? 'idle' : l.pct >= 90 ? 'waiting' : l.pct >= 75 ? 'ask' : 'busy' };
+             level: v.expired ? 'idle' : qLevel(l.pct, 'busy') };
   });
   v.fiveHour = q.fiveHourPct != null ? { pct: q.fiveHourPct, reset: q.fiveHourResetsAt || null } : null;
-  v.level = !v.ok || v.expired ? 'idle' : v.pct >= 90 ? 'waiting' : v.pct >= 75 || v.fullAt ? 'ask' : 'busy';
+  v.level = !v.ok || v.expired ? 'idle' : v.fullAt && qLevel(v.pct, 'busy') === 'busy' ? 'ask' : qLevel(v.pct, 'busy');
   return v;
 }
 const PLAN_FR = p => { const m = /max_(\d+)x/i.exec(p || ''); return m ? 'Max ' + m[1] + 'x' : /pro/i.test(p || '') ? 'Pro' : (p || '').replace(/^default_claude_/, ''); };
@@ -939,9 +941,9 @@ function renderLauncher() {
     // Remise à zéro déjà passée : le relevé de ce compte n'a pas été rafraîchi par le lanceur — on le dit.
     const stale = q.weeklyResetsAt && new Date(q.weeklyResetsAt).getTime() < L.now;
     if (stale) { const t = el('div', 'tile idle'); t.append(el('b', null, (q.weeklyPct ?? '?') + ' % ?'), el('span', null, T('quota ' + (q.alias || '') + ' · relevé périmé (remise du ' + new Date(q.weeklyResetsAt).toLocaleDateString(LOCALE) + ' passée)', 'quota ' + (q.alias || '') + ' · outdated reading (reset of ' + new Date(q.weeklyResetsAt).toLocaleDateString('en-GB') + ' passed)'))); tiles.append(t); continue; }
-    const t = el('div', 'tile ' + (q.weeklyPct >= 90 ? 'waiting' : q.weeklyPct >= 75 ? 'ask' : 'idle')); t.append(el('b', null, (q.weeklyPct ?? '?') + ' %'), el('span', null, T('quota semaine ', 'weekly quota ') + (q.alias || '') + (q.weeklyResetsAt ? T(' · remise ', ' · reset ') + new Date(q.weeklyResetsAt).toLocaleString(LOCALE, { weekday:'short', hour:'2-digit', minute:'2-digit' }) : ''))); tiles.append(t);
+    const t = el('div', 'tile ' + qLevel(q.weeklyPct, 'idle')); t.append(el('b', null, (q.weeklyPct ?? '?') + ' %'), el('span', null, T('quota semaine ', 'weekly quota ') + (q.alias || '') + (q.weeklyResetsAt ? T(' · remise ', ' · reset ') + new Date(q.weeklyResetsAt).toLocaleString(LOCALE, { weekday:'short', hour:'2-digit', minute:'2-digit' }) : ''))); tiles.append(t);
     // Limite propre à un modèle (« Fable ») : sa tuile, mêmes seuils.
-    for (const l of (q.limits || []).filter(l => l.model && l.pct != null)) { const tm = el('div', 'tile ' + (l.pct >= 90 ? 'waiting' : l.pct >= 75 ? 'ask' : 'idle')); tm.append(el('b', null, Math.round(l.pct) + ' %'), el('span', null, T('quota semaine ', 'weekly quota ') + l.model + ' ' + (q.alias || ''))); tiles.append(tm); } }
+    for (const l of (q.limits || []).filter(l => l.model && l.pct != null)) { const tm = el('div', 'tile ' + qLevel(l.pct, 'idle')); tm.append(el('b', null, Math.round(l.pct) + ' %'), el('span', null, T('quota semaine ', 'weekly quota ') + l.model + ' ' + (q.alias || ''))); tiles.append(tm); } }
   const running = L.runs.filter(r => r.running);
   const tr = el('div', 'tile busy'); tr.append(el('b', null, running.length), el('span', null, T('run(s) en cours', 'run(s) in progress'))); tiles.append(tr);
   const tw = el('div', 'tile ask'); tw.append(el('b', null, L.waiting.length), el('span', null, T('ticket(s) qui attendent', 'waiting ticket(s)'))); tiles.append(tw);
@@ -2711,7 +2713,10 @@ function renderNew() {
   // identifiant complet (ex. claude-opus-5-5[1m]). Le champ #nf-model reste la valeur envoyée par launchNew.
   const mo = el('input'); mo.id = 'nf-model'; mo.autocomplete = 'off'; mo.spellcheck = false;
   mo.placeholder = T('identifiant complet — ex. claude-opus-5-5[1m]', 'full id — e.g. claude-opus-5-5[1m]'); mo.value = localStorage.getItem('cc.newmodel') || '';
-  const MODELS = [['', T('Par défaut', 'Default'), T('celui de ta config', 'the one in your config')], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku'], ['fable', 'Fable']];
+  // Modèles proposés : ceux de ui.models marqués `offer` (table du poste, ou table par défaut), avec leur coût relatif.
+  const MODELS = [['', T('Par défaut', 'Default'), T('celui de ta config', 'the one in your config')],
+    ...(ui().models || []).filter(e => e.offer !== false).map(e => [e.match, e.label + (e.cost !== 1 ? ' ' + costFactor(e.cost) : ''), modelBadge(e.match).title.split('\n').slice(1, -1).join('\n'), e])];
+  const costNote = el('div', 'nf-cost'); costNote.hidden = true;
   const mg = el('div', 'nf-seg'); mg.setAttribute('role', 'radiogroup'); mg.setAttribute('aria-label', T('Modèle', 'Model'));
   const segs = [];
   const pickModel = (key, focus) => {
@@ -2719,9 +2724,14 @@ function renderNew() {
     if (!other) mo.value = key; else if (MODELS.some(([k]) => k && k === mo.value)) mo.value = '';   // « Autre… » part d'un champ vide
     for (const b of segs) { const on = b.dataset.k === key; b.classList.toggle('sel', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1; }
     mo.hidden = !other; if (other && focus) mo.focus();
+    // Modèle plus cher que la référence : le dire au moment du choix (« Autre… » : d'après l'identifiant saisi).
+    const c = modelCost(mo.value);
+    costNote.hidden = !(c && c.cost >= 1.2);
+    if (!costNote.hidden) costNote.textContent = T('💰 ' + c.label + ' coûte ' + costFactor(c.cost) + ' par rapport à ' + costRef() + ' — et épuise le quota ' + costFactor(c.cost) + ' plus vite. À réserver aux tâches qui le justifient.', '💰 ' + c.label + ' costs ' + costFactor(c.cost) + ' compared with ' + costRef() + ' — and uses up the quota ' + costFactor(c.cost) + ' faster. Keep it for tasks that need it.');
   };
-  for (const [k, lab, tip] of [...MODELS, ['*', T('Autre…', 'Other…'), T('saisir un identifiant de modèle complet', 'type a full model id')]]) {
-    const b = el('button', null, lab); b.type = 'button'; b.dataset.k = k; b.setAttribute('role', 'radio'); if (tip) b.title = tip;
+  mo.addEventListener('input', () => { const c = modelCost(mo.value); costNote.hidden = !(c && c.cost >= 1.2); if (!costNote.hidden) costNote.textContent = T('💰 ' + c.label + ' coûte ' + costFactor(c.cost) + ' par rapport à ' + costRef() + '.', '💰 ' + c.label + ' costs ' + costFactor(c.cost) + ' compared with ' + costRef() + '.'); });
+  for (const [k, lab, tip, e] of [...MODELS, ['*', T('Autre…', 'Other…'), T('saisir un identifiant de modèle complet', 'type a full model id')]]) {
+    const b = el('button', e && e.cost >= 1.2 ? 'pricey' : null, lab); b.type = 'button'; b.dataset.k = k; b.setAttribute('role', 'radio'); if (tip) b.title = tip;
     b.onclick = () => pickModel(k, true);
     b.onkeydown = e => {                                    // flèches : comme un groupe de radios
       const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
@@ -2730,7 +2740,7 @@ function renderNew() {
     segs.push(b); mg.append(b);
   }
   pickModel(MODELS.some(([k]) => k === mo.value) ? mo.value : '*', false);
-  const mbox = el('div', 'nf-model'); mbox.append(mg, mo);
+  const mbox = el('div', 'nf-model'); mbox.append(mg, mo, costNote);
   const br = el('input'); br.id = 'nf-branch'; br.autocomplete = 'off'; br.spellcheck = false;
   br.placeholder = T('facultatif — ex. feat/ma-branche : worktree neuf sur origin/master', 'optional — e.g. feat/my-branch: new worktree on origin/master');
   const tbox = el('div', 'nf-tags'); tbox.id = 'nf-tags';
