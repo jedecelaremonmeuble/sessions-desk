@@ -134,6 +134,8 @@ export class Server {
   #wake: (() => void) | null = null;
   #dirty = false;
   #stopping = false;
+  #draining = false;
+  #inflight = 0;
   #servers: (HttpServer | TcpServer)[] = [];
   onStop: (() => void) | null = null;
 
@@ -152,7 +154,12 @@ export class Server {
     if (!exists(join(this.cfg.pageDir, 'index.html'))) throw new Error(`Page introuvable : ${this.cfg.pageDir}`);
     // http.sys écoute « localhost » en IPv4 et IPv6 : deux sockets.
     for (const host of ['127.0.0.1', '::1']) {
-      const s = createServer((req, res) => { this.#handle(req, res).catch((e) => { this.logError(`${req.url} : ${(e as Error).message}`); reply(res, 500, null, ''); }); });
+      const s = createServer((req, res) => {
+        // Arrêt en cours : refus net, que la page sait lire (bandeau de reconnexion) — jamais une requête acceptée puis coupée.
+        if (this.#draining) { req.resume(); res.setHeader('Connection', 'close'); json(res, 503, { error: "serveur en cours d'arrêt" }); return; }
+        this.#inflight++; res.once('close', () => { this.#inflight--; });
+        this.#handle(req, res).catch((e) => { this.logError(`${req.url} : ${(e as Error).message}`); reply(res, 500, null, ''); });
+      });
       s.keepAliveTimeout = 5000;
       await new Promise<void>((ok, ko) => { s.once('error', ko); s.listen(this.cfg.port, host, () => { s.off('error', ko); ok(); }); })
         .catch((e: NodeJS.ErrnoException) => { if (host === '::1' && e.code === 'EADDRNOTAVAIL') return; throw new Error(`Port ${this.cfg.port} déjà pris (serveur déjà lancé ?) : ${e.message}`); });
@@ -161,6 +168,17 @@ export class Server {
     try { await this.#startRelay(this.cfg.port + 1, this.cfg.port); }
     catch (e) { process.stderr.write(`Relais d'accès distant (port ${this.cfg.port + 1}) non démarré : ${(e as Error).message}\n`); }
     try { writeFileSync(join(this.cfg.temp, `sessions-dashboard-${this.cfg.port}.pid`), String(process.pid)); } catch { /* idem */ }
+  }
+  /** ARRÊT PROPRE : plus aucune requête acceptée (503), celles déjà reçues — en file ou en cours — vont au bout, puis
+   *  le serveur s'arrête. Plafonné à maxMs : un envoi bloqué ne retient pas un déploiement. C'est ce que demandent
+   *  /api/stop et Ctrl+C ; Stop-Process -Force (impossible à intercepter sous Windows) ne reste qu'en dernier recours. */
+  async shutdown(maxMs = 8000): Promise<void> {
+    if (this.#draining) return;
+    this.#draining = true;
+    const until = nowMs() + maxMs;
+    while ((this.#inflight > 0 || this.#queue.length > 0) && nowMs() < until) await sleep(50);
+    if (this.#inflight > 0 || this.#queue.length > 0) this.logError(`arrêt : ${this.#inflight} requête(s) en cours et ${this.#queue.length} en file abandonnées après ${maxMs} ms`);
+    this.close(); this.onStop?.();
   }
   close(): void {
     this.#stopping = true; this.#wake?.();
@@ -482,7 +500,7 @@ export class Server {
     }
     req.resume();
     reply(res, status, type, body);
-    if (stopAfter) { setTimeout(() => { this.close(); this.onStop?.(); }, 300); }
+    if (stopAfter) void this.shutdown();
     return isAction;
   }
 }

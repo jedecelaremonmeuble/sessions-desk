@@ -42,6 +42,7 @@ export async function start(argv: string[]): Promise<Server> {
   process.stdout.write(`Suivi des sessions (Node) : ${cfg.url}  ${cfg.allowWrite ? 'écriture permise' : 'LECTURE SEULE'}${cfg.primary ? '' : ', à côté du serveur principal'}\n`);
   if (!cfg.noBackground) srv.search.warm();
   srv.onStop = () => { driver.close(); process.exit(0); };
+  for (const sig of ['SIGINT', 'SIGBREAK'] as const) process.once(sig, () => { void srv.shutdown(); });   // Ctrl+C / Ctrl+Pause : arrêt propre
   srv.loop().catch((e) => { srv.logError(`boucle : ${(e as Error).message}`); process.exit(1); });
   return srv;
 }
