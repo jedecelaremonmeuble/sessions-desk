@@ -31,7 +31,7 @@ const PAGE: Record<string, [string, string]> = {
 const JSON_TYPE = 'application/json; charset=utf-8';
 const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab']);
 const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy']);
-const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/launcher/order']);
+const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/launcher/order']);
 const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/close', '/api/relaunch']);
 /** Routes d'un module optionnel : sans lui, elles n'existent pas (404, comme une route inconnue). */
 const LAUNCHER_ROUTES = new Set(['/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/order', '/api/test-launcher-alerts']);
@@ -401,6 +401,7 @@ export class Server {
         }
         case '/api/send-many': { const j = await payload(); if (!isObjBody(j)) { status = 400; body = '{}'; } else body = JSON.stringify(await this.actions.sendMany(arr(pget(j, 'pids')), psString(pget(j, 'text')))); break; }
         case '/api/close-many': { const j = await payload(); if (!isObjBody(j)) { status = 400; body = '{}'; } else body = JSON.stringify(await this.actions.closeMany(arr(pget(j, 'pids')), String(pget(j, 'rule') ?? ''))); break; }
+        case '/api/relaunch-many': { const j = await payload(); if (!isObjBody(j)) { status = 400; body = '{}'; } else body = JSON.stringify(await this.actions.relaunchMany(arr(pget(j, 'pids')))); break; }
         case '/api/git-refresh': {
           const s1 = knownPid ? (await this.d.openSessions()).find((s) => Number(s.pid) === target) : undefined;
           if (s1) { startGitRefresh(this.d, [s1.gitDir]).catch(() => undefined); body = '{"ok":true}'; } else { status = 400; body = '{}'; }

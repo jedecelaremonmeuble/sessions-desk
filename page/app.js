@@ -48,7 +48,7 @@ const TODO = ['waiting', 'ask', 'done'];
 // jusqu'à la remise, rythme récent (déduit de la projection du collecteur, faite sur les 30 dernières heures).
 const WEEK = 7 * 864e5, DAY = 864e5;
 function quotaView(q, now) {
-  const v = { alias: q.alias || '', status: q.status || '', pct: q.weeklyPct ?? null, projected: q.weeklyProjectedPct ?? null, age: q.measuredAt ? now - q.measuredAt : null };
+  const v = { alias: q.alias || '', active: !!q.active, status: q.status || '', pct: q.weeklyPct ?? null, projected: q.weeklyProjectedPct ?? null, age: q.measuredAt ? now - q.measuredAt : null };
   v.ok = v.pct != null;
   v.expired = !!(q.weeklyResetsAt && q.weeklyResetsAt <= now);                 // remise passée : le relevé ne vaut plus
   v.stale = v.expired || (v.age != null && v.age > 30 * 60000) || (!!v.status && v.status !== 'ok');
@@ -105,10 +105,11 @@ function renderQuota() {
   const vs = quotas().filter(v => v.ok);
   const sm = suggestionMode(data && data.quota, data && data.promptSuggestion, Date.now());
   const sig = vs.map(v => [v.alias, v.pct, v.level, v.fullAt, v.stale, Math.round(v.elapsed || 0), v.models.map(m => m.name + '=' + m.pct + m.level).join(',')].join(':')).join('|') + '|' + (sm ? sm.text + sm.back : '');
-  if (box.dataset.sig === sig) return; box.dataset.sig = sig; box.replaceChildren();
+  const sigA = sig + '|' + vs.map(v => v.active ? 1 : 0).join('');           // compte connecté : la mise en avant suit la bascule /login
+  if (box.dataset.sig === sigA) return; box.dataset.sig = sigA; box.replaceChildren();
   for (const v of vs) {
-    const d = el('div', 'qline' + (v.stale ? ' stale' : ''));
-    d.title = 'Quota hebdomadaire Claude' + (vs.length > 1 ? ' — ' + v.alias : '') + ' · cliquer : détail dans la vue d\'ensemble';
+    const d = el('div', 'qline' + (v.stale ? ' stale' : '') + (v.active && vs.length > 1 ? ' active' : ''));
+    d.title = 'Quota hebdomadaire Claude' + (vs.length > 1 ? ' — ' + v.alias : '') + (v.active ? ' (compte connecté, celui que consomment les sessions)' : '') + ' · cliquer : détail dans la vue d\'ensemble';
     const txt = el('span', 'qt');
     txt.append(el('b', null, Math.round(v.pct) + ' %'), ' semaine' + (vs.length > 1 ? ' · ' + v.alias.split('@')[0] : ''));
     const info = v.expired ? 'relevé d\'avant la remise' : v.fullAt ? '100 % ' + atFr(v.fullAt) : v.reset ? 'remise ' + atFr(v.reset) : '';
@@ -132,8 +133,8 @@ function quotaSection() {
   const vs = quotas(); if (!vs.length) return null;
   const box = el('div', 'qcards');
   for (const v of vs) {
-    const c = el('div', 'qcard ' + v.level);
-    const h = el('div', 'qhead'); h.append(el('b', null, v.ok ? Math.round(v.pct) + ' %' : '—'), el('span', null, v.alias + (data.quota.find(q => q.alias === v.alias)?.plan ? ' · ' + PLAN_FR(data.quota.find(q => q.alias === v.alias).plan) : '')));
+    const c = el('div', 'qcard ' + v.level + (v.active && vs.length > 1 ? ' active' : ''));
+    const h = el('div', 'qhead'); h.append(el('b', null, v.ok ? Math.round(v.pct) + ' %' : '—'), el('span', null, v.alias + (data.quota.find(q => q.alias === v.alias)?.plan ? ' · ' + PLAN_FR(data.quota.find(q => q.alias === v.alias).plan) : '') + (v.active && vs.length > 1 ? ' · connecté' : '')));
     c.append(h);
     if (v.ok) {                                                                 // barres côte à côte : tous modèles, puis chaque modèle limité à part
       const row = el('div', 'qrow');
@@ -422,6 +423,52 @@ async function closeMany(list, rule) {
     if (r.skipped.length) alertSkipped(r.skipped);
   } catch { say('échec de la demande'); }
   closingMany = false; tick(); loadClosed();
+}
+// ── Relance groupée : fermer puis reprendre (--resume) les sessions « À traiter », « ⏳ Attente Teams » et « Inactives ».
+// Le process redémarre pour de bon : compte changé, serveurs MCP à réinitialiser. Seule une session INACTIVE peut
+// recevoir /exit : celle qui est bloquée sur un dialogue ou qui attend une commande en arrière-plan est annoncée, pas
+// touchée. Les sessions au travail, les automates et les sessions fermées ne sont pas concernés. Pure.
+function restartPlan(items) {
+  const go = [], skip = [];
+  for (const it of items) {
+    if (it.kind !== 'open' || it.headless || !['waiting', 'ask', 'done', 'teams', 'idle'].includes(it.state)) continue;
+    if (it.status === 'idle') go.push(it);
+    else skip.push({ it, why: it.status === 'waiting' ? 'bloquée sur une question' : it.status === 'shell' ? 'commande en arrière-plan en cours' : 'statut ' + it.status });
+  }
+  return { go, skip };
+}
+const RESTART_GROUPS = [['À traiter', ['waiting', 'ask', 'done']], ['⏳ Attente Teams', ['teams']], ['Inactives', ['idle']]];
+const restartCounts = list => RESTART_GROUPS.map(([t, st]) => [t, list.filter(it => st.includes(it.state)).length]).filter(x => x[1]).map(x => x[0] + ' ' + x[1]).join(' · ');
+const restartSig = () => { const p = restartPlan(allItems()); return (canWrite ? 'w' : 'r') + (restartingMany ? '!' : '') + p.go.map(it => it.key + it.state).join(',') + '|' + p.skip.map(s => s.it.key).join(','); };
+let restartingMany = false;
+async function restartMany() {
+  if (restartingMany || !canWrite) return;
+  const { go, skip } = restartPlan(allItems());
+  if (!go.length) return say('aucune session à relancer');
+  if (!confirm('Relancer ' + plural(go.length, 'session', 'sessions') + ' ?\n\n' + restartCounts(go)
+    + '\n\nChacune reçoit /exit puis reprend sa conversation (--resume), dans son onglet quand c’est possible, sinon dans un nouvel onglet. Le process redémarre : nouveau compte pris en compte, serveurs MCP réinitialisés. Une session dont l’invite porte un brouillon est laissée telle quelle.'
+    + (skip.length ? '\n\nNon relancée' + (skip.length > 1 ? 's' : '') + ' :\n' + skip.map(s => '• ' + label(s.it) + ' — ' + s.why).join('\n') : '')
+    + '\n\nDurée : environ ' + Math.round(20 + go.length * 1.5) + ' s.')) return;
+  restartingMany = true; say('relance de ' + plural(go.length, 'session', 'sessions') + '…'); renderDetail(true);
+  try {
+    const r = await (await fetch('/api/relaunch-many', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ pids: go.map(it => it.pid) }) })).json();
+    const tabs = r.relaunched.filter(x => !x.sameTab).length;
+    say(plural(r.relaunched.length, 'session relancée', 'sessions relancées') + (tabs ? ' (dont ' + tabs + ' dans un nouvel onglet)' : '') + (r.skipped.length ? ' · ' + r.skipped.length + ' sautée(s)' : ''));
+    if (r.skipped.length) alertSkipped(r.skipped);
+  } catch { say('échec de la demande'); }
+  restartingMany = false; tick(); loadClosed();
+}
+function restartPanel() {
+  if (!canWrite) return null;
+  const { go, skip } = restartPlan(allItems()); if (!go.length && !skip.length) return null;
+  const wrap = el('div');
+  wrap.append(el('h2', null, 'Relancer les sessions — ' + go.length));
+  const act = el('div', 'actions');
+  const b = el('button', 'primary', restartingMany ? 'Relance en cours…' : 'Relancer les ' + plural(go.length, 'session', 'sessions') + '…'); b.disabled = restartingMany || !go.length;
+  b.title = 'Ferme (/exit) puis reprend (--resume) les sessions « À traiter », « ⏳ Attente Teams » et « Inactives » : à faire après un changement de compte, ou pour réinitialiser les serveurs MCP. Les sessions au travail ne sont pas touchées.';
+  b.onclick = restartMany; act.append(b); wrap.append(act);
+  wrap.append(el('div', 'empty', (restartCounts(go) || 'aucune session inactive') + (skip.length ? ' — ' + skip.length + ' laissée' + (skip.length > 1 ? 's' : '') + ' (' + skip.map(s => label(s.it) + ' : ' + s.why).join(' ; ').slice(0, 240) + ')' : '')));
+  return wrap;
 }
 // ── Ménage large : fermer d'un coup les sessions INACTIVES, même avec du travail en cours (la conversation reste
 // reprenable, le worktree n'est pas touché). Cochées par défaut : inactives depuis au moins le seuil choisi. Le
@@ -1412,7 +1459,7 @@ async function openTab(it) {
 }
 const noTab = new Set();     // sessions dont l'onglet n'a pas pu être affiché : on propose la relance
 async function relaunch(it) {
-  if (!confirm('Fermer « ' + label(it) + ' » et la reprendre dans un nouvel onglet ?\n\nLa conversation est conservée. Si son ancien onglet existe encore, il restera ouvert sur une invite vide.')) return;
+  // Sans confirmation : rien ne se perd (session inactive, invite vide exigées par le serveur ; conversation reprise).
   say('relance de « ' + label(it) + ' »…');
   try { const r = await post('/api/relaunch?pid=' + it.pid);
     if (r.error) say('non relancée : ' + r.error); else { noTab.delete(it.key); say('relancée dans un nouvel onglet — elle réapparaît dans quelques secondes'); } }
@@ -1982,9 +2029,10 @@ function renderDetail(force) {
     bh.onclick = () => setHidden([it], !it.hidden); actions.append(bh);
   }
   if (it.kind === 'open') { const bx = el('button', null, '✕ Fermer la session'); bx.title = 'Quitte la session (/exit) ; la conversation reste reprenable  ( x )'; bx.onclick = () => closeSession(it); actions.append(bx); }
-  if (it.kind === 'open' && noTab.has(it.key)) {
-    const b3 = el('button', null, 'Relancer dans un nouvel onglet'); b3.disabled = it.status !== 'idle';
-    b3.title = it.status === 'idle' ? 'Ferme la session (/exit) et la reprend dans un nouvel onglet' : 'Possible seulement quand la session est inactive';
+  // Toujours proposé (pas seulement quand l'onglet est introuvable) : fermer puis rouvrir en un seul geste.
+  if (it.kind === 'open' && !it.headless) {
+    const b3 = el('button', noTab.has(it.key) ? 'primary' : null, '↻ Fermer et rouvrir'); b3.disabled = it.status !== 'idle';
+    b3.title = it.status === 'idle' ? 'Ferme la session (/exit) et la reprend aussitôt dans un nouvel onglet (claude --resume) ; la conversation est conservée' : 'Possible seulement quand la session est inactive';
     b3.onclick = () => relaunch(it); actions.append(b3);
   }
   head.append(actions);
@@ -2023,12 +2071,13 @@ function renderOverview() {
   }
   head.append(tiles);
   const cl = allItems().filter(closable);
-  const nsig = idleSig() + '/' + data.restarts.length + '/' + data.notifs.length + '/' + (data.notifs.length ? data.notifs[data.notifs.length - 1].at : 0) + '/' + (data.reboot ? data.reboot.sessions.map(s => s.sessionId).join(',') : '') + '/' + cl.map(it => it.key).join(',')
+  const nsig = idleSig() + '/' + restartSig() + '/' + data.restarts.length + ':' + (data.restarts.length ? data.restarts[data.restarts.length - 1].at : 0) + '/' + data.notifs.length + '/' + (data.notifs.length ? data.notifs[data.notifs.length - 1].at : 0) + '/' + (data.reboot ? data.reboot.sessions.map(s => s.sessionId).join(',') : '') + '/' + cl.map(it => it.key).join(',')
     + '/' + (data.quota || []).map(q => q.alias + ':' + q.weeklyPct + ':' + q.measuredAt + ':' + q.status).join(',') + '/' + Math.floor(Date.now() / 60000);
   if (body.dataset.sig === 'overview' && body.dataset.n === nsig) return;
   body.dataset.sig = 'overview'; body.dataset.n = nsig; body.replaceChildren();
   const rp = rebootPanel(); if (rp) body.append(rp);
   const qs = quotaSection(); if (qs) body.append(el('h2', null, 'Quota Claude de la semaine'), qs);
+  const sp = restartPanel(); if (sp) body.append(sp);
   if (cl.length) {
     body.append(el('h2', null, 'Peuvent se fermer — ' + cl.length));
     const act = el('div', 'actions');
@@ -2062,7 +2111,7 @@ function renderOverview() {
     const kk = el('span'); k.split(' ').forEach((x, i) => { if (i) kk.append(' '); kk.append(el('kbd', null, x)); }); keys.append(kk, el('span', null, d));
   }
   body.append(keys);
-  body.append(el('h2', null, 'Dernières relances (restart-idle-sessions)'));
+  body.append(el('h2', null, 'Dernières relances'));
   if (!data.restarts.length) body.append(el('div', 'empty', 'Aucune relance enregistrée.'));
   else {
     const w = el('div', 'tablewrap'), t = el('table'), hr = el('tr'); ['Quand', 'Session', 'Résultat'].forEach(h => hr.append(el('th', null, h))); t.append(hr);

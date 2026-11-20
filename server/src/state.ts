@@ -11,7 +11,7 @@ import type { Config } from './config.ts';
 import type { DriverClient } from './driver.ts';
 import { modulesView } from './modules.ts';
 import { lastNewsAt } from './quiet.ts';
-import { readClaudeUsage, promptSuggestionSetting } from './usage.ts';
+import { activeAccountUuid, markActiveAccount, readClaudeUsage, promptSuggestionSetting } from './usage.ts';
 import { AskJudge, claudeAskAsync } from './asks-judge.ts';
 import {
   addContent, GUID, ieq, imatch, isDir, isFile, leaf, mtimeMs, netTrim, nowMs, parent, psString, readJson, readTail,
@@ -576,7 +576,7 @@ export class Dashboard {
     try { this.saveOpenSeen(sess); } catch { /* idem */ }
     try { this.writeStatusChanges(sess); } catch { /* idem */ }
     let quota: unknown[] = [];
-    try { quota = readClaudeUsage(this.cfg); } catch { /* idem */ }
+    try { quota = markActiveAccount(readClaudeUsage(this.cfg), activeAccountUuid(this.cfg)); } catch { /* idem */ }
     return { now: nowMs(), sessions: sess, reboot: this.rebootInfo(sess), restarts: restarts.slice(-40), favs: [...this.favs], hidden: [...this.hidden], notifs: this.notifs.slice(-60), quota, promptSuggestion: promptSuggestionSetting(this.cfg), teams: this.cfg.modules.teams ? this.teamsWaits() : null, modules: modulesView(this.cfg.modules), ui: this.cfg.ui };
   }
 
