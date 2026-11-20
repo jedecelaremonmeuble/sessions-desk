@@ -84,8 +84,11 @@ function quotaBar(v) {
 // (une limite active en alerte : severity autre que normal) — sauf si CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION est forcée
 // (data.promptSuggestion.forced, lue dans ~/.claude/settings.json) ; quota épuisé : plus rien dans tous les cas.
 // Sans cette ligne, la ligne 💡 disparaît de la liste sans explication. Pure : (data.quota, data.promptSuggestion, now).
+// Seul le compte CONNECTÉ compte : c'est son quota que voient les sessions — un autre compte à 100 % ne coupe rien.
+// Compte connecté inconnu (aucun relevé marqué active) : on retombe sur tous les comptes.
 function suggestionMode(quota, setting, now) {
-  const lims = (quota || []).filter(q => q.status === 'ok').flatMap(q => (q.limits || []).map(l => ({ ...l, reset: l.resetsAt || q.weeklyResetsAt || null })))
+  const ok = (quota || []).filter(q => q.status === 'ok'), mine = ok.some(q => q.active) ? ok.filter(q => q.active) : ok;
+  const lims = mine.flatMap(q => (q.limits || []).map(l => ({ ...l, reset: l.resetsAt || q.weeklyResetsAt || null })))
     .filter(l => l.active && (!l.reset || l.reset > now));
   const full = lims.filter(l => l.pct != null && l.pct >= 100), warn = lims.filter(l => l.severity && l.severity !== 'normal');
   if (!full.length && !warn.length) return null;
