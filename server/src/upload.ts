@@ -6,6 +6,7 @@ import { createWriteStream, mkdirSync, readdirSync, rmSync, unlinkSync } from 'n
 import type { IncomingMessage } from 'node:http';
 import { join, resolve } from 'node:path';
 import { trimChars } from './util.ts';
+import { T } from './i18n.ts';
 
 export const MAX_UPLOAD = 20 * 1024 * 1024;
 const UPLOAD_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.pdf', '.txt', '.log', '.csv', '.json', '.md']);
@@ -59,19 +60,19 @@ function localDay(d = new Date()): string { const p = (x: number): string => Str
 export interface Reply { status: number; body: Record<string, unknown> }
 
 export async function upload(req: IncomingMessage, uploadDir: string | null): Promise<Reply> {
-  if (uploadDir === null) return { status: 503, body: { error: 'pièces jointes désactivées' } };
+  if (uploadDir === null) return { status: 503, body: { error: T('pièces jointes désactivées', 'attachments disabled') } };
   const lenH = req.headers['content-length'];
-  if (lenH === undefined) { req.resume(); return { status: 411, body: { error: 'longueur du fichier inconnue' } }; }
+  if (lenH === undefined) { req.resume(); return { status: 411, body: { error: T('longueur du fichier inconnue', 'unknown file length') } }; }
   const len = Number(lenH);
-  if (len === 0) return { status: 400, body: { error: 'fichier vide' } };
-  if (len > MAX_UPLOAD) { req.resume(); return { status: 413, body: { error: 'fichier trop gros (20 Mo au plus)' } }; }
+  if (len === 0) return { status: 400, body: { error: T('fichier vide', 'empty file') } };
+  if (len > MAX_UPLOAD) { req.resume(); return { status: 413, body: { error: T('fichier trop gros (20 Mo au plus)', 'file too large (20 MB max)') } }; }
   const fn = req.headers['x-file-name'];
   const name = cleanName(Array.isArray(fn) ? fn.join(',') : fn, req.headers['content-type']);
-  if (!UPLOAD_EXT.has(extension(name).toLowerCase())) { req.resume(); return { status: 415, body: { error: 'type de fichier refusé (images, pdf, txt, log, csv, json, md)' } }; }
+  if (!UPLOAD_EXT.has(extension(name).toLowerCase())) { req.resume(); return { status: 415, body: { error: T('type de fichier refusé (images, pdf, txt, log, csv, json, md)', 'file type refused (images, pdf, txt, log, csv, json, md)') } }; }
   const root = resolve(uploadDir).replace(/\\+$/, '') + '\\';
   const dir = join(root, localDay());
   const file = resolve(dir, randomBytes(4).toString('hex') + '-' + name);
-  if (!file.toLowerCase().startsWith(root.toLowerCase())) { req.resume(); return { status: 400, body: { error: 'nom de fichier invalide' } }; }
+  if (!file.toLowerCase().startsWith(root.toLowerCase())) { req.resume(); return { status: 400, body: { error: T('nom de fichier invalide', 'invalid file name') } }; }
   mkdirSync(dir, { recursive: true });
   let total = 0; let over = false;
   try {
@@ -84,11 +85,11 @@ export async function upload(req: IncomingMessage, uploadDir: string | null): Pr
     });
   } catch (e) {
     try { unlinkSync(file); } catch { /* absent */ }
-    return { status: 500, body: { error: 'écriture impossible : ' + (e as Error).message } };
+    return { status: 500, body: { error: T('écriture impossible : ' + (e as Error).message, 'could not write: ' + (e as Error).message) } };
   }
   if (over || total === 0) {
     try { unlinkSync(file); } catch { /* absent */ }
-    return total === 0 ? { status: 400, body: { error: 'fichier vide' } } : { status: 413, body: { error: 'fichier trop gros (20 Mo au plus)' } };
+    return total === 0 ? { status: 400, body: { error: T('fichier vide', 'empty file') } } : { status: 413, body: { error: T('fichier trop gros (20 Mo au plus)', 'file too large (20 MB max)') } };
   }
   return { status: 200, body: { path: file, name, size: total } };
 }

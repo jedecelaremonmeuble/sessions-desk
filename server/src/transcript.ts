@@ -3,6 +3,7 @@
 // sous-agents. Lecture à l'octet près : start/end sont des positions d'octets du fichier, comme dans la façade C#.
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs';
 import { netTrim, netTrimEnd } from './util.ts';
+import { T } from './i18n.ts';
 
 export const CHUNK = 1024 * 1024;
 const MAX_READ = 64 * 1024 * 1024;
@@ -14,7 +15,7 @@ const nf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 /** Cut : « […] (1 234 caractères de plus) », nombre au format N0 de la culture courante. */
 export function cut(s: string | null | undefined, max: number): string {
   const v = s ?? '';
-  return v.length <= max ? v : v.slice(0, max) + ' […] (' + nf.format(v.length - max) + ' caractères de plus)';
+  return v.length <= max ? v : v.slice(0, max) + T(' […] (' + nf.format(v.length - max) + ' caractères de plus)', ' […] (' + nf.format(v.length - max) + ' more characters)');
 }
 type J = unknown;
 const isObj = (e: J): e is Record<string, J> => e !== null && typeof e === 'object' && !Array.isArray(e);

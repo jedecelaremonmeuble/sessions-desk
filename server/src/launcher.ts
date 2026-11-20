@@ -8,6 +8,7 @@ import type { Dashboard } from './state.ts';
 import { launchMs, readClaudeUsage, readUsageRaw, roundHalfEven } from './usage.ts';
 import { exists, isDir, leaf, netTrim, nowMs, psString, readJson, setContent, splitPathParent } from './util.ts';
 import { ntfsSort } from './state.ts';
+import { T } from './i18n.ts';
 
 type Obj = Record<string, unknown>;
 const FILE_EXT = ['.md', '.html', '.json', '.png', '.patch', '.diff', '.txt', '.sql', '.log'];
@@ -101,23 +102,23 @@ export function orderArgs(j: unknown): string[] | null {
 /** Invoke-LauncherOrder : { ok, message } ou { error } (1re ligne de la commande, qui dit le refus). */
 export function runLauncherOrder(j: unknown, env: NodeJS.ProcessEnv = process.env, mod: { cli: string; python: string } | null = null): Promise<Obj> {
   const args = orderArgs(j);
-  if (!args) return Promise.resolve({ error: 'demande invalide' });
+  if (!args) return Promise.resolve({ error: T('demande invalide', 'invalid request') });
   const cli = env.SD_LAUNCHER_CLI || mod?.cli || '';
-  if (!cli) return Promise.resolve({ error: 'commande du lanceur non configurée (modules.launcher.cli)' });
-  if (!existsSync(cli)) return Promise.resolve({ error: `commande du lanceur introuvable (${cli})` });
+  if (!cli) return Promise.resolve({ error: T('commande du lanceur non configurée (modules.launcher.cli)', 'launcher command not configured (modules.launcher.cli)') });
+  if (!existsSync(cli)) return Promise.resolve({ error: T(`commande du lanceur introuvable (${cli})`, `launcher command not found (${cli})`) });
   return new Promise((done) => {
     let settled = false;
     // La commande répond en une seconde ; au-delà de 30 s on répond SANS tuer : l'ordre est peut-être déjà déposé.
-    const t = setTimeout(() => { if (!settled) { settled = true; done({ error: 'le lanceur ne répond pas en 30 s — voir sa vue 🤖 avant de recommencer' }); } }, 30000);
+    const t = setTimeout(() => { if (!settled) { settled = true; done({ error: T('le lanceur ne répond pas en 30 s — voir sa vue 🤖 avant de recommencer', 'the launcher did not answer within 30 s — check its 🤖 view before trying again') }); } }, 30000);
     execFile(env.SD_LAUNCHER_PYTHON || mod?.python || 'python', ['-X', 'utf8', cli, ...args], { cwd: dirname(cli), windowsHide: true, encoding: 'utf8', env: { ...env, PYTHONIOENCODING: 'utf-8' } },
       (err, stdout, stderr) => {
         clearTimeout(t); if (settled) return; settled = true;
         const lines = String(stdout ?? '').split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean);
         if (!err) { done({ ok: true, message: lines.join('\n') }); return; }
         if (lines[0]) { done({ error: lines[0].trim() }); return; }
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') { done({ error: 'lanceur injoignable : python introuvable' }); return; }
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') { done({ error: T('lanceur injoignable : python introuvable', 'launcher unreachable: python not found') }); return; }
         const e = String(stderr ?? '').trim().split('\n');
-        done({ error: e[e.length - 1]?.trim() || 'lanceur en échec' });
+        done({ error: e[e.length - 1]?.trim() || T('lanceur en échec', 'launcher failed') });
       });
   });
 }
@@ -125,17 +126,17 @@ export function runLauncherOrder(j: unknown, env: NodeJS.ProcessEnv = process.en
 /** Livraison refusée parce que la PR a reçu des commits après les contrôles : ce qui est arrivé depuis, lu par la
  *  commande du lanceur `delivery-diff <hd>` (LECTURE SEULE, JSON sur la dernière ligne). Pas de cache : le sha montré doit être celui de la PR au moment de relire (D2). Get-LauncherDeliveryDiff. */
 export function lookupDeliveryDiff(hd: string, env: NodeJS.ProcessEnv = process.env, mod: { cli: string; python: string } | null = null): Promise<Obj> {
-  if (!/^[1-9]\d{0,8}$/.test(hd)) return Promise.resolve({ error: 'demande invalide' });
+  if (!/^[1-9]\d{0,8}$/.test(hd)) return Promise.resolve({ error: T('demande invalide', 'invalid request') });
   const cli = env.SD_LAUNCHER_CLI || mod?.cli || '';
-  if (!cli) return Promise.resolve({ error: 'commande du lanceur non configurée (modules.launcher.cli)' });
-  if (!existsSync(cli)) return Promise.resolve({ error: `commande du lanceur introuvable (${cli})` });
+  if (!cli) return Promise.resolve({ error: T('commande du lanceur non configurée (modules.launcher.cli)', 'launcher command not configured (modules.launcher.cli)') });
+  if (!existsSync(cli)) return Promise.resolve({ error: T(`commande du lanceur introuvable (${cli})`, `launcher command not found (${cli})`) });
   return new Promise((done) => {
     execFile(env.SD_LAUNCHER_PYTHON || mod?.python || 'python', ['-X', 'utf8', cli, 'delivery-diff', hd], { cwd: dirname(cli), windowsHide: true, encoding: 'utf8', timeout: 60000, maxBuffer: 16 << 20, env: { ...env, PYTHONIOENCODING: 'utf-8' } },
       (err, stdout) => {
         const last = String(stdout ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).pop() ?? '';
         let v: unknown = null; try { v = JSON.parse(last); } catch { v = null; }
         if (v && typeof v === 'object' && !Array.isArray(v)) { done(v as Obj); return; }
-        done({ error: err ? 'diff illisible : le lanceur a échoué (' + ((err as NodeJS.ErrnoException).code ?? 'erreur') + ')' : 'diff illisible' });
+        done({ error: err ? T('diff illisible : le lanceur a échoué (' + ((err as NodeJS.ErrnoException).code ?? 'erreur') + ')', 'diff unreadable: the launcher failed (' + ((err as NodeJS.ErrnoException).code ?? 'error') + ')') : T('diff illisible', 'diff unreadable') });
       });
   });
 }
@@ -163,18 +164,18 @@ export function hdSummary(j: unknown): Obj | null {
 const hdCache = new Map<string, { at: number; value: Obj }>();
 /** Get-LauncherHd : { ...hdSummary } ou { error }. Cache 5 min (1 min sur une erreur) : l'en-tête se redessine toutes les 2 s. */
 export function lookupHd(hd: string, env: NodeJS.ProcessEnv = process.env, mod: { ticketApi: string; python: string } | null = null): Promise<Obj> {
-  if (!/^[1-9]\d{0,8}$/.test(hd)) return Promise.resolve({ error: 'demande invalide' });
+  if (!/^[1-9]\d{0,8}$/.test(hd)) return Promise.resolve({ error: T('demande invalide', 'invalid request') });
   const c = hdCache.get(hd);
   if (c && nowMs() - c.at < ('error' in c.value ? 60000 : 300000)) return Promise.resolve(c.value);
   const api = env.SD_LAUNCHER_TICKET_API || mod?.ticketApi || '';
-  if (!api) return Promise.resolve({ error: 'lecture des demandes non configurée (modules.launcher.ticketApi)' });
-  if (!existsSync(api)) return Promise.resolve({ error: `lecture des demandes introuvable (${api})` });
+  if (!api) return Promise.resolve({ error: T('lecture des demandes non configurée (modules.launcher.ticketApi)', 'ticket reading not configured (modules.launcher.ticketApi)') });
+  if (!existsSync(api)) return Promise.resolve({ error: T(`lecture des demandes introuvable (${api})`, `ticket reader not found (${api})`) });
   return new Promise((done) => {
     execFile(env.SD_LAUNCHER_PYTHON || mod?.python || 'python', ['-X', 'utf8', api, 'ticket', hd, '--max-chars', '600'], { cwd: dirname(api), windowsHide: true, encoding: 'utf8', timeout: 20000, maxBuffer: 8 << 20, env: { ...env, PYTHONIOENCODING: 'utf-8' } },
       (err, stdout) => {
         let v: Obj | null = null;
         if (!err) { try { v = hdSummary(JSON.parse(String(stdout))); } catch { v = null; } }
-        const value = v ?? { error: err ? 'demande illisible (hors périmètre du jeton, introuvable ou réseau)' : 'réponse illisible' };
+        const value = v ?? { error: err ? T('demande illisible (hors périmètre du jeton, introuvable ou réseau)', 'ticket unreadable (outside the token scope, not found, or network)') : T('réponse illisible', 'unreadable answer') };
         hdCache.set(hd, { at: nowMs(), value }); done(value);
       });
   });

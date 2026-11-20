@@ -9,13 +9,17 @@ import { draftHolds, promptDraft } from './prompt.ts';
 import { isRelance } from './quiet.ts';
 import { checkTag, type Dashboard, type Session } from './state.ts';
 import { addContent, GUID, ieq, isDir, netTrim, nowMs, psArray, psIntZero, psString, sleep } from './util.ts';
+import { T } from './i18n.ts';
 
 const KEY_NAMES = ['Enter', 'Esc', 'Up', 'Down', 'Left', 'Right', 'Tab', 'ShiftTab', 'Space', 'Backspace'];
 const NOT_EMPTY = "l'invite de la session n'est pas vide (brouillon, menu ou dialogue ouvert)";
 const NOT_GONE = "tapé dans l'invite de la session, mais pas parti : le texte y est resté — envoie-le ou vide l'invite depuis le panneau « Invite occupée »";
+const notEmpty = (): string => T(NOT_EMPTY, 'the session prompt is not empty (draft, menu or dialog open)');
+const notGone = (): string => T(NOT_GONE, 'typed into the session prompt, but not sent: the text is still there — send it or clear the prompt from the "Prompt busy" panel');
 /** « ; » sépare les commandes de wt.exe, même entre guillemets : un dossier qui en contient couperait la ligne en deux
  *  commandes. Ouvrir, rouvrir ou relancer une session dans un tel dossier est refusé. */
 export const SEMICOLON_REFUSED = 'dossier refusé : son chemin contient « ; », que Windows Terminal lirait comme une seconde commande';
+const semicolonRefused = (): string => T(SEMICOLON_REFUSED, 'folder refused: its path contains ";", which Windows Terminal would read as a second command');
 
 /** Shells à l'invite desquels une reprise peut être tapée (nom du process → ligne : se replacer dans le dossier de
  *  la conversation, puis reprendre). Tout autre parent : la session reprend dans un nouvel onglet. */
@@ -63,17 +67,17 @@ export class Actions {
    *  ce qu'on y tape. Réponse à une session seulement (ni message groupé, ni proposition). */
   async send(pid: number, text: string, suggested = false, allowBusy = false): Promise<string | null> {
     const line = submitLine(text);
-    if (!line) return 'message vide';
-    if (line.length > 4000) return 'message trop long (4 000 caractères au plus)';
+    if (!line) return T('message vide', 'empty message');
+    if (line.length > 4000) return T('message trop long (4 000 caractères au plus)', 'message too long (4,000 characters max)');
     const sess = await this.session(pid);
-    if (!sess) return 'session introuvable';
+    if (!sess) return T('session introuvable', 'session not found');
     const queued = allowBusy && !suggested && ieq(sess.status, 'busy');
-    if (!ieq(sess.status, 'idle') && !ieq(sess.status, 'shell') && !queued) return `la session n'est pas inactive (statut ${psString(sess.status)})`;
+    if (!ieq(sess.status, 'idle') && !ieq(sess.status, 'shell') && !queued) return T(`la session n'est pas inactive (statut ${psString(sess.status)})`, `the session is not idle (status ${psString(sess.status)})`);
     if (suggested) {
       let cur: string | null = null;
       try { cur = await this.d.driver.call('suggestion', { pid }); } catch { /* idem */ }
-      if (!cur) return "plus de proposition à l'écran";
-      if (cur !== line) return "la proposition a changé à l'écran";
+      if (!cur) return T("plus de proposition à l'écran", 'no suggestion on screen anymore');
+      if (cur !== line) return T("la proposition a changé à l'écran", 'the suggestion changed on screen');
     }
     const cut = suggested && line.endsWith('…');
     let code = 2;
@@ -85,12 +89,12 @@ export class Actions {
       // caractère qui change le sens d'Entrée…). Le dire tout de suite, plutôt qu'un refus incompris au message suivant.
       if (!cut && await this.stuck(pid, line)) {
         addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, code: 6, text: line, notGone: true }));
-        return NOT_GONE;
+        return notGone();
       }
       if (!isRelance(line)) this.d.setSeen([sess.sessionId]);
       return null;
     }
-    return code === 5 ? NOT_EMPTY : 'console de la session inaccessible';
+    return code === 5 ? notEmpty() : T('console de la session inaccessible', 'session console unreachable');
   }
 
   /** Délai laissé à l'invite pour se vider après Entrée, avant de la relire. */
@@ -114,39 +118,39 @@ export class Actions {
     const items: string[] = []; let len = 0;
     for (const raw of psArray(keys)) {
       const k = (raw && typeof raw === 'object' ? raw : {}) as { k?: unknown; t?: unknown };
-      if (k.k) { const name = psString(k.k); if (!KEY_NAMES.includes(name)) return 'touche inconnue'; items.push('\u0001' + name); }
+      if (k.k) { const name = psString(k.k); if (!KEY_NAMES.includes(name)) return T('touche inconnue', 'unknown key'); items.push('\u0001' + name); }
       else if (k.t !== null && k.t !== undefined) { const t = cleanLine(psString(k.t)).replace(/\\+$/, ''); if (t) { items.push(t); len += t.length; } }
     }
-    if (!items.length) return 'rien à envoyer';
-    if (items.length > 20 || len > 4000) return 'trop de touches ou texte trop long';
+    if (!items.length) return T('rien à envoyer', 'nothing to send');
+    if (items.length > 20 || len > 4000) return T('trop de touches ou texte trop long', 'too many keys or text too long');
     const sess = await this.session(pid);
-    if (!sess) return 'session introuvable';
+    if (!sess) return T('session introuvable', 'session not found');
     const unblock = !!expect && (ieq(sess.status, 'idle') || ieq(sess.status, 'shell'));
-    if (!ieq(sess.status, 'waiting') && !unblock) return `la session n'attend plus de réponse (statut ${psString(sess.status)})`;
+    if (!ieq(sess.status, 'waiting') && !unblock) return T(`la session n'attend plus de réponse (statut ${psString(sess.status)})`, `the session is no longer waiting for an answer (status ${psString(sess.status)})`);
     if (expect) {
       let scr: unknown = null;
       try { scr = await this.d.driver.call('read', { pid }); } catch { /* idem */ }
-      if (typeof scr !== 'string' || !scr.includes(expect)) return `le dialogue a changé : « ${expect} » n'est plus à l'écran`;
+      if (typeof scr !== 'string' || !scr.includes(expect)) return T(`le dialogue a changé : « ${expect} » n'est plus à l'écran`, `the dialog changed: "${expect}" is no longer on screen`);
     }
     let code = 2;
     try { code = await this.d.driver.call('sendKeys', { pid, items }); } catch { /* idem */ }
     addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, code, keys: items.map((x) => x.replaceAll('\u0001', '#')), expect }));
     if (code === 0) { this.d.setSeen([sess.sessionId]); return null; }
-    return code === 3 ? 'touche inconnue' : 'console de la session inaccessible';
+    return code === 3 ? T('touche inconnue', 'unknown key') : T('console de la session inaccessible', 'session console unreachable');
   }
 
   /** Invoke-Close : /exit si inactive (arrêt du process s'il ne sort pas en 10 s) ; sinon needForce, puis arrêt sur force. */
   async close(pid: number, force: boolean): Promise<Record<string, unknown>> {
     const sess = await this.session(pid);
-    if (!sess) return { error: 'session introuvable' };
-    if (!alive(pid)) return { error: 'process introuvable' };
+    if (!sess) return { error: T('session introuvable', 'session not found') };
+    if (!alive(pid)) return { error: T('process introuvable', 'process not found') };
     if (!force) {
-      if (!ieq(sess.status, 'idle')) return { error: `la session travaille (statut ${psString(sess.status)})`, needForce: true };
+      if (!ieq(sess.status, 'idle')) return { error: T(`la session travaille (statut ${psString(sess.status)})`, `the session is working (status ${psString(sess.status)})`), needForce: true };
       let code = 2; try { code = await this.d.driver.call('send', { pid, line: '/exit' }); } catch { /* idem */ }
-      if (code === 5) return { error: NOT_EMPTY, needForce: true };
+      if (code === 5) return { error: notEmpty(), needForce: true };
       force = !(code === 0 && await waitExit(pid, 10000));
     }
-    if (force) { kill(pid); if (!await waitExit(pid, 5000)) return { error: "le process n'a pas pu être arrêté" }; }
+    if (force) { kill(pid); if (!await waitExit(pid, 5000)) return { error: T("le process n'a pas pu être arrêté", 'the process could not be stopped') }; }
     try { rmSync(join(this.d.sessionsDir, `${pid}.json`), { force: true }); } catch { /* idem */ }
     this.d.openSeen.delete(psString(sess.sessionId));
     addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, forced: force, text: '(fermeture)' }));
@@ -169,8 +173,8 @@ export class Actions {
       const id = psIntZero(p);
       const s = all.find((x) => Number(x.pid) === id);
       if (!s) continue;
-      if (rule === 'idle') { if (!ieq(s.status, 'idle')) { skipped.push({ title: s.title, why: `n'est plus inactive (statut ${psString(s.status)})` }); continue; } }
-      else if (!Actions.closable(s)) { skipped.push({ title: s.title, why: 'ne peut plus se fermer (état changé)' }); continue; }
+      if (rule === 'idle') { if (!ieq(s.status, 'idle')) { skipped.push({ title: s.title, why: T(`n'est plus inactive (statut ${psString(s.status)})`, `is no longer idle (status ${psString(s.status)})`) }); continue; } }
+      else if (!Actions.closable(s)) { skipped.push({ title: s.title, why: T('ne peut plus se fermer (état changé)', 'can no longer be closed (state changed)') }); continue; }
       const r = await this.close(Number(s.pid), false);
       if (r.error) skipped.push({ title: s.title, why: r.error }); else closed.push({ title: s.title, forced: Boolean(r.forced) });
     }
@@ -180,16 +184,16 @@ export class Actions {
   /** Invoke-Relaunch */
   async relaunch(pid: number): Promise<string | null> {
     const sess = await this.session(pid);
-    if (!sess) return 'session introuvable';
-    if (!ieq(sess.status, 'idle')) return `la session n'est pas inactive (statut ${psString(sess.status)})`;
+    if (!sess) return T('session introuvable', 'session not found');
+    if (!ieq(sess.status, 'idle')) return T(`la session n'est pas inactive (statut ${psString(sess.status)})`, `the session is not idle (status ${psString(sess.status)})`);
     const m = this.d.meta(sess.sessionId);
-    if (!m.path) return 'aucun transcript : la session ne pourrait pas être reprise';
-    if (!m.cwd || !isDir(m.cwd)) return 'dossier de lancement introuvable';
-    if (m.cwd.includes(';')) return SEMICOLON_REFUSED;      // AVANT de fermer : la session ne pourrait pas être rouverte
+    if (!m.path) return T('aucun transcript : la session ne pourrait pas être reprise', 'no transcript: the session could not be resumed');
+    if (!m.cwd || !isDir(m.cwd)) return T('dossier de lancement introuvable', 'launch folder not found');
+    if (m.cwd.includes(';')) return semicolonRefused();      // AVANT de fermer : la session ne pourrait pas être rouverte
     const was = alive(pid);
     let code = 2; try { code = await this.d.driver.call('send', { pid, line: '/exit' }); } catch { /* idem */ }
-    if (code === 5) return NOT_EMPTY;
-    if (was && (code !== 0 || !await waitExit(pid, 15000))) { kill(pid); if (!await waitExit(pid, 5000)) return "le process n'a pas pu être arrêté"; }
+    if (code === 5) return notEmpty();
+    if (was && (code !== 0 || !await waitExit(pid, 15000))) { kill(pid); if (!await waitExit(pid, 5000)) return T("le process n'a pas pu être arrêté", 'the process could not be stopped'); }
     try { rmSync(join(this.d.sessionsDir, `${pid}.json`), { force: true }); } catch { /* idem */ }
     return this.reopen(sess.sessionId);
   }
@@ -226,16 +230,16 @@ export class Actions {
       if (!s || seen.has(pid)) continue;
       seen.add(pid);
       const skip = (why: string): void => { skipped.push({ title: s.title, why }); };
-      if (s.headless) { skip('automate sans terminal'); continue; }
-      if (!ieq(s.status, 'idle')) { skip(`n'est pas inactive (statut ${psString(s.status)})`); continue; }
+      if (s.headless) { skip(T('automate sans terminal', 'automation without a terminal')); continue; }
+      if (!ieq(s.status, 'idle')) { skip(T(`n'est pas inactive (statut ${psString(s.status)})`, `is not idle (status ${psString(s.status)})`)); continue; }
       const m = this.d.meta(s.sessionId);
-      if (!m.path) { skip('aucun transcript : elle ne pourrait pas être reprise'); continue; }
-      if (!m.cwd || !isDir(m.cwd)) { skip('dossier de lancement introuvable'); continue; }
+      if (!m.path) { skip(T('aucun transcript : elle ne pourrait pas être reprise', 'no transcript: it could not be resumed')); continue; }
+      if (!m.cwd || !isDir(m.cwd)) { skip(T('dossier de lancement introuvable', 'launch folder not found')); continue; }
       const par = parents.get(pid); const kind = par === undefined ? undefined : shells.get(par);
-      if (!kind && m.cwd.includes(';')) { skip(SEMICOLON_REFUSED); continue; }
-      if (!alive(pid)) { skip('process introuvable'); continue; }
+      if (!kind && m.cwd.includes(';')) { skip(semicolonRefused()); continue; }
+      if (!alive(pid)) { skip(T('process introuvable', 'process not found')); continue; }
       let code = 2; try { code = await this.d.driver.call('send', { pid, line: '/exit' }); } catch { /* idem */ }
-      if (code !== 0) { skip(code === 5 ? NOT_EMPTY : 'console de la session inaccessible'); continue; }
+      if (code !== 0) { skip(code === 5 ? notEmpty() : T('console de la session inaccessible', 'session console unreachable')); continue; }
       const resume = `claude ${this.d.cfg.claudeArgs} --resume ${s.sessionId}`;
       out.push({ s, pid, cwd: m.cwd, shell: kind ? par! : null, line: kind ? SHELL_RESUME[kind]!(m.cwd, resume) : '', sameTab: false });
     }
@@ -244,7 +248,7 @@ export class Actions {
     const gone = await Promise.all(out.map((o) => waitExit(o.pid, 15000)));
     const ready: typeof out = [];
     for (const [i, o] of out.entries()) {
-      if (!gone[i]) { kill(o.pid); if (!await waitExit(o.pid, 5000)) { skipped.push({ title: o.s.title, why: "le process n'a pas pu être arrêté" }); log(o.s, o.pid, 3, 'pas sortie : relance non tapée'); continue; } }
+      if (!gone[i]) { kill(o.pid); if (!await waitExit(o.pid, 5000)) { skipped.push({ title: o.s.title, why: T("le process n'a pas pu être arrêté", 'the process could not be stopped') }); log(o.s, o.pid, 3, 'pas sortie : relance non tapée'); continue; } }
       try { rmSync(join(this.d.sessionsDir, `${o.pid}.json`), { force: true }); } catch { /* idem */ }
       ready.push(o);
     }
@@ -257,12 +261,12 @@ export class Actions {
         let code = 2; try { code = await this.d.driver.call('sendKeys', { pid: o.shell, items: [o.line, '\u0001Enter'] }); } catch { /* idem */ }
         if (code === 0) { o.sameTab = true; typed.push(o); continue; }
       }
-      if (o.cwd.includes(';')) { skipped.push({ title: o.s.title, why: 'fermée, non reprise : ' + SEMICOLON_REFUSED }); log(o.s, o.pid, 2, 'fermée, non reprise'); continue; }
+      if (o.cwd.includes(';')) { skipped.push({ title: o.s.title, why: T('fermée, non reprise : ' + SEMICOLON_REFUSED, 'closed, not resumed: ' + semicolonRefused()) }); log(o.s, o.pid, 2, 'fermée, non reprise'); continue; }
       tabs.push(o);
     }
     if (tabs.length) {
       try { await this.wt('-w 0 ' + tabs.map((o) => this.resumeTab(o.s.sessionId, o.cwd)).join(' ; ')); typed.push(...tabs); }
-      catch { for (const o of tabs) { skipped.push({ title: o.s.title, why: 'fermée, non reprise : nouvel onglet impossible (elle est dans « Fermées »)' }); log(o.s, o.pid, 2, 'fermée, non reprise'); } }
+      catch { for (const o of tabs) { skipped.push({ title: o.s.title, why: T('fermée, non reprise : nouvel onglet impossible (elle est dans « Fermées »)', 'closed, not resumed: could not open a new tab (it is in "Closed")') }); log(o.s, o.pid, 2, 'fermée, non reprise'); } }
     }
 
     // 4. Contrôle : une session relancée redevient listée. Celle qui ne revient pas est dite, pas comptée.
@@ -276,7 +280,7 @@ export class Actions {
     for (const o of typed) {
       const where = o.sameTab ? 'dans son onglet' : 'dans un nouvel onglet';
       if (back && !back.has(o.s.sessionId)) {
-        skipped.push({ title: o.s.title, why: `reprise demandée ${where}, mais pas réapparue : voir son onglet (sinon elle est dans « Fermées »)` });
+        skipped.push({ title: o.s.title, why: T(`reprise demandée ${where}, mais pas réapparue : voir son onglet (sinon elle est dans « Fermées »)`, `resume requested ${o.sameTab ? 'in its tab' : 'in a new tab'}, but it did not come back: check its tab (otherwise it is in "Closed")`) });
         log(o.s, o.pid, 6, `reprise demandée ${where}, pas réapparue`);
       } else { relaunched.push({ title: o.s.title, sameTab: o.sameTab }); log(o.s, o.pid, 0, `relancée ${where}`); }
       addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid: o.pid, sessionId: o.s.sessionId, title: o.s.title, text: '(relance groupée)' }));
@@ -289,12 +293,12 @@ export class Actions {
 
   /** Invoke-Reopen : nouvel onglet de la fenêtre Windows Terminal la plus récente. */
   async reopen(id: string): Promise<string | null> {
-    if (!GUID.test(id)) return 'identifiant invalide';
-    if ((await this.d.openSessions()).some((s) => s.sessionId === id)) return 'session déjà ouverte';
+    if (!GUID.test(id)) return T('identifiant invalide', 'invalid id');
+    if ((await this.d.openSessions()).some((s) => s.sessionId === id)) return T('session déjà ouverte', 'session already open');
     const m = this.d.meta(id);
-    if (!m.path) return 'transcript introuvable';
-    if (!m.cwd || !isDir(m.cwd)) return 'dossier de lancement introuvable';
-    if (m.cwd.includes(';')) return SEMICOLON_REFUSED;
+    if (!m.path) return T('transcript introuvable', 'transcript not found');
+    if (!m.cwd || !isDir(m.cwd)) return T('dossier de lancement introuvable', 'launch folder not found');
+    if (m.cwd.includes(';')) return semicolonRefused();
     await this.wt(`-w 0 ${this.resumeTab(id, m.cwd)}`);
     return null;
   }
@@ -309,7 +313,7 @@ export class Actions {
       if (!m.path || !m.cwd || !isDir(m.cwd) || m.cwd.includes(';')) { skipped++; continue; }
       tabs.push(this.resumeTab(id, m.cwd));
     }
-    if (!tabs.length) return { error: 'aucune session à rouvrir', opened: 0, skipped };
+    if (!tabs.length) return { error: T('aucune session à rouvrir', 'no session to reopen'), opened: 0, skipped };
     await this.wt('-w 0 ' + tabs.join(' ; '));
     return { error: null, opened: tabs.length, skipped };
   }
@@ -330,43 +334,43 @@ export class Actions {
   async newSession(cwd: string, prompt: string, model: string, branchRaw: string, forkRaw = '', tagsRaw: unknown = undefined, sidRaw = ''): Promise<string | null> {
     const want = cwd.replace(/\\+$/, '');
     const dir = (await this.d.newFolders()).find((f) => ieq(f.path, want));
-    if (!dir) return 'dossier non proposé';
-    if (model && !/^[A-Za-z0-9][A-Za-z0-9.\-\[\]]{0,60}$/.test(model)) return 'modèle invalide';
-    if (prompt.length > 20000) return 'premier message trop long';
+    if (!dir) return T('dossier non proposé', 'folder not offered');
+    if (model && !/^[A-Za-z0-9][A-Za-z0-9.\-\[\]]{0,60}$/.test(model)) return T('modèle invalide', 'invalid model');
+    if (prompt.length > 20000) return T('premier message trop long', 'first message too long');
     const forkFrom = forkRaw.trim();
     if (forkFrom) {
-      if (!GUID.test(forkFrom)) return 'session source : identifiant invalide';
-      if (!this.d.meta(forkFrom).path) return 'session source : transcript introuvable';
+      if (!GUID.test(forkFrom)) return T('session source : identifiant invalide', 'source session: invalid id');
+      if (!this.d.meta(forkFrom).path) return T('session source : transcript introuvable', 'source session: transcript not found');
     }
     // Tags choisis à la création : mêmes contrôles que la correction à la main, TOUS vérifiés avant d'ouvrir l'onglet.
     // Identifiant choisi par l'appelant (veilleur Teams : il doit retrouver la session qu'il ouvre) : jamais un identifiant déjà pris.
     const wantSid = sidRaw.trim();
     if (wantSid) {
-      if (!GUID.test(wantSid)) return 'identifiant de session invalide';
-      if (this.d.meta(wantSid).path) return 'identifiant de session déjà pris';
+      if (!GUID.test(wantSid)) return T('identifiant de session invalide', 'invalid session id');
+      if (this.d.meta(wantSid).path) return T('identifiant de session déjà pris', 'session id already taken');
     }
     const sid = wantSid || randomUUID(); const newTags: [string, string][] = [];
     if (tagsRaw !== undefined && tagsRaw !== null) {
-      if (!Array.isArray(tagsRaw)) return 'tags : liste attendue';
-      if (tagsRaw.length > 8) return 'tags : 8 au plus';
+      if (!Array.isArray(tagsRaw)) return T('tags : liste attendue', 'tags: a list is expected');
+      if (tagsRaw.length > 8) return T('tags : 8 au plus', 'tags: 8 at most');
       const vocab = this.d.tagVocab();
       for (const t of tagsRaw) {
         const o = (t !== null && typeof t === 'object' ? t : {}) as Record<string, unknown>;
         const a = psString(o.axis), v = psString(o.v).trim();
-        const e = checkTag(sid, a, v, vocab); if (e) return `tag ${a}:${v} : ${e}`;
+        const e = checkTag(sid, a, v, vocab); if (e) return T(`tag ${a}:${v} : ${e}`, `tag ${a}:${v}: ${e}`);
         newTags.push([a, v]);
       }
     }
     const branch = branchRaw.trim(); let prelude = ''; let startDir = dir.path;
     if (branch) {
       if (!/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*){0,2}$/i.test(branch) || branch.length > 80 || /\.\.|\.lock$|\/$/i.test(branch))
-        return 'nom de branche invalide (minuscules, chiffres, . _ - et /, ex. feat/hd-123456-x)';
+        return T('nom de branche invalide (minuscules, chiffres, . _ - et /, ex. feat/hd-123456-x)', 'invalid branch name (lowercase, digits, . _ - and /, e.g. feat/hd-123456-x)');
       const r = await run('git', ['-C', dir.path, 'rev-parse', '--show-toplevel']);
       const top = r.out.trim().replace(/\//g, '\\');
-      if (r.code !== 0 || !top) return "ce dossier n'est pas dans un dépôt git";
-      if ((await run('git', ['-C', top, 'rev-parse', '--verify', '-q', `refs/heads/${branch}`])).code === 0) return `la branche ${branch} existe déjà`;
+      if (r.code !== 0 || !top) return T("ce dossier n'est pas dans un dépôt git", 'this folder is not in a git repository');
+      if ((await run('git', ['-C', top, 'rev-parse', '--verify', '-q', `refs/heads/${branch}`])).code === 0) return T(`la branche ${branch} existe déjà`, `branch ${branch} already exists`);
       const wt = join(top, '.claude', 'worktrees', branch.split('/').at(-1)!);
-      if (existsSync(wt)) return `le dossier ${wt} existe déjà`;
+      if (existsSync(wt)) return T(`le dossier ${wt} existe déjà`, `folder ${wt} already exists`);
       let rel = dir.path.slice(Math.min(top.length, dir.path.length)).replace(/^\\+/, '');
       if (!dir.path.toLowerCase().startsWith(top.toLowerCase())) rel = '';
       const q = (s: string): string => "'" + s.replace(/'/g, "''") + "'";
@@ -377,7 +381,7 @@ export class Actions {
         + `Set-Location -LiteralPath ${q(join(wt, rel))}; `;
       startDir = top;
     }
-    if (startDir.includes(';')) return SEMICOLON_REFUSED;
+    if (startDir.includes(';')) return semicolonRefused();
     let cmd =`claude ${this.d.cfg.claudeArgs}`;
     if (model) cmd += ` --model ${model}`;
     if (forkFrom) cmd += ` --resume ${forkFrom} --fork-session`;
