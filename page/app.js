@@ -1,3 +1,51 @@
+// LANGUE DE LA PAGE — anglais ou français. Chaque texte affiché s'écrit T('texte français', 'English text') : les deux
+// versions côte à côte, sans table de clés. Choix : ?lang=en|fr (gardé), puis le dernier choix fait dans la page, puis
+// `ui.language` du fichier de configuration du poste, puis la langue du navigateur. Le serveur reçoit la langue dans
+// l'en-tête X-SD-Lang de chaque appel, pour ses propres messages.
+const LANG_KEY = 'cc.lang';
+let LANG = (() => {
+  const q = new URLSearchParams(location.search).get('lang');
+  if (q === 'en' || q === 'fr') { localStorage.setItem(LANG_KEY, q); return q; }
+  const saved = localStorage.getItem(LANG_KEY);
+  if (saved === 'en' || saved === 'fr') return saved;
+  return /^fr\b/i.test(navigator.language || '') ? 'fr' : 'en';
+})();
+const T = (fr, en) => LANG === 'fr' ? fr : en;
+document.documentElement.lang = LANG;
+{ const f = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => { const headers = new Headers(init.headers || {}); headers.set('X-SD-Lang', LANG); return f(input, { ...init, headers }); }; }
+/** Langue du poste (ui.language), appliquée tant qu'aucun choix n'a été fait dans la page. */
+function adoptPostLanguage(lang) {
+  if ((lang === 'en' || lang === 'fr') && lang !== LANG && !localStorage.getItem(LANG_KEY)) { LANG = lang; location.reload(); }
+}
+/** Choix fait dans la page : gardé, puis la page se recharge dans cette langue. */
+function setLanguage(lang) { localStorage.setItem(LANG_KEY, lang); location.reload(); }
+
+/** Textes fixes de index.html (écrits en français dans le fichier) : traduits au chargement. */
+function applyStaticText() {
+  const set = (id, attr, fr, en) => { const e = document.getElementById(id); if (e) { if (attr) e.setAttribute(attr, T(fr, en)); else e.textContent = T(fr, en); } };
+  document.title = T('Sessions Claude Code', 'Claude Code sessions');
+  document.querySelector('.sidehead h1').textContent = T('Sessions Claude Code', 'Claude Code sessions');
+  set('resizer', 'title', 'Glisser pour redimensionner · double-clic : largeur par défaut', 'Drag to resize · double-click: default width');
+  set('q', 'placeholder', 'Rechercher…  ( / )', 'Search…  ( / )');
+  set('q', 'title', 'Titre, prompt, numéro de PR, dossier, identifiant', 'Title, prompt, PR number, folder, id');
+  set('favonly', 'title', "N'afficher que les favoris", 'Show favourites only');
+  set('sortbtn', 'title', 'Ordre dans chaque groupe : dernière activité ou date de création', 'Order within each group: last activity or creation date');
+  set('bell', 'title', 'Notifications récentes', 'Recent notifications');
+  set('chatsbtn', 'title', "Conversations Teams : tous tes chats actifs, ceux où c'est à toi de répondre, ceux à voir  ( m )", 'Teams conversations: all your active chats, the ones waiting for your reply, the ones to look at  ( m )');
+  set('launchbtn', 'title', 'Lanceur (diagnostic auto) : runs en cours, tickets qui attendent, runs récents  ( l )', 'Launcher (automatic diagnosis): running runs, waiting tickets, recent runs  ( l )');
+  set('boardbtn', 'title', 'Tableau par projet : à cadrer → en cours → en recette → à merger → livré  ( t )', 'Board by project: to scope → in progress → in review → to merge → shipped  ( t )');
+  set('bcbtn', 'title', 'Écrire le même message à plusieurs sessions', 'Send the same message to several sessions');
+  set('newbtn', 'title', 'Lancer une nouvelle session  ( + )', 'Start a new session  ( + )');
+  set('mfind', 'title', 'Afficher les passages trouvés dans les conversations', 'Show the matches found in conversations');
+  set('mfind', null, 'Passages trouvés dans les conversations →', 'Matches found in conversations →');
+  set('mback', 'title', 'Revenir à la liste des sessions  ( Échap )', 'Back to the session list  ( Esc )');
+  set('mback', null, '← Sessions', '← Sessions');
+  const lb = document.getElementById('langbtn');
+  if (lb) { lb.textContent = LANG === 'fr' ? 'EN' : 'FR'; lb.title = T('Afficher la page en anglais', 'Show the page in French'); lb.onclick = () => setLanguage(LANG === 'fr' ? 'en' : 'fr'); }
+}
+applyStaticText();
+
 const LABEL = { waiting:'bloquée sur une question', ask:'attend ta décision', done:'terminé, à relire', busy:'travaille', shell:'attend sa commande en arrière-plan', idle:'inactive', auto:'automate sans terminal (claude -p)', teams:'attend un retour Teams', closed:'fermée' };
 const GROUPS = [
   { key:'todo',   title:'À traiter',  states:['waiting','ask','done'], asc:true },
@@ -3319,7 +3367,7 @@ async function tick() {
     ticking = false; return;
   }
   try {
-    data = srv; favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
+    data = srv; adoptPostLanguage(data.ui && data.ui.language); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
     if (linkUp(data.server)) return;
     renderList(); renderDetail(); refreshScreen(); refreshConv(); try { renderQuota(); } catch (e) { console.log('[sessions] quota :', e); }
     if (pendingRoute) { const r = pendingRoute; pendingRoute = null; applyRoute(r); }      // ?view= : écran d'arrivée, une fois l'état connu

@@ -5,6 +5,7 @@
 // le reste passe par une FILE traitée une requête à la fois (la « boucle » : actions, recherche, dossiers, lanceur),
 // entre deux calculs d'état — jamais en même temps qu'eux. Mêmes en-têtes, mêmes codes, mêmes refus d'accès.
 // En plus du .ps1 : --allow-write absent ⇒ toute action est refusée (serveur À CÔTÉ en lecture seule).
+import { langOf, withLang } from './i18n.ts';
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { createServer as createTcpServer, connect, type Server as TcpServer, type Socket } from 'node:net';
 import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -160,7 +161,7 @@ export class Server {
         // Arrêt en cours : refus net, que la page sait lire (bandeau de reconnexion) — jamais une requête acceptée puis coupée.
         if (this.#draining) { req.resume(); res.setHeader('Connection', 'close'); json(res, 503, { error: "serveur en cours d'arrêt" }); return; }
         this.#inflight++; res.once('close', () => { this.#inflight--; });
-        this.#handle(req, res).catch((e) => { this.logError(`${req.url} : ${(e as Error).message}`); reply(res, 500, null, ''); });
+        withLang(langOf(req.headers['x-sd-lang']), () => this.#handle(req, res)).catch((e) => { this.logError(`${req.url} : ${(e as Error).message}`); reply(res, 500, null, ''); });
       });
       s.keepAliveTimeout = 5000;
       await new Promise<void>((ok, ko) => { s.once('error', ko); s.listen(this.cfg.port, host, () => { s.off('error', ko); ok(); }); })
@@ -366,7 +367,7 @@ export class Server {
         this.#wake = () => { clearTimeout(t); this.#wake = null; ok(this.#queue.shift()); };
       });
       if (!item) continue;
-      const isAction = await this.#process(item);
+      const isAction = await withLang(langOf(item.req.headers['x-sd-lang']), () => this.#process(item));
       if (isAction) this.#dirty = true;
     }
   }

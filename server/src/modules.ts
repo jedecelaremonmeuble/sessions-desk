@@ -40,8 +40,8 @@ import { isAbsolute, join } from 'node:path';
 
 export interface LauncherModule { root: string; cli: string; python: string; ticketApi: string; cardsApi: string }
 /** Ce que la page affiche et qui dépend du poste : préfixe de chemin à ne pas répéter, adresses des PR et des tickets. */
-export interface UiConfig { pathPrefix: string; prUrl: string; ticketUrl: string; ticketLabel: string }
-export const NO_UI: UiConfig = { pathPrefix: '', prUrl: '', ticketUrl: '', ticketLabel: '' };
+export interface UiConfig { pathPrefix: string; prUrl: string; ticketUrl: string; ticketLabel: string; language: '' | 'en' | 'fr' }
+export const NO_UI: UiConfig = { pathPrefix: '', prUrl: '', ticketUrl: '', ticketLabel: '', language: '' };
 /** Ordre « Lancer maintenant » d'un automate : `python <cli> <args…>`. `confirm` non vide ⇒ la page demande avant. */
 export interface AutomationOrder { id: string; label: string; args: string[]; confirm: string }
 export interface AutomationDef {
@@ -131,7 +131,9 @@ const httpUrl = (v: unknown): string => (typeof v === 'string' && /^https?:\/\/[
 export function parseUi(raw: unknown, env: PathEnv): UiConfig {
   const u = obj(obj(raw)?.ui); if (!u) return { ...NO_UI };
   const label = typeof u.ticketLabel === 'string' ? u.ticketLabel.trim().slice(0, 30) : '';
-  return { pathPrefix: absPath(u.pathPrefix, env), prUrl: httpUrl(u.prUrl), ticketUrl: httpUrl(u.ticketUrl), ticketLabel: label };
+  // language : langue de la page sur ce poste ('en' ou 'fr') ; vide = celle du navigateur. Un choix fait dans la page l'emporte.
+  const language = u.language === 'en' || u.language === 'fr' ? u.language : '';
+  return { pathPrefix: absPath(u.pathPrefix, env), prUrl: httpUrl(u.prUrl), ticketUrl: httpUrl(u.ticketUrl), ticketLabel: label, language };
 }
 
 /** Options passées à `claude` au lancement d'une session : une ligne de 200 caractères au plus, sans « ; » (qui
