@@ -51,12 +51,27 @@ function Stop-NodeServer {
     $pidFile = Join-Path $env:TEMP "sessions-desk-node-$Port.pid"
     $old = 0
     if ((Test-Path $pidFile) -and [int]::TryParse("$(Get-Content $pidFile -Raw)".Trim(), [ref]$old)) { $ids += $old }
-    foreach ($id in ($ids | Sort-Object -Unique)) {
+    $ours = @(foreach ($id in ($ids | Sort-Object -Unique)) {
         $p = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
         if (-not $p -or $p.Name -ne 'node.exe' -or $p.CommandLine -notmatch 'server[\\/]src[\\/]main\.ts') { continue }
         $pp = if ($p.CommandLine -match '--port\s+(\d+)') { [int]$Matches[1] } else { 8767 }
-        if ($pp -ne $Port) { continue }
-        Write-Host "arrêt du serveur Node (pid $id)"
+        if ($pp -eq $Port) { $id }
+    })
+    # ARRÊT PROPRE d'abord (/api/stop) : le serveur refuse les nouvelles requêtes, va au bout de celles reçues (8 s
+    # au plus) et sort de lui-même. La force — qu'aucun process ne peut intercepter sous Windows — ne sert plus qu'au
+    # serveur figé ou muet.
+    if ($ours) {
+        $t0 = Get-Date
+        try { $null = Invoke-RestMethod "http://localhost:$Port/api/stop" -TimeoutSec 5; $asked = $true } catch { $asked = $false }
+        if ($asked) {
+            foreach ($id in $ours) { Wait-Process -Id $id -Timeout 12 -ErrorAction SilentlyContinue }
+            $left = @($ours | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+            if (-not $left) { Write-Host "serveur Node arrêté proprement (pid $($ours -join ', '), $([int]((Get-Date) - $t0).TotalMilliseconds) ms)" }
+        }
+    }
+    foreach ($id in $ours) {
+        if (-not (Get-Process -Id $id -ErrorAction SilentlyContinue)) { continue }
+        Write-Host "arrêt FORCÉ du serveur Node (pid $id) : il n'a pas répondu à /api/stop ou n'est pas sorti à temps"
         Stop-Process -Id $id -Force
     }
     for ($i = 0; $i -lt 20 -and (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 250 }
