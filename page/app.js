@@ -1014,7 +1014,7 @@ function renderLauncher() {
     row.append(h);
     if (r.detail) row.append(el('div', 'ld', r.detail));
     { const lv = r.running ? runLiveLine(r.live, Date.now()) : null;
-      if (lv) row.append(el('div', 'ld runlive-l' + (lv.stale ? ' stale' : ''), [lv.text, lv.todos, lv.stale ? '⚠️ ' + lv.moved : null].filter(Boolean).join(' · '))); }
+      if (lv) row.append(el('div', 'ld runlive-l' + (lv.stale ? ' stale' : ''), [lv.stale ? '⚠️ ' + lv.moved : null, lv.text, lv.todos].filter(Boolean).join(' · '))); }
     const fl = el('div', 'lf');
     for (const f of r.files) { const b = el('button', 'quick' + (launchView === r.dir + '/' + f.name ? ' on' : ''), f.name); b.title = Math.max(1, Math.round(f.size / 1024)) + T(' Ko', ' KB'); b.onclick = () => viewLaunchFile(r.dir, f.name); fl.append(b); }
     if (r.sessionId && !r.running) { const b = el('button', 'quick', '↻ conversation'); b.title = T('Rouvrir cette conversation dans un onglet (claude --resume ' + r.sessionId.slice(0, 8) + '…)', 'Reopen this conversation in a tab (claude --resume ' + r.sessionId.slice(0, 8) + '…)'); b.onclick = () => openRunConversation(r); fl.append(b); }
@@ -1333,7 +1333,8 @@ function runSub(it) {
   const r = it.run, multi = it.runCount > 1;
   const tail = multi ? [phaseChain(it.phases), it.runCount + ' runs' + (it.costTotal != null ? ' · ' + money(it.costTotal) : '')] : [];
   const lv = r.running ? runLiveLine(r.live, Date.now()) : null;
-  if (lv) return [lv.text].concat(lv.stale ? ['⚠️ ' + lv.moved] : [], tail).join(' · ');
+  // Immobile : l'alerte passe EN TÊTE — en fin de ligne, l'ellipse de la liste la mangerait.
+  if (lv) return (lv.stale ? ['⚠️ ' + lv.moved] : []).concat([lv.text], tail).join(' · ');
   if (r.running) return [T('travaille' + (r.at ? ' depuis ' + ago(Date.now() - r.at) : ''), 'working' + (r.at ? ' for ' + ago(Date.now() - r.at) : ''))].concat(tail, it.reply ? [lastLine(it.reply)] : []).join(' · ');
   return [it.wait && STAGE_FR[it.wait.stage] ? STAGE_FR[it.wait.stage] : null, it.outcome || null, it.scripted ? T('étape scriptée', 'scripted step') : null]
     .concat(multi ? tail : [r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.costUsd != null ? money(r.costUsd) : null]).filter(Boolean).join(' · ') || '—';
