@@ -125,6 +125,13 @@ td, th { text-align:left; padding:6px 12px; border-bottom:1px solid var(--line);
 td.ok { color:var(--busy); } td.ko { color:var(--waiting); } .empty { color:var(--mute); }
 .tiles { display:flex; gap:10px; flex-wrap:wrap; } .tile { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--c); border-radius:8px; padding:8px 16px; min-width:120px; }
 .tile b { display:block; font-size:22px; font-variant-numeric:tabular-nums; } .tile span { color:var(--mute); font-size:12px; }
+/* Tuile cliquable : filtre la liste sur cet état ; « on » = filtre actif, « zero » = rien dans cet état. */
+button.tile { font:inherit; color:inherit; text-align:left; cursor:pointer; transition:box-shadow .12s, transform .12s, background .12s; }
+button.tile:hover { border-color:var(--line); border-left-color:var(--c); box-shadow:0 2px 8px rgba(0,0,0,.08); transform:translateY(-1px); }
+button.tile.on:hover { border-color:var(--c); }
+button.tile:focus-visible { outline:2px solid var(--c); outline-offset:2px; }
+button.tile.on { background:color-mix(in srgb, var(--c) 10%, var(--card)); border-color:var(--c); box-shadow:inset 0 0 0 1px var(--c); }
+button.tile.zero b { color:var(--mute); font-weight:500; }
 #newbtn { padding:2px 11px; color:var(--mute); font-weight:700; font-size:17px; line-height:1; } #newbtn.on { color:var(--shell); border-color:var(--shell); }
 #newform { display:grid; grid-template-columns:150px minmax(0, 640px); gap:10px 14px; align-items:start; margin-top:18px; }
 #newform label { color:var(--mute); padding-top:7px; }
@@ -161,7 +168,9 @@ mark { background:#fde68a; color:inherit; border-radius:2px; padding:0 1px; } @m
 .gitbox .gk { display:inline-block; width:72px; color:var(--mute); }
 /* Après un redémarrage de Windows : sessions à rouvrir. */
 .reboot { background:var(--card); border:1px solid var(--line); border-left:4px solid var(--shell); border-radius:8px; padding:12px 16px; margin-top:18px; }
-.reboot .rt { font-weight:600; margin-bottom:8px; }
+.reboot .rt { font:inherit; font-weight:600; color:inherit; background:none; border:0; padding:0; margin-bottom:8px; cursor:pointer; text-align:left; display:block; width:100%; }
+.reboot .rt:hover { color:var(--shell); } .reboot .rt .car { display:inline-block; width:1em; color:var(--mute); } .reboot .rt .rm { font-weight:400; }
+.reboot.folded .actions { margin-top:4px; }
 .reboot .rl { display:flex; flex-direction:column; gap:4px; max-height:46vh; overflow:auto; }
 .reboot label { display:grid; grid-template-columns:20px minmax(0, 1fr) auto; gap:8px; align-items:baseline; cursor:pointer; }
 .reboot .rm { color:var(--mute); font-size:12px; white-space:nowrap; }
