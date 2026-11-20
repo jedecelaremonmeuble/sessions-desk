@@ -2216,9 +2216,30 @@ function renderNew() {
   const pr = el('textarea'); pr.id = 'nf-prompt'; pr.maxLength = 20000; pr.spellcheck = true;
   if (newPrefill) { pr.value = newPrefill.prompt; pr.rows = 8; }
   pr.placeholder = 'Facultatif — ex. « /cadrage HD-123456 » ou « regarde pourquoi … »';
-  const mo = el('input'); mo.id = 'nf-model'; mo.setAttribute('list', 'nf-models'); mo.autocomplete = 'off'; mo.spellcheck = false;
-  mo.placeholder = 'par défaut : celui de ta config'; mo.value = localStorage.getItem('cc.newmodel') || '';
-  const dl = el('datalist'); dl.id = 'nf-models'; for (const m of ['opus', 'sonnet', 'haiku', 'fable']) { const o = el('option'); o.value = m; dl.append(o); }
+  // Modèle : un groupe de boutons (un seul actif) plutôt qu'une liste ; « Autre… » ouvre la saisie libre pour un
+  // identifiant complet (ex. claude-opus-5-5[1m]). Le champ #nf-model reste la valeur envoyée par launchNew.
+  const mo = el('input'); mo.id = 'nf-model'; mo.autocomplete = 'off'; mo.spellcheck = false;
+  mo.placeholder = 'identifiant complet — ex. claude-opus-5-5[1m]'; mo.value = localStorage.getItem('cc.newmodel') || '';
+  const MODELS = [['', 'Par défaut', 'celui de ta config'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku'], ['fable', 'Fable']];
+  const mg = el('div', 'nf-seg'); mg.setAttribute('role', 'radiogroup'); mg.setAttribute('aria-label', 'Modèle');
+  const segs = [];
+  const pickModel = (key, focus) => {
+    const other = key === '*';
+    if (!other) mo.value = key; else if (MODELS.some(([k]) => k && k === mo.value)) mo.value = '';   // « Autre… » part d'un champ vide
+    for (const b of segs) { const on = b.dataset.k === key; b.classList.toggle('sel', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1; }
+    mo.hidden = !other; if (other && focus) mo.focus();
+  };
+  for (const [k, lab, tip] of [...MODELS, ['*', 'Autre…', 'saisir un identifiant de modèle complet']]) {
+    const b = el('button', null, lab); b.type = 'button'; b.dataset.k = k; b.setAttribute('role', 'radio'); if (tip) b.title = tip;
+    b.onclick = () => pickModel(k, true);
+    b.onkeydown = e => {                                    // flèches : comme un groupe de radios
+      const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
+      if (!d) return; e.preventDefault(); const n = segs[(segs.indexOf(b) + d + segs.length) % segs.length]; pickModel(n.dataset.k, false); n.focus();
+    };
+    segs.push(b); mg.append(b);
+  }
+  pickModel(MODELS.some(([k]) => k === mo.value) ? mo.value : '*', false);
+  const mbox = el('div', 'nf-model'); mbox.append(mg, mo);
   const br = el('input'); br.id = 'nf-branch'; br.autocomplete = 'off'; br.spellcheck = false;
   br.placeholder = 'facultatif — ex. feat/ma-branche : worktree neuf sur origin/master';
   const tbox = el('div', 'nf-tags'); tbox.id = 'nf-tags';
@@ -2241,7 +2262,7 @@ function renderNew() {
            el('label', null, 'Pièces jointes'), attachBar('new'),
            el('label', null, 'Tags'), tbox, tdl,
            el('div', 'hint', 'Entrée ajoute · clic sur un tag le retire. Domaine et outil : listes fermées ; sinon le mot devient une fonction (power-dial). Posés comme une correction à la main : l’étiqueteur ne les retire jamais.'),
-           el('label', null, 'Modèle'), mo, dl,
+           el('label', null, 'Modèle'), mbox,
            el('label', null, 'Branche neuve'), br,
            el('div', 'hint', 'Remplie : l’onglet récupère origin/master, crée la branche dans un worktree neuf (.claude\\worktrees\\<dernier segment>) et y lance la session, au même sous-dossier. Vide : session dans le dossier choisi.'),
            acts, el('div', 'hint', 'Ctrl+Entrée lance · Échap annule'));
