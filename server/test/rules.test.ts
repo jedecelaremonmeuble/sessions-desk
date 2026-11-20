@@ -104,6 +104,14 @@ describe('écran et envoi', () => {
     expect(Dashboard.screenIdle('✻ Pondering… (3s)\n❯ ')).toBe(false);
     expect(Dashboard.screenIdle('')).toBe(false);
   });
+  test('ligne d\'activité : verbe et tokens du tour lus sur l\'écran', () => {
+    expect(Dashboard.screenSpin('x\n✻ Pondering… (12s · ↓ 1.2k tokens · esc to interrupt)\n❯ ')).toEqual({ verb: 'Pondering', tokens: '↓ 1.2k' });
+    expect(Dashboard.screenSpin('✶ Cogitating… (esc to interrupt · ctrl+t to show todos)\n❯ ')).toEqual({ verb: 'Cogitating', tokens: null });
+    expect(Dashboard.screenSpin('· Writing tests…\n❯ ')).toEqual({ verb: 'Writing tests', tokens: null });
+    expect(Dashboard.screenSpin('❯ Relis ça…\n⏺ Lecture…')).toBeNull();   // invite et outil : pas la ligne d'activité
+    expect(Dashboard.screenSpin('❯ \n────\n  ? for shortcuts')).toBeNull();
+    expect(Dashboard.screenSpin(null)).toBeNull();
+  });
   test('ligne envoyée : sauts de ligne et tabulations ⇒ espace, contrôles retirés', () => {
     expect(netTrim(cleanLine('  a\r\n\tb\u0007c\u007f '))).toBe('a bc');
   });
