@@ -24,6 +24,14 @@ function adoptPostLanguage(lang) {
 }
 /** Choix fait dans la page : gardé, puis la page se recharge dans cette langue. */
 function setLanguage(lang) { localStorage.setItem(LANG_KEY, lang); location.reload(); }
+/** Bascule de langue, dans l'en-tête de la vue d'ensemble. */
+function langSwitch() {
+  const b = document.createElement('button'); b.className = 'langsw';
+  b.textContent = LANG === 'fr' ? 'English' : 'Français';
+  b.title = LANG === 'fr' ? 'Afficher la page en anglais' : 'Show the page in French';
+  b.onclick = () => setLanguage(LANG === 'fr' ? 'en' : 'fr');
+  return b;
+}
 
 /** Textes fixes de index.html (écrits en français dans le fichier) : traduits au chargement. */
 function applyStaticText() {
@@ -45,8 +53,6 @@ function applyStaticText() {
   set('mfind', null, 'Passages trouvés dans les conversations →', 'Matches found in conversations →');
   set('mback', 'title', 'Revenir à la liste des sessions  ( Échap )', 'Back to the session list  ( Esc )');
   set('mback', null, '← Sessions', '← Sessions');
-  const lb = document.getElementById('langbtn');
-  if (lb) { lb.textContent = LANG === 'fr' ? 'EN' : 'FR'; lb.title = T('Afficher la page en anglais', 'Show the page in French'); lb.onclick = () => setLanguage(LANG === 'fr' ? 'en' : 'fr'); }
 }
 applyStaticText();
 
@@ -2884,7 +2890,7 @@ function renderPromptsOnly(it) {
 
 function renderOverview() {
   const head = $('head'), body = $('body'); const items = allItems().filter(it => !it.hidden);
-  head.className = ''; head.replaceChildren(el('div', 'dtitle', T('Vue d\'ensemble', 'Overview')));
+  head.className = ''; head.replaceChildren(el('div', 'dtitle', T('Vue d\'ensemble', 'Overview')), langSwitch());
   const tiles = el('div', 'tiles');
   for (const st of ['waiting', 'ask', 'done', 'busy', 'shell', 'idle', 'auto', 'closed']) {
     const t = el('div', 'tile ' + st); t.append(el('b', null, items.filter(it => it.state === st).length), el('span', null, LABEL[st])); tiles.append(t);
