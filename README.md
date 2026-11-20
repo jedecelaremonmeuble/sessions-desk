@@ -98,7 +98,7 @@ server never fails to start because of this file.
 | `launcher` | A view of runs started by an external orchestrator (headless sessions), their files, alerts and orders | `root`: the orchestrator's data folder · `cli`: the command that receives orders · `ticketApi`: the command that reads a ticket · `cardsApi`: the command that lists and answers the question cards the orchestrator addresses to you (`pending`, `cards <ticket>`, `answer <ticket> <card> --answers-file <file>`, one JSON line each; it alone holds the ticket system's address and token) · `python` |
 | `teams` | Sessions that wait for a Microsoft Teams reply or an Outlook email reply (opt-in `"mail": true`), with reminders; and a per-conversation view (💬) of all your active Teams chats — yours to answer, to look at, up to date — whether or not a session follows them, with full messages and an optional reply box that posts in your name on your click, and a way to hand a thread over to a session that then receives what follows (reply is opt-in `"reply": true`; the view itself is opt-in `"conversations": { "enabled": true }` in the watcher's own configuration file) | `enabled` |
 | `tickets` | The "current subject" of a session, from ticket references in your prompts | `pattern`: a regular expression |
-| `quota` | An account usage banner | `file`: a usage file written by a collector of your own |
+| `quota` | An account usage banner: 5-hour window, week (all models) and week per model, with a projection to the weekly reset | `source`: `"usage-probe"` (built in, see below) · or `file`: a usage file written by a collector of your own |
 | `automations` | Your scheduled scripts (cleanups, reports…): one group per script in the list, a card in the overview, the detail of a pass (summary, files, live conversation of its `claude -p` session), failure notifications and « run now » buttons | A list: `id`, `label`, `icon`, `history` (its JSONL history) · `runs` (folder of its passes) · `everyMinutes` · `cli` + `python` + `orders` (`id`, `label`, `args`, `confirm`) |
 
 The `launcher` module is published as an example of plugging an orchestrator in; it expects that orchestrator's
@@ -116,6 +116,27 @@ The `automations` module reads one key per history line, written by your script:
 health of the pass itself and drives notifications (every `error`, a second `warn` in a row); `quiet` passes get no
 row, only a count in the group header; `files` are the only files of `runDir` the page may open, and `runDir` must be
 under `runs`. A running `claude -p` whose command line cites a folder under `runs` is shown as the running pass.
+
+### Account usage
+
+With `"quota": { "source": "usage-probe" }`, the server measures the usage of the signed-in Claude account every
+15 minutes by running Claude Code's own `/usage` screen without a model call:
+
+```
+claude -p /usage --output-format json --setting-sources project --strict-mcp-config --no-session-persistence
+```
+
+- **No token is read or used**: the probe never opens Claude Code's credentials and calls no Anthropic address
+  itself. It costs nothing (0 turns, $0).
+- It runs from an empty folder (`%LOCALAPPDATA%\sessions-desk\probe`) without your user settings, so none of your
+  hooks fire and none of your MCP servers start (`--strict-mcp-config`); it leaves no transcript or history entry.
+  It never appears in the session list.
+- Only the subscription line and the `Current …` lines of the screen are kept; the rest (paths, skills, MCP
+  servers) is discarded.
+- If Claude Code ever answers with a model call instead (a version that would no longer know `/usage`), the probe
+  stops until the server restarts.
+- Several accounts on one profile (switching with `/login`): the signed-in account is measured, the others keep
+  their last measure, shown with its age. After switching, "Restart sessions" puts every session on the new account.
 
 ### Tags
 

@@ -8,7 +8,7 @@
     },
     "teams": { "enabled": true },
     "tickets": { "pattern": "ABC-\\d{4}" },
-    "quota": { "file": "%LOCALAPPDATA%\\my-orchestrator\\claude-usage.json" },
+    "quota": { "source": "usage-probe" },
     "automations": [
       {
         "id": "cleanup",

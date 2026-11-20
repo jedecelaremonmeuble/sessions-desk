@@ -13,6 +13,7 @@ import { modulesView } from './modules.ts';
 import { lastNewsAt } from './quiet.ts';
 import { pendingQueue, type QueuedPrompt } from './queued.ts';
 import { activeAccountUuid, markActiveAccount, readClaudeUsage, promptSuggestionSetting } from './usage.ts';
+import { isProbeCwd } from './usage-probe.ts';
 import { AskJudge, claudeAskAsync } from './asks-judge.ts';
 import { T } from './i18n.ts';
 import {
@@ -481,6 +482,7 @@ export class Dashboard {
       const s = readJson(join(this.sessionsDir, name)) as Record<string, unknown> | undefined;
       if (!s || typeof s !== 'object') continue;
       if (!alive.has(Math.trunc(Number(s.pid) || 0))) continue;
+      if (this.cfg.modules.quota?.probe && isProbeCwd(this.cfg, s.cwd)) continue;   // sonde d'usage : jamais dans la liste
       const sid = psString(s.sessionId);
       const m = this.meta(sid);
       const pr = this.getPrompts(sid, 6);

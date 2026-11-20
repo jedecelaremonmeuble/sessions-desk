@@ -29,7 +29,9 @@
 //   (runs\, state.json, stages.json, heartbeat.stamp) ; `cli` = la commande qui reçoit les ordres tapés dans la page.
 // - teams    : attentes de réponse Teams tenues par teams-watcher.ts (state/teams-waits).
 // - tickets  : motif des références de ticket citées dans les prompts (le « sujet actuel » d'une session).
-// - quota    : fichier de relevé du quota, écrit par un collecteur qui n'est PAS dans ce dépôt.
+// - quota    : relevé du quota par compte Claude — `{ "source": "usage-probe" }` : la sonde intégrée
+//              (usage-probe.ts, écran /usage de Claude Code, sans jeton) ; ou `{ "file": … }` : le relevé d'un
+//              collecteur extérieur.
 // - automations : scripts planifiés du poste (automations.ts). Chacun tient un historique JSONL dont chaque ligne
 //   porte une clé `pass` au format commun ; `runs` = dossier de ses passes (fichiers servis, passe en cours) ;
 //   `cli` + `orders` = « Lancer maintenant ». Un automate mal décrit est ignoré, sans éteindre les autres.
@@ -56,7 +58,7 @@ export interface Modules {
   launcher: LauncherModule | null;
   teams: boolean;
   tickets: { pattern: string } | null;
-  quota: { file: string } | null;
+  quota: { file: string; probe?: boolean } | null;
   automations: AutomationDef[];
 }
 export const NO_MODULES: Modules = { launcher: null, teams: false, tickets: null, quota: null, automations: [] };
@@ -123,7 +125,11 @@ export function parseModules(raw: unknown, env: PathEnv): Modules {
   if (l && root) out.launcher = { root, cli: absPath(l.cli, env), python: typeof l.python === 'string' && l.python.trim() ? l.python.trim() : 'python', ticketApi: absPath(l.ticketApi, env), cardsApi: absPath(l.cardsApi, env) };
   out.teams = obj(m.teams)?.enabled === true;
   const pat = ticketPattern(obj(m.tickets)?.pattern); if (pat) out.tickets = { pattern: pat };
-  const q = obj(m.quota); const file = q ? absPath(q.file, env) : ''; if (file) out.quota = { file };
+  // quota : { "source": "usage-probe" } = la sonde intégrée (usage-probe.ts) écrit et lit son propre relevé ;
+  // sinon { "file": … } = relevé d'un collecteur extérieur (forme historique, toujours lue).
+  const q = obj(m.quota);
+  if (q && q.source === 'usage-probe') out.quota = { file: join(env.localAppData, 'sessions-desk', 'usage-probe.json'), probe: true };
+  else { const file = q ? absPath(q.file, env) : ''; if (file) out.quota = { file }; }
   return out;
 }
 
