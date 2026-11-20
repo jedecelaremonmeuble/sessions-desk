@@ -205,7 +205,8 @@ export async function buildFixture(): Promise<Fixture> {
   writeFileSync(join(launchRoot, 'claude-usage.json'), JSON.stringify({
     'uuid-1': { alias: 'a@exemple.fr', plan: 'max', weeklyPct: 92, weeklyResetsAt: iso(t0 + 86400000), fiveHourPct: 10, fiveHourResetsAt: null,
       weeklyProjectedPct: 120, weeklyFullAt: iso(t0 + 3600000), measuredAt: iso(t0 - 60000), status: 'ok',
-      limitsJson: JSON.stringify([{ kind: 'weekly_scoped', percent: 43, scope: { model: { display_name: 'Fable' } }, resets_at: iso(t0 + 86400000), is_active: true, severity: 'warn' }]) },
+      limitsJson: JSON.stringify([{ kind: 'weekly_scoped', percent: 43, scope: { model: { display_name: 'Fable' } }, resets_at: iso(t0 + 86400000), is_active: true, severity: 'warn' },
+        { kind: 'weekly_scoped', percent: 95, scope: { model: { display_name: 'Opus' } }, resets_at: iso(t0 + 86400000), is_active: false, severity: 'critical' }]) },
     'uuid-2': { alias: 'b@exemple.fr', plan: 'pro', weeklyPct: null, weeklyResetsAt: null, limitsJson: 'None', measuredAt: '2026-11-16T17:20:07Z', status: 'error:network' },
   }));
   // Muet depuis 50 min (> 45) : « arrêté » même si un VRAI run du lanceur tourne sur le poste (les deux serveurs lisent

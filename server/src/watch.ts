@@ -1,6 +1,7 @@
 // SURVEILLANCE (toutes les 2 s, page ouverte ou non) — Watch-Waiting, Send-Notif, Update-SeenFromForeground,
-// Register-FocusProtocol du .ps1. Rôle « side » (à côté du .ps1) : seules les lectures (état git, qui va dans un
-// fichier suffixé) tournent ; notifications, « vu », alertes du lanceur et état des PR restent au .ps1.
+// Register-FocusProtocol, Send-TeamsAlerts du .ps1. Rôle « side » (à côté du .ps1) : seules les lectures (état git,
+// qui va dans un fichier suffixé) tournent ; notifications, « vu », alertes du lanceur et Teams, état des PR restent
+// au .ps1.
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { refreshPrs, startGitRefresh } from './gitpr.ts';
@@ -19,6 +20,7 @@ export class Watch {
   #prAsked = 0;
   #prRunning = false;
   #gitAsked = 0;
+  #teamsAlerted = new Set<string>();
 
   constructor(d: Dashboard, launcher: Launcher) { this.d = d; this.launcher = launcher; }
 
@@ -67,6 +69,7 @@ export class Watch {
     try { this.#updateGitState(st.sessions); } catch { /* idem */ }
     if (!cfg.primary) return;
     if (this.launcher.enabled) try { await this.launcher.runAlerts((t, x, hd) => this.notify('launcher', { sessionId: null, pid: 0 }, t, x, hd)); } catch { /* idem */ }
+    if (cfg.modules.teams) try { for (const a of teamsAlertsDue(this.d.teamsWaits(), this.#teamsAlerted, st)) this.notify('waiting', a.session, a.title, a.text); } catch { /* idem */ }
     try { await this.#seenFromForeground(st.sessions); } catch { /* idem */ }
     for (const s of st.sessions) {
       if (s.headless) continue;
@@ -92,6 +95,28 @@ export class Watch {
     }
     this.#seeded = true;
   }
+}
+
+/** Send-TeamsAlerts : une attente Teams restée sans réponse après les relances (alertedAt posé par teams-watcher.ts)
+ * ⇒ une notification Windows, une seule fois par message ; au démarrage, une alerte de plus de 10 min n'est pas
+ * renotifiée. `alerted` est tenu par l'appelant (mémoire du process, comme $teamsAlerted du .ps1). Pure. */
+export function teamsAlertsDue(summary: unknown, alerted: Set<string>, st: { now: number; sessions: Session[] }):
+    { session: { sessionId: string; pid: number }; title: string; text: string }[] {
+  const out: { session: { sessionId: string; pid: number }; title: string; text: string }[] = [];
+  const sessions = (summary as { sessions?: Record<string, unknown> } | null)?.sessions;
+  if (!sessions || typeof sessions !== 'object') return out;
+  for (const [sid, list] of Object.entries(sessions)) {
+    for (const w of (Array.isArray(list) ? list : [list]) as Record<string, unknown>[]) {
+      if (!w || !w.alertedAt || alerted.has(String(w.messageId))) continue;
+      alerted.add(String(w.messageId));
+      if (st.now - Number(w.alertedAt) > 600000) continue;
+      const s = st.sessions.find((x) => x.sessionId === sid);
+      const who = w.chatLabel ? psString(w.chatLabel) : 'le chat Teams';
+      const label = s ? psString(s.title ?? s.name) : sid.slice(0, 8);
+      out.push({ session: { sessionId: sid, pid: s ? Number(s.pid) : 0 }, title: `🔔 ${who} n'a pas répondu (${psString(w.reminders)} relances)`, text: `${label} — « ${psString(w.excerpt)} »` });
+    }
+  }
+  return out;
 }
 
 /** Register-FocusProtocol : le clic sur un toast ouvre cc-focus://<pid>, branché sur focus-session.ps1. */

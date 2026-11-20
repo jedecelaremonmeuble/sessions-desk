@@ -26,9 +26,10 @@ const sortBy = <T>(a: T[], k: (x: T) => string): T[] => [...a].sort((x, y) => (k
 function normalize(route: string, j: any): any {
   const c = JSON.parse(JSON.stringify(j));
   if (route === 'state') {
-    delete c.now; delete c.modules; delete c.ui;   // modules, ui : réglages du poste, que chaque serveur tient de son côté
-    for (const s of c.sessions) { if (s.stale) s.statusSince = '<corrigé>'; }
+    delete c.now; delete c.modules; delete c.ui; delete c.promptSuggestion;   // modules, ui : réglages du poste, que chaque serveur tient de son côté ; promptSuggestion : Node seul, le .ps1 ne bouge plus
+    for (const s of c.sessions) { if (s.stale) s.statusSince = '<corrigé>'; delete s.createdAt; }   // createdAt : Node seul (tri par création)
   }
+  if (route === 'closed') for (const s of c.closed) delete s.createdAt;
   if (route === 'folders') for (const f of c.folders) if (f.last > fx.t0) f.last = '<maintenant>';
   if (route.startsWith('launcher')) { delete c.now; if (c.runs) c.runs = sortBy(c.runs, (r: any) => r.dir); }
   if (route.startsWith('find')) delete c.ms;
@@ -132,7 +133,7 @@ describe.runIf(KINDS.includes('ps') && KINDS.includes('node'))('PS = Node (même
         const x = await call(s, path, { method, origin: o, headers: headers ?? {}, ...(host ? { host: host.includes(':') ? host : `${host}:${s.port}` } : {}), ...(method === 'POST' ? { body: '' } : {}) });
         // /api/state.modules et .ui : réglages du poste, que chaque serveur tient de son côté — hors comparaison.
         let raw = x.body;
-        if (raw.length > 300 && raw.startsWith('{')) { try { const o = JSON.parse(raw); delete o.modules; delete o.ui; raw = JSON.stringify(o); } catch { /* pas du JSON : comparé tel quel */ } }
+        if (raw.length > 300 && raw.startsWith('{')) { try { const o = JSON.parse(raw); delete o.modules; delete o.ui; delete o.promptSuggestion; for (const s of [...(o.sessions ?? []), ...(o.closed ?? [])]) delete s.createdAt; raw = JSON.stringify(o); } catch { /* pas du JSON : comparé tel quel */ } }
         r[k] = { code: x.code, body: x.code === 400 && x.headers['content-type']?.toString().includes('html') ? '<http.sys>' : raw.length > 300 ? `<${raw.length} o>` : raw };
       }
       if (r.ps!.code !== r.node!.code || r.ps!.body !== r.node!.body) diffs.push(`${method} ${path} ${origin ?? ''} ${JSON.stringify(headers ?? {})} ${host ?? ''} : PS ${r.ps!.code} ${r.ps!.body} | Node ${r.node!.code} ${r.node!.body}`);
@@ -261,7 +262,8 @@ describe.each(KINDS)('serveur %s', (kind) => {
       expect(state.favs).toEqual([fx.ids.A, fx.ids.H]); expect(state.hidden).toEqual([fx.ids.I]);
       expect(state.notifs.map((n: any) => n.kind)).toEqual(['waiting', 'done']); expect(state.restarts).toHaveLength(1);
       const q = state.quota.find((x: any) => x.uuid === 'uuid-1');
-      expect(q.weeklyResetsAt).toBe(Math.floor((fx.t0 + 86400000) / 1000) * 1000); expect(q.limits).toEqual([{ kind: 'weekly_scoped', pct: 43, model: 'Fable', resetsAt: q.weeklyResetsAt, active: true, severity: 'warn' }]);
+      expect(q.weeklyResetsAt).toBe(Math.floor((fx.t0 + 86400000) / 1000) * 1000); expect(q.limits).toEqual([{ kind: 'weekly_scoped', pct: 43, model: 'Fable', resetsAt: q.weeklyResetsAt, active: true, severity: 'warn' },
+        { kind: 'weekly_scoped', pct: 95, model: 'Opus', resetsAt: q.weeklyResetsAt, active: false, severity: 'critical' }]);
       const q2 = state.quota.find((x: any) => x.uuid === 'uuid-2');
       expect(q2.limits).toEqual([]); expect(q2.measuredAt).toBe(Date.UTC(2026, 10, 16, 17, 20, 7)); expect(q2.weeklyResetsAt).toBeNull();
     });
@@ -352,9 +354,11 @@ describe.each(KINDS)('serveur %s', (kind) => {
       expect((await post(s, '/api/send?pid=4000001', { text: 'x' })).json().error).toBe('session introuvable');   // fiche présente, process mort
       expect((await post(s, '/api/send?pid=4000003', { text: 'x' })).code).toBe(400);
     });
-    test('proposition : coupée (…) refusée ; changée refusée ; exacte lancée', async () => {
+    // Le serveur Node accepte une proposition coupée (Tab, Entrée — voir suggestion-cut.test.ts), mais seulement si
+    // elle est encore telle quelle à l'écran ; le serveur d'origine la refuse d'emblée.
+    test('proposition : coupée (…) absente de l\'écran refusée ; changée refusée ; exacte lancée', async () => {
       const b = fx.consoles.B!; const before = b.keys().length;
-      expect((await post(s, `/api/send?pid=${fx.pids.B}`, { text: 'ouvre la PR et…', suggestion: true })).json().error).toMatch(/coupée/);
+      expect((await post(s, `/api/send?pid=${fx.pids.B}`, { text: 'ouvre la PR et…', suggestion: true })).json().error).toMatch(kind === 'node' ? /a changé/ : /coupée/);
       expect((await post(s, `/api/send?pid=${fx.pids.B}`, { text: 'ouvre la PR', suggestion: true })).json().error).toBe("la proposition a changé à l'écran");
       expect((await post(s, `/api/send?pid=${fx.pids.B}`, { text: 'ouvre la PR et lance la CI', suggestion: true })).json().error).toBeNull();
       await sleep(300); expect(b.keys().slice(before).map((x) => x.ch).join('')).toBe('ouvre la PR et lance la CI\r');
@@ -691,12 +695,14 @@ describe.each(KINDS)('serveur %s', (kind) => {
       const a = (await call(s, '/api/test-launcher-alerts')).json().alerts;
       const keys = a.map((x: any) => x.key).sort();
       const held = Math.floor((fx.t0 - 10 * 60000) / 1000) * 1000;
-      expect(keys).toEqual(['down', `quota:a@exemple.fr:${usPs(new Date(fx.t0 + 86400000))}`, `run:${fx.runDirs.diag!.toLowerCase()}`, `stage:111:${Date.UTC(2026, 10, 18, 9)}`,
+      expect(keys).toEqual(['down', `quota:a@exemple.fr:${usPs(new Date(fx.t0 + 86400000))}`, `quota:a@exemple.fr:Opus:${usPs(new Date(fx.t0 + 86400000))}`, `run:${fx.runDirs.diag!.toLowerCase()}`, `stage:111:${Date.UTC(2026, 10, 18, 9)}`,
         `wait:444:diagnosis-held:${held}`].sort());
       expect(a.find((x: any) => x.key.startsWith('wait:'))).toMatchObject({ hd: '444', title: "Lanceur : HD-444 t'attend — diagnostic posé, go attendu", text: 'diagnostic posé, aucun correctif lancé' });
       expect(a.find((x: any) => x.key === 'down').text).toMatch(/^Aucun signe de vie depuis 5\d min(, aucun run en cours| \(un run tourne pourtant\)) — /);
       expect(a.find((x: any) => x.key.startsWith('run:'))).toMatchObject({ title: 'Lanceur : diagnostic en échec — HD-111', text: 'failed — écriture refusée' });
       expect(a.find((x: any) => x.key.startsWith('quota:')).title).toBe('Quota Claude à 92 % — a@exemple.fr');
+      // La limite propre à un modèle alerte à part (Opus 95 %) ; sous 90 % (Fable 43 %) elle se tait.
+      expect(a.find((x: any) => x.key.startsWith('quota:a@exemple.fr:Opus:'))).toMatchObject({ title: 'Quota Claude Opus à 95 % — a@exemple.fr' });
     });
   });
 

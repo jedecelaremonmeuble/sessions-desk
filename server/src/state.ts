@@ -10,15 +10,21 @@ import { fileURLToPath } from 'node:url';
 import type { Config } from './config.ts';
 import type { DriverClient } from './driver.ts';
 import { modulesView } from './modules.ts';
-import { readClaudeUsage } from './usage.ts';
+import { lastNewsAt } from './quiet.ts';
+import { readClaudeUsage, promptSuggestionSetting } from './usage.ts';
+import { AskJudge, claudeAskAsync } from './asks-judge.ts';
 import {
   addContent, GUID, ieq, imatch, isDir, isFile, leaf, mtimeMs, netTrim, nowMs, parent, psString, readJson, readTail,
-  setContent, setContentAtomic, splitPathParent,
+  setContent, setContentAtomic, splitPathParent, transcriptCreatedAt,
 } from './util.ts';
 
 export interface Meta {
   path: string | null; len: number; title: string | null; pr: number | null; prUrl: string | null; cwd: string | null;
   reply: string | null; tokens: number | null; model: string | null; wt: string | null; recette: boolean;
+  /** Derniers tours sans nouveauté (quiet.ts) : fin du dernier tour qui comptait ; null si le dernier tour compte. */
+  quiet: { at: number; why: string } | null;
+  /** Création de la session (transcriptCreatedAt) : lue une fois, quand le transcript est trouvé. */
+  createdAt: number | null;
 }
 export interface Prompt { at: unknown; text: string }
 export type Session = Record<string, unknown> & {
@@ -141,6 +147,8 @@ export class Dashboard {
   lastStatus = new Map<string, string>();
   closedScan: { at: number; files: { id: string; path: string; mtime: number }[] } = { at: 0, files: [] };
   readonly bootMs: number;
+  /** Juge « attend l'utilisateur ? » (asks-judge.ts) : serveur en écriture (8765 ou 8767 --allow-write), hors --no-background (tests). */
+  askJudge: AskJudge | null = null;
   #stamps = new Map<string, number>();
 
   constructor(cfg: Config, driver: DriverClient) {
@@ -151,6 +159,8 @@ export class Dashboard {
     this.reloadSeen(true); this.reloadFavs(true); this.reloadHidden(true); this.reloadTagsManual(true);
     this.notifs = this.readNotifsFile();
     this.initReboot();
+    if (cfg.allowWrite && !cfg.noBackground && process.env.SD_ASK_JUDGE !== '0')
+      this.askJudge = new AskJudge(this.sf('sessions-ask-verdicts.json'), claudeAskAsync(process.env.SD_CLAUDE_EXE ?? 'claude', process.env.SD_ASK_MODEL ?? 'claude-haiku-5-5'));
   }
 
   // ───── chemins ─────
@@ -278,15 +288,18 @@ export class Dashboard {
   }
   meta(id: string, knownPath?: string | null): Meta {
     let c = this.metaCache.get(id);
-    if (!c) { c = { path: null, len: -1, title: null, pr: null, prUrl: null, cwd: null, reply: null, tokens: null, model: null, wt: null, recette: false }; this.metaCache.set(id, c); }
+    if (!c) { c = { path: null, len: -1, title: null, pr: null, prUrl: null, cwd: null, reply: null, tokens: null, model: null, wt: null, recette: false, quiet: null, createdAt: null }; this.metaCache.set(id, c); }
     if (!c.path && knownPath) c.path = knownPath;
     if (!c.path) { c.path = this.findTranscript(id); if (!c.path) return c; }
+    if (c.createdAt == null) c.createdAt = transcriptCreatedAt(c.path);
     let size: number;
     try { size = statSync(c.path).size; } catch { return c; }
     if (size === c.len) return c;
     c.len = size;
     const replyLines: string[] = []; let usageLine: string | null = null; const wtLines: string[] = [];
-    for (const l of readTail(c.path, 512 * 1024)) {
+    const tail = readTail(c.path, 512 * 1024);
+    try { c.quiet = lastNewsAt(tail); } catch { c.quiet = null; }
+    for (const l of tail) {
       if (l.startsWith('{"parentUuid"') && l.includes('"type":"assistant"') && !l.includes('"isSidechain":true')) {
         if (l.includes('"usage"')) usageLine = l;
         const mm = l.match(MODEL_RX); if (mm) c.model = mm[1]!;
@@ -477,10 +490,15 @@ export class Dashboard {
         pid: s.pid as number, name: s.name ?? null, title: m.title, pr: m.pr, prUrl: m.prUrl, prInfo: this.prInfo(m.prUrl), reply: m.reply, tokens: m.tokens, model: m.model,
         wt: m.wt, recette: m.recette, tags: this.sessionTags(sid), gitDir: gd, git: this.gitState[gd.toLowerCase()] ?? null,
         status, stale, bg: null, headless, entrypoint: s.entrypoint ?? null, hookStop: this.stops.get(sid) ?? 0, waitingFor: s.waitingFor ?? null,
-        done: ieq(status, 'idle') && since > (this.seen.get(sid) ?? 0),
-        statusSince: since, startedAt: s.startedAt ?? null, cwd: s.cwd ?? null,
+        // « À relire » : fin de tour après le dernier « vu » — sauf tour sans nouveauté (réveil programmé à réponse
+        // identique, relance du veilleur), où c'est la fin du dernier tour qui comptait qui fait foi.
+        done: ieq(status, 'idle') && (m.quiet ? m.quiet.at : since) > (this.seen.get(sid) ?? 0),
+        ...(m.quiet ? { quiet: m.quiet.why } : {}),   // absent hors de ce cas : l'état reste celui du .ps1
+        statusSince: since, startedAt: s.startedAt ?? null, createdAt: m.createdAt, cwd: s.cwd ?? null,
         sessionId: s.sessionId as string, version: s.version ?? null,
         lastPrompt: pr.length ? pr[pr.length - 1]!.text : '', prompts: pr, suggestion: sug, topicHd: this.topicHd(sid),
+        // Verdict du juge (« attend l'utilisateur ? ») sur une session au repos : absent tant qu'il n'est pas rendu.
+        ...(this.askJudge && !headless && (ieq(status, 'idle') || ieq(status, 'shell')) ? { askVerdict: this.askJudge.verdict(sid, m.reply) } : {}),
       } as Session);
     }
     return out;
@@ -559,7 +577,7 @@ export class Dashboard {
     try { this.writeStatusChanges(sess); } catch { /* idem */ }
     let quota: unknown[] = [];
     try { quota = readClaudeUsage(this.cfg); } catch { /* idem */ }
-    return { now: nowMs(), sessions: sess, reboot: this.rebootInfo(sess), restarts: restarts.slice(-40), favs: [...this.favs], hidden: [...this.hidden], notifs: this.notifs.slice(-60), quota, teams: this.cfg.modules.teams ? this.teamsWaits() : null, modules: modulesView(this.cfg.modules), ui: this.cfg.ui };
+    return { now: nowMs(), sessions: sess, reboot: this.rebootInfo(sess), restarts: restarts.slice(-40), favs: [...this.favs], hidden: [...this.hidden], notifs: this.notifs.slice(-60), quota, promptSuggestion: promptSuggestionSetting(this.cfg), teams: this.cfg.modules.teams ? this.teamsWaits() : null, modules: modulesView(this.cfg.modules), ui: this.cfg.ui };
   }
 
   /** Get-TeamsWaits : résumé tenu par teams-watcher.ts (state/teams-waits/_summary.json), relu quand il change. */
@@ -606,7 +624,7 @@ export class Dashboard {
       if (!m.title) continue;
       const pr = this.getPrompts(f.id, 6);
       list.push({ sessionId: f.id, title: m.title, pr: m.pr, prUrl: m.prUrl, prInfo: this.prInfo(m.prUrl), reply: m.reply, tokens: m.tokens, model: m.model, cwd: m.cwd, wt: m.wt, recette: m.recette, tags: this.sessionTags(f.id),
-        lastActivity: Math.trunc(f.mtime), lastPrompt: pr.length ? pr[pr.length - 1]!.text : '', prompts: pr, topicHd: this.topicHd(f.id) });
+        lastActivity: Math.trunc(f.mtime), createdAt: m.createdAt, lastPrompt: pr.length ? pr[pr.length - 1]!.text : '', prompts: pr, topicHd: this.topicHd(f.id) });
     }
     return { days: this.cfg.closedDays, closed: list.slice(0, 400) };
   }

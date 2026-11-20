@@ -361,12 +361,23 @@ export class Launcher {
     // 4. Quota hebdomadaire > 90 % : une fois par compte et par période.
     try {
       const raw = readUsageRaw(this.d.cfg) as Record<string, Obj> | undefined;
+      //    Même règle pour la limite propre à un modèle (limitsJson, « Fable ») : elle peut saturer avant la limite globale.
       for (const q of Object.values(raw ?? {})) {
-        if ((Number(q.weeklyPct) || 0) < 90) continue;
-        const key = `quota:${psString(q.alias)}:${psDateString(q.weeklyResetsAt)}`; if (seen[key]) continue;
         const reset = launchMs(q.weeklyResetsAt);
         if (reset && reset < now) continue;
-        alerts.push({ key, title: `Quota Claude à ${psString(q.weeklyPct)} % — ${psString(q.alias)}`, text: `Quota de la semaine presque épuisé${reset ? ' ; remise à zéro le ' + formatLocal(reset) : ''}.` });
+        const when = reset ? ' ; remise à zéro le ' + formatLocal(reset) : '';
+        const key = `quota:${psString(q.alias)}:${psDateString(q.weeklyResetsAt)}`;
+        if ((Number(q.weeklyPct) || 0) >= 90 && !seen[key]) {
+          alerts.push({ key, title: `Quota Claude à ${psString(q.weeklyPct)} % — ${psString(q.alias)}`, text: `Quota de la semaine presque épuisé${when}.` });
+        }
+        let limits: unknown[] = [];
+        try { if (q.limitsJson) { const p = JSON.parse(String(q.limitsJson)) as unknown; limits = Array.isArray(p) ? p : [p]; } } catch { limits = []; }
+        for (const x of limits) {
+          const l = (x ?? {}) as { percent?: unknown; scope?: { model?: { display_name?: unknown } } | null };
+          const m = psString(l.scope?.model?.display_name); if (!m || (Number(l.percent) || 0) < 90) continue;
+          const mkey = `quota:${psString(q.alias)}:${m}:${psDateString(q.weeklyResetsAt)}`; if (seen[mkey]) continue;
+          alerts.push({ key: mkey, title: `Quota Claude ${m} à ${psString(l.percent)} % — ${psString(q.alias)}`, text: `Quota de la semaine du modèle ${m} presque épuisé${when}.` });
+        }
       }
     } catch { /* comme le .ps1 */ }
     return alerts;

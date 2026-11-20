@@ -1,6 +1,6 @@
 // GARDE DES RÉFÉRENCES INTERNES — rien de propre à l'équipe d'origine ne doit entrer dans ce qui est publié.
 //
-//   node server/scripts/guard.mjs            fichiers suivis par git, hors périmètre privé (PRIVATE ci-dessous)
+//   node server/scripts/guard.mjs            fichiers suivis par git, hors fichiers dispensés (PRIVATE ci-dessous)
 //   node server/scripts/guard.mjs --text     le texte reçu sur l'entrée standard (titre de PR, messages de commit)
 //
 // Motifs génériques : ci-dessous. Noms propres (collègues, clients) : jamais dans le dépôt — variable
@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
 
-/** Ce qui ne sera pas publié : le serveur PowerShell historique (sa page, elle, l'est) et l'étiqueteur de tags. */
+/** Dispensés du contrôle des références internes : le serveur PowerShell historique (non publié) et l'étiqueteur de
+ *  tags, publié tel quel — ses règles décrivent le dépôt de l'équipe d'origine. La recherche de secrets (gitleaks),
+ *  elle, lit tout. */
 export const PRIVATE = [/^legacy\/(?!sessions-dashboard-page\/)/, /^server\/src\/tagger(\.ts|-config\.json)$/, /^server\/test\/tagger\.test\.ts$/];
 /** Jamais lus : générés, ou le garde lui-même (il porte les motifs). */
 const SKIP = [/^server\/package-lock\.json$/, /^server\/scripts\/guard(\.mjs|-allow\.txt)$/, /^server\/test\/guard\.test\.ts$/, /\.(png|ico|jpg|gif|exe|dll)$/i];

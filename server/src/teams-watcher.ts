@@ -20,11 +20,17 @@
 // le plus souvent un BROUILLON : l'attente ne démarre qu'à l'envoi par l'utilisateur, constaté dans la conversation. La
 // réponse est injectée comme pour Teams ; une relance est un BROUILLON préparé par la session, jamais un envoi. Éteint tant que
 // teams-watcher-config.json ne dit pas { "mail": true } ; allumé, « login » demande aussi Mail.Read (à refaire une fois).
+// Lot 8 (FILS LUS) : lire un fil par Graph ne le marque pas « lu » — Teams garde son compteur de non-lus alors qu'une session
+// a lu et traité les messages. La passe marque donc le fil lu (markChatReadForUser) quand une session vient d'y ÉCRIRE,
+// quand une réponse lui est REMISE, et quand une demande entrante lui est confiée. Jamais pour un message écarté ou pas
+// encore remis. Éteint tant que teams-watcher-config.json ne dit pas { "markRead": true } ; allumé, « login » demande
+// aussi Chat.ReadWrite (à refaire une fois) — sans lui, la surveillance continue et la passe le dit.
 //
 // Fichiers : ~/.claude/state/teams-waits/
 //   _inbound.json                 demandes entrantes : curseur par chat, session ouverte (jamais de texte de message)
 //   <sessionId>_<messageId>.json  une attente (écrite par le hook, mise à jour par la passe)
 //   _summary.json                 résumé par session, SEUL fichier lu par les serveurs (.ps1 et Node)
+//   _read.json                    fils à marquer lus, rejoués 30 min après un échec (ids de chat seulement)
 //   _token.dpapi                  jeton de rafraîchissement chiffré par DPAPI (utilisateur Windows) — jamais en clair
 //   _watcher.log                  une ligne JSON par passe (jamais de jeton, jamais de texte de message)
 // Fichier autonome (aucun import local) : -Deploy le copie tel quel dans ~/.claude/scripts/teams-watcher/.
@@ -926,6 +932,8 @@ export interface WatcherConfig {
   mail: boolean; mailScope: string;
   /** Lot 7 : recopie des validations métier sur le ticket de la session. Éteint (null) par défaut. */
   export: ExportConfig | null;
+  /** Lot 8 : marquer « lu » dans Teams un fil qu'une session a lu ou auquel elle a répondu. Éteint par défaut ; allumé, il demande Chat.ReadWrite au « login ». */
+  markRead: boolean; readScope: string;
 }
 export const defaultConfig: WatcherConfig = {
   tenant: 'organizations',
@@ -936,10 +944,11 @@ export const defaultConfig: WatcherConfig = {
   reminders: false, calendar: defaultCalendar, inbound: defaultInbound,
   mail: false, mailScope: 'Mail.Read User.Read offline_access',
   export: null,
+  markRead: false, readScope: 'Chat.ReadWrite User.Read offline_access',
 };
-/** Portée demandée au « login » : celle des emails en plus quand ils sont allumés (le jeton de rafraîchissement couvre alors les deux). */
-export const loginScope = (cfg: Pick<WatcherConfig, 'scope' | 'mail' | 'mailScope'>): string =>
-  cfg.mail ? [...new Set(`${cfg.scope} ${cfg.mailScope}`.split(/\s+/).filter(Boolean))].join(' ') : cfg.scope;
+/** Portée demandée au « login » : celles des emails et des fils lus en plus quand ils sont allumés (le jeton de rafraîchissement les couvre alors toutes). */
+export const loginScope = (cfg: Pick<WatcherConfig, 'scope' | 'mail' | 'mailScope'> & Partial<Pick<WatcherConfig, 'markRead' | 'readScope'>>): string =>
+  [...new Set([cfg.scope, cfg.mail ? cfg.mailScope : '', cfg.markRead ? cfg.readScope ?? '' : ''].join(' ').split(/\s+/).filter(Boolean))].join(' ');
 const pwsh = () => (process.platform === 'win32' ? 'pwsh.exe' : 'pwsh');
 function protect(secret: string): string {
   return execFileSync(pwsh(), ['-NoProfile', '-NonInteractive', '-Command', 'ConvertTo-SecureString $env:SD_SECRET -AsPlainText -Force | ConvertFrom-SecureString'],
@@ -988,6 +997,41 @@ async function graph<T>(token: string, path: string, headers: Record<string, str
   if (!r.ok) throw Object.assign(new Error(`Graph ${r.status} sur ${path.split('?')[0]!.replace(/19:[^/]+/, '<chat>').replace(/messages\/[^/]+/, 'messages/<id>')}`), { status: r.status });
   return (await r.json()) as T;
 }
+async function graphPost(token: string, path: string, body: unknown): Promise<void> {
+  const r = await fetch(`https://graph.microsoft.com/v1.0${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) });
+  if (!r.ok) throw Object.assign(new Error(`Graph ${r.status} sur ${path.replace(/19(:|%3A)[^/]+/i, '<chat>')}`), { status: r.status });
+}
+/** Locataire de l'utilisateur, lu dans le jeton d'accès (revendication « tid ») : markChatReadForUser l'exige à côté de son id. */
+export function tokenTenant(jwt: string): string | null {
+  try {
+    const tid = (JSON.parse(Buffer.from(jwt.split('.')[1] ?? '', 'base64url').toString('utf8')) as { tid?: unknown }).tid;
+    return typeof tid === 'string' && tid ? tid : null;
+  } catch { return null; }
+}
+
+// ─────────────── fils lus (lot 8) ───────────────
+
+/** Fils à marquer lus : chatId → instant de la demande. */
+export interface ReadQueue { v: 1; chats: Record<string, number> }
+/** Passé ce délai on renonce : marquer lu plus tard couvrirait des messages arrivés depuis, qu'aucune session n'a vus. */
+export const READ_MAX_AGE_MS = 30 * 60_000;
+export interface ReadResult { marked: number; errors: string[] }
+/** Marque lus les fils demandés par cette passe et ceux qu'une passe précédente n'a pas réussi à marquer. */
+export async function runMarkRead(dir: string, chats: Iterable<string>, now: number, mark: (chatId: string) => Promise<void>): Promise<ReadResult> {
+  const file = join(dir, '_read.json');
+  const q: ReadQueue = readJson<ReadQueue>(file) ?? { v: 1, chats: {} };
+  for (const c of chats) q.chats[c] = now;
+  const errors = new Set<string>();
+  let marked = 0;
+  for (const [c, at] of Object.entries(q.chats)) {
+    if (now - at > READ_MAX_AGE_MS) { delete q.chats[c]; continue; }
+    try { await mark(c); delete q.chats[c]; marked++; }
+    catch (e) { errors.add(`fil lu : ${String((e as Error).message)}`); }
+  }
+  if (Object.keys(q.chats).length) writeAtomic(file, JSON.stringify(q, null, 1)); else rmSync(file, { force: true });
+  return { marked, errors: [...errors] };
+}
+
 /** Les ids rendus par le connecteur Outlook sont IMMUABLES (« AAk… ») : Graph les accepte en entrée, et les rend tels quels avec cet en-tête. */
 const IMMUTABLE = { prefer: 'IdType="ImmutableId"' };
 const TEXT_BODY = { prefer: 'IdType="ImmutableId", outlook.body-content-type="text"' };
@@ -1028,12 +1072,12 @@ export interface InboundDeps {
   open: (sessionId: string, prompt: string) => Promise<string | null>;
   newId: () => string;
 }
-export interface InboundResult { seen: number; opened: number; followed: number; skipped: number; deferred: number; preview: string[]; errors: string[] }
+export interface InboundResult { seen: number; opened: number; followed: number; skipped: number; deferred: number; preview: string[]; errors: string[]; /** Fils confiés à une session par cette passe (lot 8). */ read: string[] }
 
 /** Passe des demandes entrantes. liveChats = chats où une session attend déjà la réponse (l'injection s'en charge). */
 export async function runInbound(dir: string, cfg: WatcherConfig, meId: string, liveChats: ReadonlySet<string>, deps: InboundDeps, opts: { dryRun: boolean; now: number; previewSince?: number; selfCmd?: string | undefined }): Promise<InboundResult> {
   const { now } = opts, ic = cfg.inbound;
-  const res: InboundResult = { seen: 0, opened: 0, followed: 0, skipped: 0, deferred: 0, preview: [], errors: [] };
+  const res: InboundResult = { seen: 0, opened: 0, followed: 0, skipped: 0, deferred: 0, preview: [], errors: [], read: [] };
   const file = join(dir, '_inbound.json');
   // Première passe : on part de MAINTENANT, jamais de l'historique.
   const st: InboundState = readJson<InboundState>(file) ?? { v: 1, since: now, chats: {}, opened: [] };
@@ -1073,7 +1117,7 @@ export async function runInbound(dir: string, cfg: WatcherConfig, meId: string, 
         saveEvidence(validationsDir(dir), open.sessionId, 'inbound', c.id, v.burst);
         const err = await deps.send(open.pid, inboundFollowUp(who, v.burst, opts.selfCmd, open.sessionId)).catch((x: Error) => x.message);
         if (err) { e.lastError = err; res.deferred++; continue; }
-        open.status = 'busy'; e.handledAt = v.upTo; e.lastError = null; res.followed++;
+        open.status = 'busy'; e.handledAt = v.upTo; e.lastError = null; res.followed++; res.read.push(c.id);
         continue;
       }
       if (st.opened.length >= ic.maxPerHour) { e.lastError = 'plafond horaire atteint'; res.deferred++; continue; }
@@ -1082,7 +1126,7 @@ export async function runInbound(dir: string, cfg: WatcherConfig, meId: string, 
       const err = await deps.open(sid, inboundPrompt(c.id, who, v.burst, opts.selfCmd, sid)).catch((x: Error) => x.message);
       if (err) { e.lastError = `ouverture impossible : ${err}`; res.errors.push(`demande entrante : ${err}`); res.deferred++; continue; }
       Object.assign(e, { sessionId: sid, openedAt: now, from: v.burst[0]!.from, handledAt: v.upTo, lastError: null });
-      st.opened.push(now); res.opened++;
+      st.opened.push(now); res.opened++; res.read.push(c.id);
     } catch (x) { res.errors.push(String((x as Error).message)); }
   }
   if (!opts.dryRun) writeAtomic(file, JSON.stringify(st, null, 1));
@@ -1218,7 +1262,7 @@ async function runMail(dir: string, cfg: WatcherConfig, todo: Wait[], all: Wait[
   }
 }
 
-export interface PassResult { live: number; checked: number; replied: number; injected: number; reminded: number; alerted: number; reopened: number; takenOver: number; expired: number; errors: string[]; inbound?: Omit<InboundResult, 'errors'> }
+export interface PassResult { live: number; checked: number; replied: number; injected: number; reminded: number; alerted: number; reopened: number; takenOver: number; expired: number; errors: string[]; inbound?: Omit<InboundResult, 'errors' | 'read'>; /** Fils marqués lus dans Teams (lot 8). */ read?: number }
 export interface PassOptions { dryRun: boolean; now?: number; selfCmd?: string; previewSince?: number }
 export async function runPass(dir: string, cfg: WatcherConfig, opts: PassOptions): Promise<PassResult> {
   const now = opts.now ?? Date.now(), cal = cfg.calendar;
@@ -1254,6 +1298,8 @@ export async function runPass(dir: string, cfg: WatcherConfig, opts: PassOptions
     return { w: { ...w, lastError: null, reopens: 0, reopenedAt: undefined }, ok: true };
   };
   const byChat = new Map<string, Wait[]>();
+  /** Fils qu'une session a lus ou auxquels elle vient d'écrire pendant cette passe (lot 8). */
+  const toRead = new Set<string>();
   const mailTodo: Wait[] = [];
   for (const w of live) {
     const st = nextStep(w, cal);
@@ -1274,6 +1320,8 @@ export async function runPass(dir: string, cfg: WatcherConfig, opts: PassOptions
     }
     for (const w0 of waits) {
       let w: Wait = { ...w0, chatLabel: label ?? null, lastCheckAt: now };
+      // Première passe sur cette attente : la session vient d'écrire dans le fil, elle l'a donc lu.
+      if (w0.lastCheckAt === undefined) toRead.add(chatId);
       const v = judge(w, msgs, me.id, sessionSent, now);
       if (v.kind === 'taken-over') { w = { ...w, status: 'taken-over', closedAt: now }; res.takenOver++; }
       else if (v.kind === 'replies') {
@@ -1283,7 +1331,7 @@ export async function runPass(dir: string, cfg: WatcherConfig, opts: PassOptions
           saveEvidence(validationsDir(dir), w.sessionId, 'teams', w.chatId, v.replies);
           const d = await deliver(w, injectionText(w, v.replies, opts.selfCmd ?? 'node teams-watcher.ts', openFor(dir, w, now)));
           w = d.ok ? { ...d.w, status: 'injected', injectedAt: now, closedAt: now } : d.w;
-          if (d.ok) res.injected++;
+          if (d.ok) { res.injected++; toRead.add(chatId); }
         }
       } else {
         // Pas de réponse : relance ou alerte à l'échéance (D6, D7). Le calendrier ne vaut que pour l'automatique ;
@@ -1304,11 +1352,24 @@ export async function runPass(dir: string, cfg: WatcherConfig, opts: PassOptions
     }
   }
   if (cfg.inbound.enabled) {
-    const { errors, ...inb } = await runInbound(dir, cfg, me.id, new Set(live.map((w) => w.chatId)), {
+    const { errors, read, ...inb } = await runInbound(dir, cfg, me.id, new Set(live.map((w) => w.chatId)), {
       graph: (path) => graph(token, path), sessions: getSessions,
       send: (pid, text) => send(cfg, pid, text), open: (sid, prompt) => newSession(cfg, sid, prompt), newId: () => randomUUID(),
     }, { dryRun: opts.dryRun, now, selfCmd: opts.selfCmd, ...(opts.previewSince !== undefined ? { previewSince: opts.previewSince } : {}) });
     res.inbound = inb; res.errors.push(...errors);
+    for (const c of read) toRead.add(c);
+  }
+  if (cfg.markRead && !opts.dryRun) {
+    // Portée à part (Chat.ReadWrite) : refusée, la surveillance a déjà tourné — seul le marquage manque, et la passe le dit.
+    let tok: Promise<string> | undefined;
+    const r = await runMarkRead(dir, toRead, now, async (chatId) => {
+      const t = await (tok ??= accessToken(cfg, dir, cfg.readScope).catch((e: Error) => { throw new Error(`${e.message} — relancer « login » pour accorder Chat.ReadWrite`); }));
+      const tenantId = tokenTenant(t);
+      if (!tenantId) throw new Error('locataire absent du jeton');
+      await graphPost(t, `/chats/${encodeURIComponent(chatId)}/markChatReadForUser`, { user: { id: me.id, tenantId } });
+    });
+    if (r.marked) res.read = r.marked;
+    res.errors.push(...r.errors);
   }
   writeSummary(dir, now, cfg.reminders);
   return res;
@@ -1394,7 +1455,7 @@ async function main(argv: string[]): Promise<number> {
     const line = JSON.stringify({ at: t0, ms: Date.now() - t0, ...r, inbound: i ? { ...i, preview: undefined } : undefined });
     console.log(line);
     for (const p of i?.preview ?? []) console.log(`  demande entrante — ${p}`);
-    if (r.live || r.errors.length || (i && (i.opened || i.followed || i.skipped || i.deferred))) appendFileSync(join(dir, '_watcher.log'), line + '\n');
+    if (r.live || r.read || r.errors.length || (i && (i.opened || i.followed || i.skipped || i.deferred))) appendFileSync(join(dir, '_watcher.log'), line + '\n');
     return 0;
   } catch (e) {
     appendFileSync(join(dir, '_watcher.log'), JSON.stringify({ at: t0, error: String((e as Error).message) }) + '\n');

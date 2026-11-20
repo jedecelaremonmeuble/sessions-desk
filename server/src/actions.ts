@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { run } from './gitpr.ts';
+import { isRelance } from './quiet.ts';
 import { checkTag, type Dashboard, type Session } from './state.ts';
 import { addContent, GUID, ieq, isDir, netTrim, nowMs, psArray, psIntZero, psString, sleep } from './util.ts';
 
@@ -41,6 +42,9 @@ export class Actions {
   }
 
   /** Invoke-Send : session inactive, invite vide, une ligne ≤ 4 000 caractères, journalisé.
+   *  Proposition COUPÉE à l'écran (elle finit par « … », Claude Code la tronque à la largeur du terminal) : son texte
+   *  complet n'est lisible nulle part, on ne peut donc pas le taper. Elle est acceptée dans le terminal — Tab, puis
+   *  Entrée — après la même revérification : ce qui est à l'écran est encore exactement ce que la page a montré.
    *  allowBusy : MESSAGE EN FILE — une session au travail garde son invite vide et active ; Claude Code met en file
    *  ce qu'on y tape. Réponse à une session seulement (ni message groupé, ni proposition). */
   async send(pid: number, text: string, suggested = false, allowBusy = false): Promise<string | null> {
@@ -52,16 +56,17 @@ export class Actions {
     const queued = allowBusy && !suggested && ieq(sess.status, 'busy');
     if (!ieq(sess.status, 'idle') && !ieq(sess.status, 'shell') && !queued) return `la session n'est pas inactive (statut ${psString(sess.status)})`;
     if (suggested) {
-      if (line.endsWith('…')) return "proposition coupée à l'écran : la modifier avant de l'envoyer";
       let cur: string | null = null;
       try { cur = await this.d.driver.call('suggestion', { pid }); } catch { /* idem */ }
       if (!cur) return "plus de proposition à l'écran";
       if (cur !== line) return "la proposition a changé à l'écran";
     }
+    const cut = suggested && line.endsWith('…');
     let code = 2;
-    try { code = await this.d.driver.call('send', { pid, line }); } catch { /* inaccessible */ }
-    addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, code, text: line, suggested, queued }));
-    if (code === 0) { this.d.setSeen([sess.sessionId]); return null; }
+    try { code = cut ? await this.d.driver.call('sendKeys', { pid, items: ['\u0001Tab', '\u0001Enter'] }) : await this.d.driver.call('send', { pid, line }); } catch { /* inaccessible */ }
+    addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, code, text: line, suggested, queued, ...(cut ? { cut: true } : {}) }));
+    // Une relance du veilleur n'est pas toi : elle ne marque pas « vue » une réponse que tu n'as pas encore lue.
+    if (code === 0) { if (!isRelance(line)) this.d.setSeen([sess.sessionId]); return null; }
     return code === 5 ? NOT_EMPTY : 'console de la session inaccessible';
   }
 

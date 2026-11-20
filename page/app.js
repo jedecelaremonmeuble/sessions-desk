@@ -12,6 +12,10 @@ const GROUPS = [
   { key:'closed', title:'Fermées, reprenables', states:['closed'] } ];
 let data = null, closedData = { days:0, closed:[] }, flat = [], notice = null, lastScreen = null, detailKey = null;
 let favs = new Set(), favOnly = localStorage.getItem('cc.favonly') === '1';
+// Ordre dans chaque groupe : 'activity' (dernier changement d'état, par défaut) ou 'created' (création de la session, la plus
+// récente d'abord). createdAt vient du serveur (1er horodatage du transcript) ; un run du lanceur n'en a pas : son début.
+let sortMode = localStorage.getItem('cc.sort') === 'created' ? 'created' : 'activity';
+const createdOf = it => it.createdAt || it.startedAt || it.at || it.since || 0;
 let selected = new URLSearchParams(location.search).get('sel') || sessionStorage.getItem('cc.sel');   // ?sel=<sessionId> : lien direct
 let collapsed = new Set(JSON.parse(localStorage.getItem('cc.collapsed') || '["closed"]'));
 if (!localStorage.getItem('cc.autoGroup')) { collapsed.add('auto'); localStorage.setItem('cc.autoGroup', '1'); localStorage.setItem('cc.collapsed', JSON.stringify([...collapsed])); }   // replié par défaut
@@ -30,7 +34,11 @@ const label = it => it.title || it.name || String(it.pid || it.sessionId.slice(0
 // Une session qui a fini son tour « demande » quelque chose si la fin de son dernier message est une
 // question ou sollicite un accord. Simple heuristique : sinon elle est « terminé, à relire ».
 const tailOf = r => (r || '').trim().split(/\n\s*\n/).slice(-2).join('\n');
-const asks = r => { const t = tailOf(r); return /\?\s*$/m.test(t) || /\b(le go|ton go|votre go|ton accord|votre accord|feu vert|dis-moi|dites-moi|donne-moi|donnez-moi|veux-tu|voulez-vous|souhaites-tu|souhaitez-vous|à toi de|à vous de|let me know|should i)\b/i.test(t); };
+// Aussi la consigne à dire entre guillemets (« Dis « envoie » et je le poste », « Réponds « go » ») : sans elle, une
+// session qui attend ce mot finissait « à relire », donc rangée dans ⏳ Attente Teams quand elle avait aussi écrit à
+// un collègue — invisible alors que c'est à toi de jouer.
+const asks = r => { const t = tailOf(r); return /\?\s*$/m.test(t) || /\b(le go|ton go|votre go|ton accord|votre accord|feu vert|dis-moi|dites-moi|donne-moi|donnez-moi|veux-tu|voulez-vous|souhaites-tu|souhaitez-vous|à toi de|à vous de|dès que tu|j'attends ton|j'attends ta|let me know|should i)\b/i.test(t)
+  || /(^|[^\p{L}])(dis|dites|réponds|répondez|tape|tapez|écris|écrivez|say|reply|type)\s*[«"“]/iu.test(t); };
 const lastLine = r => { const l = (r || '').split('\n').map(x => x.trim()).filter(Boolean); return l.length ? l[l.length - 1].replace(/[*`#]/g, '') : ''; };
 const TODO = ['waiting', 'ask', 'done'];
 
@@ -52,7 +60,12 @@ function quotaView(q, now) {
     if (v.projected != null && v.projected >= v.pct) v.recentPerDay = (v.projected - v.pct) / days;
   }
   v.fullAt = q.weeklyFullAt && q.weeklyFullAt > now && (!v.reset || q.weeklyFullAt < v.reset) && !v.expired ? q.weeklyFullAt : null;
-  v.models = (q.limits || []).filter(l => l.model && l.pct != null).map(l => ({ name: l.model, pct: l.pct }));
+  // Limite propre à un modèle (« Fable ») : même semaine que la limite globale, sa barre porte le même repère.
+  v.models = (q.limits || []).filter(l => l.model && l.pct != null).map(l => {
+    const reset = l.resetsAt && l.resetsAt > now ? l.resetsAt : null;
+    return { name: l.model, pct: l.pct, reset, elapsed: reset ? Math.min(100, Math.max(0, 100 * (now - (reset - WEEK)) / WEEK)) : v.elapsed ?? null,
+             level: v.expired ? 'idle' : l.pct >= 90 ? 'waiting' : l.pct >= 75 ? 'ask' : 'busy' };
+  });
   v.fiveHour = q.fiveHourPct != null ? { pct: q.fiveHourPct, reset: q.fiveHourResetsAt || null } : null;
   v.level = !v.ok || v.expired ? 'idle' : v.pct >= 90 ? 'waiting' : v.pct >= 75 || v.fullAt ? 'ask' : 'busy';
   return v;
@@ -67,11 +80,31 @@ function quotaBar(v) {
   if (v.elapsed != null) { const m = el('u'); m.style.left = v.elapsed + '%'; m.title = Math.round(v.elapsed) + ' % de la semaine écoulée'; b.append(m); }
   return b;
 }
+// MODE DÉGRADÉ des propositions de prompt. Claude Code cesse d'en générer dès que le quota n'est plus « allowed »
+// (une limite active en alerte : severity autre que normal) — sauf si CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION est forcée
+// (data.promptSuggestion.forced, lue dans ~/.claude/settings.json) ; quota épuisé : plus rien dans tous les cas.
+// Sans cette ligne, la ligne 💡 disparaît de la liste sans explication. Pure : (data.quota, data.promptSuggestion, now).
+function suggestionMode(quota, setting, now) {
+  const lims = (quota || []).filter(q => q.status === 'ok').flatMap(q => (q.limits || []).map(l => ({ ...l, reset: l.resetsAt || q.weeklyResetsAt || null })))
+    .filter(l => l.active && (!l.reset || l.reset > now));
+  const full = lims.filter(l => l.pct != null && l.pct >= 100), warn = lims.filter(l => l.severity && l.severity !== 'normal');
+  if (!full.length && !warn.length) return null;
+  const back = Math.max(...(full.length ? full : warn).map(l => l.reset || 0)) || null;
+  const forced = !!(setting && setting.forced);
+  if (full.length) return { level: 'waiting', text: '💡 mode dégradé : quota épuisé, plus de proposition de prompt', back,
+    tip: 'Une limite est à 100 % : Claude Code ne génère aucune proposition, même forcée.' };
+  if (forced) return { level: 'ask', text: '💡 mode dégradé : propositions forcées', back,
+    tip: 'Quota en alerte : Claude Code couperait les propositions, CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION les force (elles consomment un peu de quota).'
+      + (setting.since ? '\nRéglage posé ' + atFr(setting.since) + ' : une session ouverte avant ne le voit qu’après redémarrage.' : '') };
+  return { level: 'waiting', text: '💡 mode dégradé : Claude Code ne propose plus de prompt', back,
+    tip: 'Quota en alerte : Claude Code ne génère plus de proposition de prompt (ligne 💡 de la liste vide).\nPour les garder : CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=true dans le bloc env de ~/.claude/settings.json (nouvelles sessions).' };
+}
 // Bandeau compact de la barre latérale : un compte par ligne (le nom seulement s'il y en a plusieurs).
 function renderQuota() {
   const box = $('quota'); if (!box) return;
   const vs = quotas().filter(v => v.ok);
-  const sig = vs.map(v => [v.alias, v.pct, v.level, v.fullAt, v.stale, Math.round(v.elapsed || 0)].join(':')).join('|');
+  const sm = suggestionMode(data && data.quota, data && data.promptSuggestion, Date.now());
+  const sig = vs.map(v => [v.alias, v.pct, v.level, v.fullAt, v.stale, Math.round(v.elapsed || 0), v.models.map(m => m.name + '=' + m.pct + m.level).join(',')].join(':')).join('|') + '|' + (sm ? sm.text + sm.back : '');
   if (box.dataset.sig === sig) return; box.dataset.sig = sig; box.replaceChildren();
   for (const v of vs) {
     const d = el('div', 'qline' + (v.stale ? ' stale' : ''));
@@ -79,8 +112,18 @@ function renderQuota() {
     const txt = el('span', 'qt');
     txt.append(el('b', null, Math.round(v.pct) + ' %'), ' semaine' + (vs.length > 1 ? ' · ' + v.alias.split('@')[0] : ''));
     const info = v.expired ? 'relevé d\'avant la remise' : v.fullAt ? '100 % ' + atFr(v.fullAt) : v.reset ? 'remise ' + atFr(v.reset) : '';
-    d.append(txt, el('span', 'qx' + (v.fullAt ? ' warn' : ''), info), quotaBar(v));
+    const main = el('div', 'qcell'); main.append(txt, el('span', 'qx' + (v.fullAt ? ' warn' : ''), info), quotaBar(v)); d.append(main);
+    for (const m of v.models) {                                                 // même ligne : une barre par modèle limité à part
+      const mc = el('div', 'qcell'), mt = el('span', 'qt'); mt.append(el('b', null, Math.round(m.pct) + ' %'), ' ' + m.name);
+      mc.title = 'Quota hebdomadaire propre au modèle ' + m.name;
+      mc.append(mt, el('span', 'qx'), quotaBar(m)); d.append(mc);
+    }
     d.onclick = () => { findMode = newMode = bcMode = boardMode = false; if (launchMode) closeLauncher(); selected = null; sessionStorage.removeItem('cc.sel'); renderList(); renderDetail(true); };
+    box.append(d);
+  }
+  if (sm) {
+    const d = el('div', 'qdeg ' + sm.level); d.title = sm.tip;
+    d.append(el('span', null, sm.text), el('span', 'qx', sm.back ? 'retour ' + atFr(sm.back) : ''));
     box.append(d);
   }
 }
@@ -92,7 +135,12 @@ function quotaSection() {
     const c = el('div', 'qcard ' + v.level);
     const h = el('div', 'qhead'); h.append(el('b', null, v.ok ? Math.round(v.pct) + ' %' : '—'), el('span', null, v.alias + (data.quota.find(q => q.alias === v.alias)?.plan ? ' · ' + PLAN_FR(data.quota.find(q => q.alias === v.alias).plan) : '')));
     c.append(h);
-    if (v.ok) c.append(quotaBar(v));
+    if (v.ok) {                                                                 // barres côte à côte : tous modèles, puis chaque modèle limité à part
+      const row = el('div', 'qrow');
+      const cell = (pct, label, bar) => { const x = el('div', 'qcell'), t = el('div', 'qmodel'); t.append(el('b', null, Math.round(pct) + ' %'), el('span', null, label)); x.append(t, bar); return x; };
+      if (v.models.length) { row.append(cell(v.pct, 'tous modèles', quotaBar(v))); for (const m of v.models) row.append(cell(m.pct, 'modèle ' + m.name, quotaBar(m))); c.append(row); }
+      else c.append(quotaBar(v));
+    }
     const lines = [];
     if (!v.ok) lines.push(['pas de mesure', v.status || 'aucun relevé']);
     if (v.expired) lines.push(['remise', 'passée depuis le relevé — en attente d\'une nouvelle mesure']);
@@ -100,7 +148,6 @@ function quotaSection() {
     if (v.pace != null) lines.push(['rythme', Math.round(v.elapsed) + ' % de la semaine écoulée · ' + (v.pace === 0 ? 'pile dans le rythme régulier' : pts(v.pace) + (v.pace > 0 ? ' au-dessus' : ' sous') + ' du rythme régulier')]);
     if (v.budgetPerDay != null) lines.push(['budget', Math.round(v.budgetPerDay) + ' %/jour jusqu\'à la remise' + (v.recentPerDay != null ? ' · rythme des 30 dernières heures : ' + Math.round(v.recentPerDay) + ' %/jour' : '')]);
     if (v.projected != null && !v.expired) lines.push(['projection', Math.round(v.projected) + ' % à la remise' + (v.fullAt ? ' — 100 % atteint ' + atFr(v.fullAt) + ' (dans ' + inFr(v.fullAt - Date.now()) + ')' : '')]);
-    if (v.models.length) lines.push(['par modèle', v.models.map(m => m.name + ' ' + Math.round(m.pct) + ' %').join(' · ')]);
     if (v.fiveHour) lines.push(['fenêtre 5 h', Math.round(v.fiveHour.pct) + ' %' + (v.fiveHour.reset ? ' · remise ' + atFr(v.fiveHour.reset) : '')]);
     if (v.age != null) lines.push(['relevé', 'il y a ' + ago(v.age) + (v.status && v.status !== 'ok' ? ' · dernière tentative : ' + v.status : '') + (v.stale && !v.expired && v.status === 'ok' ? ' — le collecteur du lanceur tourne-t-il ?' : '')]);
     const dl = el('dl'); for (const [k, x] of lines) dl.append(el('dt', null, k), el('dd', null, x)); c.append(dl);
@@ -110,8 +157,12 @@ function quotaSection() {
 }
 // « shell » (tour fini, commande en arrière-plan) : si son dernier message te pose une question, c'est à toi ;
 // sinon elle attend sa commande et reprendra seule.
-const stateOf = it => it.kind === 'closed' ? 'closed' : it.kind === 'run' || it.headless ? 'auto' : it.status === 'idle' ? (it.done ? (asks(it.reply) ? 'ask' : 'done') : 'idle')
-  : it.status === 'shell' ? (asks(it.reply) ? 'ask' : 'shell') : (LABEL[it.status] ? it.status : 'idle');
+// « Attend ta décision ? » : l'heuristique OU le petit modèle (askVerdict, rendu par le serveur quelques secondes après la
+// fin du tour, asks-judge.ts). L'heuristique se trompe rarement quand elle dit oui ; le modèle rattrape les formes qu'elle
+// ne connaît pas (« when you give the go », « je peux regarder… », un essai à faire).
+const asksOf = it => asks(it.reply) || !!(it.askVerdict && it.askVerdict.v);
+const stateOf = it => it.kind === 'closed' ? 'closed' : it.kind === 'run' || it.headless ? 'auto' : it.status === 'idle' ? (it.done ? (asksOf(it) ? 'ask' : 'done') : 'idle')
+  : it.status === 'shell' ? (asksOf(it) ? 'ask' : 'shell') : (LABEL[it.status] ? it.status : 'idle');
 function prTags(it) {
   const p = it.prInfo; if (!p || !it.pr) return [];
   const out = [p.state === 'MERGED' ? el('span', 'tag merged', 'mergée') : p.state === 'CLOSED' ? el('span', 'tag closedpr', 'fermée sans merge') : el('span', 'tag ' + (p.draft ? 'draft' : 'open'), p.draft ? 'brouillon' : 'ouverte')];
@@ -530,7 +581,9 @@ function renderLauncher() {
     // Remise à zéro déjà passée : le relevé de ce compte n'a pas été rafraîchi par le lanceur — on le dit.
     const stale = q.weeklyResetsAt && new Date(q.weeklyResetsAt).getTime() < L.now;
     if (stale) { const t = el('div', 'tile idle'); t.append(el('b', null, (q.weeklyPct ?? '?') + ' % ?'), el('span', null, 'quota ' + (q.alias || '') + ' · relevé périmé (remise du ' + new Date(q.weeklyResetsAt).toLocaleDateString('fr-FR') + ' passée)')); tiles.append(t); continue; }
-    const t = el('div', 'tile ' + (q.weeklyPct >= 90 ? 'waiting' : q.weeklyPct >= 75 ? 'ask' : 'idle')); t.append(el('b', null, (q.weeklyPct ?? '?') + ' %'), el('span', null, 'quota semaine ' + (q.alias || '') + (q.weeklyResetsAt ? ' · remise ' + new Date(q.weeklyResetsAt).toLocaleString('fr-FR', { weekday:'short', hour:'2-digit', minute:'2-digit' }) : ''))); tiles.append(t); }
+    const t = el('div', 'tile ' + (q.weeklyPct >= 90 ? 'waiting' : q.weeklyPct >= 75 ? 'ask' : 'idle')); t.append(el('b', null, (q.weeklyPct ?? '?') + ' %'), el('span', null, 'quota semaine ' + (q.alias || '') + (q.weeklyResetsAt ? ' · remise ' + new Date(q.weeklyResetsAt).toLocaleString('fr-FR', { weekday:'short', hour:'2-digit', minute:'2-digit' }) : ''))); tiles.append(t);
+    // Limite propre à un modèle (« Fable ») : sa tuile, mêmes seuils.
+    for (const l of (q.limits || []).filter(l => l.model && l.pct != null)) { const tm = el('div', 'tile ' + (l.pct >= 90 ? 'waiting' : l.pct >= 75 ? 'ask' : 'idle')); tm.append(el('b', null, Math.round(l.pct) + ' %'), el('span', null, 'quota semaine ' + l.model + ' ' + (q.alias || ''))); tiles.append(tm); } }
   const running = L.runs.filter(r => r.running);
   const tr = el('div', 'tile busy'); tr.append(el('b', null, running.length), el('span', null, 'run(s) en cours')); tiles.append(tr);
   const tw = el('div', 'tile ask'); tw.append(el('b', null, L.waiting.length), el('span', null, 'ticket(s) qui attendent')); tiles.append(tw);
@@ -1182,6 +1235,8 @@ function renderList() {
   // Les fermées masquées ne réapparaissent que dans une recherche (étiquetées « masquée »).
   const items = allItems().filter(it => (!favOnly || it.fav) && (!it.hidden || tokens.length) && tokens.every(t => tagMatch(it, t) ?? it.hay.includes(t)));
   $('favonly').className = favOnly ? 'on' : '';
+  $('sortbtn').className = sortMode === 'created' ? 'on' : '';
+  $('sortbtn').title = sortMode === 'created' ? 'Trié par date de création (la plus récente d’abord) — clic : par dernière activité' : 'Trié par dernière activité — clic : par date de création';
   const expandAll = tokens.length || favOnly;     // recherche ou filtre favoris : on cherche aussi dans les groupes repliés
   const list = $('list'); list.replaceChildren(); flat = [];
   if (data.reboot) {               // après un redémarrage de Windows : rappel en tête, la vue d'ensemble propose la réouverture
@@ -1214,7 +1269,9 @@ function renderList() {
   for (const g of GROUPS) {
     // 🤖 : en cours d'abord (runs et autres claude -p), puis du plus récent au plus ancien.
     const live = it => it.kind === 'run' ? it.run.running : it.kind === 'open';
-    const rows = items.filter(it => g.states.includes(it.state)).sort(g.key === 'auto' ? (a, b) => (live(b) - live(a)) || (b.at || b.since) - (a.at || a.since)
+    const rows = items.filter(it => g.states.includes(it.state)).sort(sortMode === 'created'
+      ? (g.key === 'auto' ? (a, b) => (live(b) - live(a)) || createdOf(b) - createdOf(a) : (a, b) => (b.fav - a.fav) || createdOf(b) - createdOf(a))
+      : g.key === 'auto' ? (a, b) => (live(b) - live(a)) || (b.at || b.since) - (a.at || a.since)
       : (a, b) => (b.fav - a.fav) || (g.asc ? (TODO.indexOf(a.state) - TODO.indexOf(b.state) || a.since - b.since) : b.since - a.since));
     if (!rows.length && (g.key !== 'todo' || expandAll)) continue;   // « À traiter » reste visible même vide
     const isCollapsed = !expandAll && collapsed.has(g.key);
@@ -1249,7 +1306,7 @@ function renderList() {
       const tt = el('span', 't'); if (it.fav) tt.append(el('span', 'star', '★ ')); tt.append(label(it));
       { const d = driftTag(it); if (d) tt.append(d); }
       if (it.hidden) tt.append(el('span', 'tag hid', 'masquée'));
-      r.append(el('span', 'dot'), tt, el('span', 'age', (it.model ? modelName(it.model) + ' · ' : '') + (it.tokens ? ktok(it.tokens) + ' · ' : '') + ago(data.now - it.since)));
+      r.append(el('span', 'dot'), tt, el('span', 'age', (it.model ? modelName(it.model) + ' · ' : '') + (it.tokens ? ktok(it.tokens) + ' · ' : '') + (sortMode === 'created' ? 'créée il y a ' + ago(data.now - createdOf(it)) : ago(data.now - it.since))));
       const merged = (closable(it) ? '✓ peut se fermer · ' : it.prInfo && it.prInfo.state === 'MERGED' ? 'PR mergée · ' : '') + (it.status === 'shell' && it.state !== 'shell' ? 'commande en arrière-plan · ' : '');
       const sub = el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'open' ? merged + (it.state === 'idle' ? (it.lastPrompt || it.name) : LABEL[it.state] + (it.lastPrompt ? ' · ' + it.lastPrompt : '')) : 'fermée · ' + merged + (it.lastPrompt || short(it.cwd)));
       r.append(sub);
@@ -1274,8 +1331,8 @@ function renderList() {
       const sg =canWrite && it.kind === 'open' && (it.status === 'idle' || it.status === 'shell') && it.suggestion;
       if (sg) {                                          // proposition de Claude Code : ▶ la lance sans ouvrir la session
         const line = el('span', 'sug'), cut = sg.endsWith('…');
-        const go = el('button', 'sgo', '▶'); go.disabled = cut;
-        go.title = cut ? 'Coupée à l’écran : ouvrir la session pour la modifier' : 'Lancer cette proposition (revérifiée à l’écran juste avant)';
+        const go = el('button', 'sgo', '▶');
+        go.title = cut ? 'Coupée à l’écran : lancée telle que Claude Code l’a écrite (Tab puis Entrée dans le terminal)' : 'Lancer cette proposition (revérifiée à l’écran juste avant)';
         go.onclick = e => { e.stopPropagation(); launchSuggestion(it, sg); };
         go.ondblclick = e => e.stopPropagation();
         line.append(go, el('span', 'stx', '💡 ' + sg)); line.title = 'Proposition de Claude Code : ' + sg; r.append(line);
@@ -1492,7 +1549,8 @@ async function sendReply() {
 }
 // PROPOSITION DE PROMPT : le texte grisé que Claude Code affiche dans l'invite vide après un tour (Tab dans le
 // terminal pour l'accepter). Lue par le serveur avec l'écran (/api/screen → suggestion) ; « Lancer » la tape dans la
-// session, le serveur revérifiant juste avant qu'elle est ENCORE exactement à l'écran. « Modifier » (ou Tab dans la
+// session, le serveur revérifiant juste avant qu'elle est ENCORE exactement à l'écran. Coupée à l'écran (« … »), elle
+// n'est pas tapée mais acceptée dans le terminal (Tab, Entrée) : le serveur n'en connaît pas la fin. « Modifier » (ou Tab dans la
 // zone de réponse vide, ou la touche p) la recopie dans la zone de réponse pour l'ajuster avant d'envoyer.
 let suggestion = null, suggestKey = null;
 function renderSuggest(it, s) {
@@ -1505,19 +1563,19 @@ function renderSuggest(it, s) {
   if (changed) renderDetail();                           // placeholder de la zone de réponse
   if (!s) return;
   const cut = s.endsWith('…');
-  const go = el('button', 'primary', '▶ Lancer'); go.disabled = cut;
-  go.title = cut ? 'Coupée à l’écran : la modifier avant de l’envoyer' : 'Tape cette proposition dans la session et l’envoie (revérifiée à l’écran juste avant)';
+  const go = el('button', 'primary', '▶ Lancer');
+  go.title = cut ? 'Accepte la proposition dans le terminal (Tab puis Entrée) : c’est son texte complet qui part, pas la version coupée' : 'Tape cette proposition dans la session et l’envoie (revérifiée à l’écran juste avant)';
   go.onclick = () => launchSuggestion(it, s);
   const ed = el('button', null, '✎ Modifier'); ed.title = 'Recopie la proposition dans la zone de réponse  ( p )'; ed.onclick = () => fillSuggestion();
   box.append(el('span', 'slabel', '💡 Proposition de Claude Code'), el('span', 'stext', s), go, ed);
-  if (cut) box.append(el('div', 'hint', 'Coupée à l’écran (…) : « Modifier » pour la compléter, ou Tab dans le terminal.'));
+  if (cut) box.append(el('div', 'hint', 'Coupée à l’écran (…) : « Lancer » envoie son texte complet, que la page ne peut pas lire ; « Modifier » pour la réécrire.'));
 }
 function fillSuggestion() {
   const inp = $('sendtext'); if (!inp || inp.disabled || !suggestion) return false;
   inp.value = suggestion.endsWith('…') ? suggestion.slice(0, -1).trimEnd() : suggestion; growArea(inp); inp.focus(); return true;
 }
 async function launchSuggestion(it, text) {
-  if (!text || sending || text.endsWith('…')) return;
+  if (!text || sending) return;
   sending = true; say('lancement de la proposition dans « ' + label(it) + ' »…');
   try {
     const r = await (await fetch('/api/send?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ text, suggestion: true }) })).json();
@@ -2385,6 +2443,7 @@ $('bcbtn').onclick = () => bcMode ? closeBc() : openBc();
 $('boardbtn').onclick = () => boardMode ? closeBoard() : openBoard();
 $('launchbtn').onclick = () => launchMode ? closeLauncher() : openLauncher();
 $('favonly').onclick = () => { favOnly = !favOnly; localStorage.setItem('cc.favonly', favOnly ? '1' : '0'); renderList(); };
+$('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 'created'; localStorage.setItem('cc.sort', sortMode); say(sortMode === 'created' ? 'tri par date de création' : 'tri par dernière activité'); renderList(); };
 // Largeur de la barre latérale : glisser son bord droit, double-clic pour revenir à 360 px ; retenue d'une visite à l'autre.
 (() => {
   const app = $('app'), rz = $('resizer');

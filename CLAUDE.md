@@ -6,6 +6,9 @@ messages, comments — is readable by anyone.
 - **No internal references.** No name of a colleague or customer, no real ticket number, no company or internal
   tool name, no path from someone's machine, no internal document. The `garde` CI job checks files and the
   pull-request title (`node server/scripts/guard.mjs`); descriptions and comments are the author's responsibility.
+  One exemption: the session tagger (`server/src/tagger.ts`, its rules file and its test), published as-is with
+  the original team's rules.
+- **No credentials, ever**: no token, password or key, in any file. `gitleaks` reads every file.
 - **Nothing machine-specific in the code.** A path, an address, a team or a person's name comes from the machine's
   configuration (`~/.claude/sessions-desk/config.json`, `server/src/modules.ts`), never from a default value. An
   integration only one team has is an optional module, off by default.
