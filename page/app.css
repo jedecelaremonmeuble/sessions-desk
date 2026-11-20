@@ -402,3 +402,5 @@ body.ro .crow .cb button { display:none; }
 
 /* Bascule de langue (vue d'ensemble) */
 .langsw { float:right; margin-top:-28px; font-size:12px; padding:2px 8px; }
+/* Choix en cours sur ce fil : les boutons des messages restent visibles, pour en retenir plusieurs. */
+.crow.picking .cmsg .who button.tos { opacity:1; } .cmsg.anchor .who button.tos { color:var(--ask); border-color:var(--ask); }
