@@ -20,6 +20,9 @@ read their screen and conversation, and lets you answer them — from one browse
 - **Read** — the live terminal screen of a session, or its full conversation rendered from the transcript.
 - **Answer** — type a reply, press a key, accept the suggested prompt, queue a message while the session works,
   send the same message to several sessions.
+- **Slash commands** — type `/` in the reply box for the menu of the session’s commands (built-in, your skills and
+  commands, the project’s, enabled plugins), with a warning for those that open a menu, cannot be undone or change
+  a lasting setting. A mistyped command is refused instead of running its closest match.
 - **Start, fork, reopen, close** — new session in a folder or in a fresh git worktree, a fork of an existing
   session, reopen a closed one, close the ones whose work is merged.
 - **Find** — full-text search across conversations, favourites, hide, tags.
@@ -87,6 +90,7 @@ or the `SD_CONFIG` environment variable). The file is optional. A template is in
 | `ui.prUrl`, `ui.ticketUrl`, `ui.ticketLabel` | Where pull-request and ticket links point |
 | `ui.models` | Relative cost of each model, so the page flags sessions on a pricier model: `[{ "match": "fable", "label": "Fable", "cost": 2, "note": "8 $ / 40 $" }, …]` — `match` is a piece of the model id (first match wins), `cost` a multiplier against the reference model (cost 1). Omitted: built-in table from public API prices (Opus = 1, Fable ×2, Sonnet ×0.5, Haiku ×0.025). When set, it replaces the built-in table. Entries with `"offer": false` are not offered in the new-session form (there, `match` is passed as is to `claude --model`). |
 | `ui.quota` | Weekly quota thresholds in %: `{ "warn": 75, "alert": 90 }` (orange, then red + launcher alert) |
+| `ui.shortcuts` | Buttons under the reply box that send a ready-made slash command in one click: `[{ "label": "Reconnect MCP", "command": "/mcp reconnect all", "confirm": "" }]`, 8 at most. Absent: two defaults (reconnect MCP servers, compact). Empty list: no button |
 | `delays` | `{ "notifyAfterSeconds": 15, "notifyDoneAfterMinutes": 3, "closedDays": 14 }` — the command-line options of the same role win |
 | `tailscaleExe` | Path to `tailscale.exe` (`""` turns remote access off); default: the standard install folder |
 | `ui.language` | `en` or `fr`: the page language on this machine (default: the browser's) |

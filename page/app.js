@@ -2477,17 +2477,130 @@ document.addEventListener('paste', e => {
 });
 
 let sending = false;
-async function sendReply() {
+// ── Commandes « / » dans les zones de saisie ──
+// Taper « / » en début de zone ouvre le menu des commandes de la session (/api/commands : intégrées, skills et
+// commandes du poste, du projet et des plugins activés). ↑ ↓ choisissent, Tab ou Entrée complètent, Échap ferme ;
+// Entrée n'envoie que si le nom tapé est exactement celui d'une commande. Sous le menu, ce qu'il faut savoir avant
+// d'envoyer : ouvre un menu dans le terminal, ne se rattrape pas, change aussi le réglage par défaut des prochaines
+// sessions, ou attend la fin du tour. Le serveur refuse une commande inconnue (faute de frappe : dans le terminal,
+// « /mod » + Entrée lance /model) ; « Envoyer quand même » reste possible, la liste pouvant être en retard.
+const slashCache = new Map();                             // pid ('' : message groupé) → { at, commands, shortcuts }
+async function loadCommands(pid) {
+  const k = String(pid || ''), hit = slashCache.get(k);
+  if (hit && Date.now() - hit.at < 30000) return hit;
+  try {
+    const r = await (await fetch('/api/commands' + (k ? '?pid=' + k : ''))).json();
+    const v = { at: Date.now(), commands: r.commands || [], shortcuts: r.shortcuts || [] }; slashCache.set(k, v); return v;
+  } catch { return hit || { at: 0, commands: [], shortcuts: [] }; }
+}
+const knownCommands = pid => (slashCache.get(String(pid || '')) || { commands: [] }).commands;
+// Calcul PUR (testé) : ce que la zone contient vu comme une commande. null : pas une commande (texte ordinaire,
+// chemin « /api/x »). `typing` : le nom est encore en cours de frappe (rien après lui) ⇒ `items`, les commandes à
+// proposer — celles qui commencent par ce qui est tapé, puis celles qui le contiennent.
+function slashState(value, commands) {
+  const v = String(value || '').replace(/^\s+/, ''), m = /^\/[^\s/]*/.exec(v);
+  if (!m || v[m[0].length] === '/' || /[\r\n]/.test(v)) return null;
+  const token = m[0].toLowerCase(), rest = v.slice(token.length), typing = rest === '';
+  if (token.length > 1 && !/^\/[a-z][a-z0-9_.:-]*$/.test(token)) return null;
+  const cmd = commands.find(c => c.name === token) || null, q = token.slice(1);
+  const items = !typing ? [] : commands.filter(c => c.name.startsWith(token)).concat(q ? commands.filter(c => !c.name.startsWith(token) && c.name.includes(q)) : []);
+  return { token, typing, cmd, items, args: /\S/.test(rest) };
+}
+// Calcul PUR (testé) : les avertissements d'une commande prête à partir. `busy` : la session travaille ; `many` :
+// message groupé.
+function slashNotes(st, busy, many) {
+  if (!st || st.token.length < 2) return [];
+  if (!st.cmd) return st.typing && st.items.length ? [] : [T('commande absente de la liste : elle sera refusée (faute de frappe ?) — tu pourras l’envoyer quand même', 'command not in the list: it will be refused (typo?) — you will be able to send it anyway')];
+  const c = st.cmd, dialog = c.dialog === 'always' || (c.dialog === 'bare' && !st.args), out = [];
+  if (dialog) out.push(many ? T('ouvre un menu dans le terminal : refusée en message groupé', 'opens a menu in the terminal: refused in a grouped message') : T('ouvre un menu dans le terminal de la session', 'opens a menu in the session terminal'));
+  if (c.risky) out.push(many ? T('ne se rattrape pas : refusée en message groupé', 'cannot be undone: refused in a grouped message') : T('ne se rattrape pas', 'cannot be undone'));
+  if (c.persist && st.args) out.push(T('change aussi le réglage par défaut des prochaines sessions', 'also changes the default for future sessions'));
+  if (busy && !c.immediate) out.push(T('session au travail : exécutée à la fin du tour', 'session working: runs at the end of the turn'));
+  return out;
+}
+const SLASH_SRC = { builtin: '', user: T('perso', 'user'), project: T('projet', 'project'), plugin: 'plugin' };
+let slashSel = 0, slashShut = null;                       // ligne surlignée ; texte pour lequel le menu a été fermé (Échap)
+function slashBox(inp) { let b = inp.parentNode.querySelector('.slashmenu'); if (!b) { b = el('div', 'slashmenu'); b.hidden = true; inp.after(b); } return b; }
+function slashComplete(inp, c) {
+  inp.value = c.name + (c.args || c.dialog === 'bare' ? ' ' : ''); inp.setSelectionRange(inp.value.length, inp.value.length);
+  slashSel = 0; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus();
+}
+// Menu et notes sous la zone. `ctx()` rend { pid, busy, many } au moment du rendu (la session change sous la zone).
+function slashRender(inp, ctx) {
+  const box = slashBox(inp), c = ctx(), st = slashState(inp.value, knownCommands(c.pid));
+  if (!st || slashShut === inp.value) { box.hidden = true; box.replaceChildren(); return null; }
+  if (!slashCache.has(String(c.pid || ''))) { loadCommands(c.pid).then(() => { if (document.contains(inp)) slashRender(inp, ctx); }); }
+  box.replaceChildren();
+  const items = st.items.slice(0, 40); slashSel = Math.max(0, Math.min(slashSel, items.length - 1));
+  items.forEach((x, i) => {
+    const r = el('div', 'srow' + (i === slashSel ? ' sel' : ''));
+    r.append(el('span', 'sn', x.name), el('span', 'sa', x.args || ''), el('span', 'sd', x.desc || ''));
+    const tag = [SLASH_SRC[x.source], x.dialog === 'always' ? 'menu' : '', x.risky ? '⚠' : ''].filter(Boolean).join(' · '); if (tag) r.append(el('span', 'st', tag));
+    r.onmousedown = e => { e.preventDefault(); slashComplete(inp, x); };
+    box.append(r);
+  });
+  if (st.items.length > items.length) box.append(el('div', 'snote', T('… ' + (st.items.length - items.length) + ' de plus : précise le nom', '… ' + (st.items.length - items.length) + ' more: type more of the name')));
+  if (st.cmd && !st.typing) { const r = el('div', 'srow info'); r.append(el('span', 'sn', st.cmd.name), el('span', 'sa', st.cmd.args || ''), el('span', 'sd', st.cmd.desc || '')); box.append(r); }
+  if (st.cmd && st.cmd.forms.length && !st.args) for (const f of st.cmd.forms) { const b = el('button', 'quick', f); b.title = T('Sans menu dans le terminal', 'No menu in the terminal'); b.onmousedown = e => { e.preventDefault(); inp.value = f; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus(); }; box.append(b); }
+  for (const n of slashNotes(st, c.busy, c.many)) box.append(el('div', 'snote', '⚠ ' + n));
+  box.hidden = !box.childNodes.length;
+  const cur = box.querySelector('.srow.sel'); if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
+  return box.hidden ? null : { st, items };
+}
+function slashAttach(inp, ctx) {
+  loadCommands(ctx().pid);
+  inp.addEventListener('input', () => { if (slashShut !== inp.value) slashShut = null; slashRender(inp, ctx); });
+  inp.addEventListener('blur', () => { const b = slashBox(inp); setTimeout(() => { if (document.activeElement !== inp) b.hidden = true; }, 150); });
+  inp.addEventListener('focus', () => slashRender(inp, ctx));
+  inp.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey || slashBox(inp).hidden) return;
+    const open = slashRender(inp, ctx); if (!open) return;
+    const pick = open.items[slashSel], stop = () => { e.preventDefault(); e.stopPropagation(); };
+    if (e.key === 'Escape') { stop(); slashShut = inp.value; slashRender(inp, ctx); }
+    else if (!open.items.length) return;
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { stop(); slashSel = (slashSel + (e.key === 'ArrowDown' ? 1 : open.items.length - 1)) % open.items.length; slashRender(inp, ctx); }
+    else if (e.key === 'Tab' && !e.shiftKey && pick) { stop(); slashComplete(inp, pick); }
+    // Entrée : complète tant que le nom tapé n'est pas exactement une commande (ou qu'une autre ligne est surlignée) ; sinon elle envoie.
+    else if (e.key === 'Enter' && !e.shiftKey && pick && (!open.st.cmd || pick.name !== open.st.cmd.name)) { stop(); slashComplete(inp, pick); }
+  });
+}
+// Avant d'envoyer une commande : confirmation de ce qui ne se rattrape pas ou change un réglage durable.
+function slashConfirm(text, pid, who) {
+  const st = slashState(text, knownCommands(pid)); if (!st || !st.cmd) return true;
+  const why = st.cmd.risky ? T('Elle ne se rattrape pas.', 'It cannot be undone.') : st.cmd.persist && st.args ? T('Elle change aussi le réglage par défaut des prochaines sessions.', 'It also changes the default for future sessions.') : '';
+  return !why || confirm(T('Envoyer « ' + text.trim() + ' » à ' + who + ' ?\n\n' + (st.cmd.desc ? st.cmd.desc + '. ' : '') + why, 'Send "' + text.trim() + '" to ' + who + '?\n\n' + (st.cmd.desc ? st.cmd.desc + '. ' : '') + why));
+}
+const unknownAsk = name => confirm(T('« ' + name + ' » n’est pas dans la liste des commandes de cette session (faute de frappe ?).\n\nDans le terminal, Entrée lancerait la commande la plus proche. L’envoyer quand même ?', '"' + name + '" is not in this session’s command list (typo?).\n\nIn the terminal, Enter would run the closest command. Send it anyway?'));
+// Boutons de raccourci (ui.shortcuts de config.json, ou ceux par défaut) : une commande toute faite, en un clic.
+async function shortcutBar(bar, pid, run) {
+  const { shortcuts } = await loadCommands(pid); if (!document.contains(bar)) return;
+  bar.replaceChildren();
+  for (const s of shortcuts) { const b = el('button', 'quick cmd', s.label); b.title = s.command; b.onclick = () => { if (!s.confirm || confirm(s.confirm)) run(s.command); }; bar.append(b); }
+}
+async function sendShortcut(it, command) {
+  if (sending) return;
+  if (link.down) return say(T('serveur injoignable', 'server unreachable'));
+  if (!slashConfirm(command, it.pid, '« ' + label(it) + ' »')) return;
+  sending = true; say(T('envoi de ' + command + ' à « ' + label(it) + ' »…', 'sending ' + command + ' to "' + label(it) + '"…'));
+  try {
+    const r = await (await fetch('/api/send?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ text: command, force: true }) })).json();
+    say(r.error ? T('non envoyé : ', 'not sent: ') + r.error : T(command + (it.status === 'busy' ? ' mis en file pour « ' : ' envoyé à « ') + label(it) + ' »', command + (it.status === 'busy' ? ' queued for "' : ' sent to "') + label(it) + '"'));
+  } catch { say(T('échec de la demande', 'request failed')); }
+  sending = false; tick();
+}
+async function sendReply(force = false) {
   const it = selected && byKey(selected), inp = $('sendtext');
   if (!it || it.kind !== 'open' || !inp || sending) return;
   if (link.down) return say(T('serveur injoignable — le message reste dans la zone, à renvoyer une fois reconnecté', 'server unreachable — the message stays in the box, send it again once reconnected'));
   const akey = 'reply:' + it.key;
   if (attBusy(akey)) return say(T('pièce jointe en cours d’envoi — un instant', 'attachment still uploading — one moment'));
   const text = withAttachments(akey, inp.value); if (!text) return;
+  if (!force && !slashConfirm(text, it.pid, '« ' + label(it) + ' »')) return;
   const queued = it.status === 'busy';
   sending = true; inp.disabled = $('sendbtn').disabled = true; say(T((queued ? 'mise en file pour « ' : 'envoi à « ') + label(it) + ' »…', (queued ? 'queueing for "' : 'sending to "') + label(it) + '"…'));
   try {
-    const r = await (await fetch('/api/send?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ text }) })).json();
+    const r = await (await fetch('/api/send?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(force ? { text, force: true } : { text }) })).json();
+    if (r.unknownCommand && !force && unknownAsk(r.unknownCommand)) { sending = false; return sendReply(true); }
     if (r.error) say(T('non envoyé : ', 'not sent: ') + r.error); else { draftSave(sessionStorage, it.key, ''); inp.value = ''; growArea(inp); clearAttachments(akey); say(queued ? T('mis en file pour « ' + label(it) + ' » — Claude Code le prendra dès qu’il peut', 'queued for "' + label(it) + '" — Claude Code will take it as soon as it can') : T('envoyé à « ' + label(it) + ' »', 'sent to "' + label(it) + '"')); }
   } catch { say(T('échec de la demande', 'request failed')); }
   sending = false; tick();
@@ -2633,6 +2746,9 @@ function renderBc() {
   const qn = el('button', null, T('Aucune', 'None')); qn.onclick = () => { bcPick.clear(); fillBc(); };
   const qc = el('button', null, T('Celles qui peuvent se fermer', 'Those that can be closed')); qc.onclick = () => { bcPick.clear(); bcEligible().filter(closable).forEach(it => bcPick.add(it.key)); fillBc(); };
   quick.append(qa, qn, qc);
+  // Commandes « / » : même menu que « Répondre » ; un raccourci pré-remplit le message (les sessions se cochent à part).
+  slashAttach(tx, () => ({ pid: '', busy: false, many: true }));
+  const scb = el('span', 'shortcuts'); quick.append(scb); shortcutBar(scb, '', c => { tx.value = c; growArea(tx); tx.focus(); });
   const go = el('button', 'primary', T('Envoyer', 'Send')); go.id = 'bc-go'; go.onclick = () => sendBc();
   const cancel = el('button', null, T('Fermer', 'Close')); cancel.onclick = () => closeBc();
   const acts = el('div', 'actions'); acts.append(go, cancel);
@@ -2652,15 +2768,17 @@ function fillBc() {
   const go = $('bc-go'); if (go) go.textContent = T('Envoyer à ' + plural(bcPick.size, 'session', 'sessions'), 'Send to ' + plural(bcPick.size, 'session', 'sessions'));
   list.onchange = () => { if ($('bc-go')) $('bc-go').textContent = T('Envoyer à ' + plural(bcPick.size, 'session', 'sessions'), 'Send to ' + plural(bcPick.size, 'session', 'sessions')); };
 }
-async function sendBc() {
+async function sendBc(force = false) {
   const tx = $('bc-text'); if (!tx || bcSending) return;
   if (attBusy('bc')) return say(T('pièce jointe en cours d’envoi — un instant', 'attachment still uploading — one moment'));
   const text = withAttachments('bc', tx.value); const targets = bcEligible().filter(it => bcPick.has(it.key));
   if (!text) return say(T('message vide', 'empty message')); if (!targets.length) return say(T('aucune session cochée', 'no session ticked'));
-  if (!confirm(T('Taper « ' + text + ' » dans ' + plural(targets.length, 'session', 'sessions') + ' ?\n\n', 'Type "' + text + '" into ' + plural(targets.length, 'session', 'sessions') + '?\n\n') + targets.map(it => '• ' + label(it)).join('\n'))) return;
+  if (!force && !confirm(T('Taper « ' + text + ' » dans ' + plural(targets.length, 'session', 'sessions') + ' ?\n\n', 'Type "' + text + '" into ' + plural(targets.length, 'session', 'sessions') + '?\n\n') + targets.map(it => '• ' + label(it)).join('\n'))) return;
   bcSending = true; $('bc-go').disabled = true; say(T('envoi à ' + plural(targets.length, 'session', 'sessions') + '…', 'sending to ' + plural(targets.length, 'session', 'sessions') + '…'));
   try {
-    const r = await (await fetch('/api/send-many', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ pids: targets.map(it => it.pid), text }) })).json();
+    const r = await (await fetch('/api/send-many', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ pids: targets.map(it => it.pid), text, force }) })).json();
+    const unk = r.results.find(x => x.unknownCommand);
+    if (unk && !force && unknownAsk(unk.unknownCommand)) { bcSending = false; return sendBc(true); }
     const ok = r.results.filter(x => !x.error), ko = r.results.filter(x => x.error);
     say(T(plural(ok.length, 'envoi', 'envois'), plural(ok.length, 'send', 'sends')) + (ko.length ? T(' · ' + ko.length + ' sauté(s) : ', ' · ' + ko.length + ' skipped: ') + ko.map(x => (x.title || x.pid) + ' (' + x.error + ')').join(', ') : ''));
     if (!ko.length) { tx.value = ''; growArea(tx); bcPick.clear(); clearAttachments('bc'); }
@@ -2873,6 +2991,10 @@ function renderDetail(force) {
       const btn = el('button', 'primary', T('Envoyer', 'Send')); btn.id = 'sendbtn'; btn.onclick = () => sendReply();
       box.append(inp, btn);
       for (const q of ['go', T('oui', 'yes'), T('non', 'no'), 'continue']) { const b = el('button', 'quick', q); b.title = T('Pré-remplit la réponse (n\'envoie pas)', 'Prefills the reply (does not send)'); b.onclick = () => { inp.value = q; growArea(inp); inp.focus(); }; box.append(b); }
+      // Commandes « / » : menu sous la zone, et boutons de raccourci (une commande toute faite, en un clic).
+      const live = () => byKey(inp.dataset.key) || it;
+      slashAttach(inp, () => ({ pid: live().pid, busy: live().status === 'busy', many: false }));
+      const sc = el('span', 'shortcuts'); box.append(sc); shortcutBar(sc, it.pid, c => sendShortcut(live(), c));
       const hint = el('div', 'hint'); hint.id = 'sendhint'; box.append(attachBar('reply:' + it.key), hint); body.append(box);
       if (inp.value) growArea(inp);   // brouillon repris : la zone reprend sa hauteur
     }
@@ -3054,7 +3176,7 @@ function renderOverview() {
   body.append(el('h2', null, T('Raccourcis clavier', 'Keyboard shortcuts')));
   const keys = el('div', 'keys');
   for (const [k, d] of [['/', T('rechercher (titre, prompt, numéro de PR, dossier, identifiant)', 'search (title, prompt, PR number, folder, id)')], ['↑ ↓', T('parcourir les sessions', 'move through the sessions')], [T('Entrée', 'Enter'), T('afficher l\'onglet de la session (ou rouvrir une session fermée)', 'show the session tab (or reopen a closed session)')],
-                        ['n', T('aller à la prochaine session à traiter et afficher son onglet', 'go to the next session to handle and show its tab')], ['r', T('répondre à la session sélectionnée (Entrée envoie)', 'reply to the selected session (Enter sends)')], ['p', T('reprendre la proposition de prompt de Claude Code dans la zone de réponse (Entrée l’envoie) — aussi Tab dans la zone vide', 'take the Claude Code prompt suggestion into the reply box (Enter sends it) — also Tab in the empty box')],['f', T('mettre la session en favori, ou la retirer (★ à côté de la recherche : favoris seulement)', 'add the session to favourites, or remove it (★ next to the search: favourites only)')], ['c', T('copier la commande de reprise', 'copy the resume command')], ['1 – 9', T('session bloquée sur un dialogue : choisir l’option correspondante (tapée dans son terminal)', 'session waiting on a dialog: pick the matching option (typed into its terminal)')], ['+', T('lancer une nouvelle session (dossier, premier message, modèle)', 'start a new session (folder, first message, model)')], ['d', T('nouvelle session à partir de la session sélectionnée : elle reprend toute sa conversation (fork), l’originale n’est pas touchée', 'new session from the selected session: it carries over its whole conversation (fork), the original is not touched')],['h', T('basculer entre l’écran du terminal et la conversation complète (tout l’historique, relu dans le transcript)', 'switch between the terminal screen and the full conversation (the whole history, read from the transcript)')], ['b', T('revenir à la session consultée juste avant (liste « Consultées récemment » en tête)', 'go back to the session viewed just before ("Recently viewed" list at the top)')], ['x', T('fermer la session sélectionnée (avec confirmation ; elle reste reprenable) — sur une session déjà fermée : la masquer / ré-afficher', 'close the selected session (with confirmation; it can still be reopened) — on a session already closed: hide / show it again')], [T('Échap', 'Esc'), T('vider la recherche, puis revenir à cette vue', 'clear the search, then come back to this view')],
+                        ['n', T('aller à la prochaine session à traiter et afficher son onglet', 'go to the next session to handle and show its tab')], ['r', T('répondre à la session sélectionnée (Entrée envoie)', 'reply to the selected session (Enter sends)')], ['/', T('zone de réponse : menu des commandes de la session — ↑ ↓ choisir, Tab ou Entrée compléter, Échap fermer', 'reply box: the session’s command menu — ↑ ↓ choose, Tab or Enter complete, Esc close')], ['p', T('reprendre la proposition de prompt de Claude Code dans la zone de réponse (Entrée l’envoie) — aussi Tab dans la zone vide', 'take the Claude Code prompt suggestion into the reply box (Enter sends it) — also Tab in the empty box')],['f', T('mettre la session en favori, ou la retirer (★ à côté de la recherche : favoris seulement)', 'add the session to favourites, or remove it (★ next to the search: favourites only)')], ['c', T('copier la commande de reprise', 'copy the resume command')], ['1 – 9', T('session bloquée sur un dialogue : choisir l’option correspondante (tapée dans son terminal)', 'session waiting on a dialog: pick the matching option (typed into its terminal)')], ['+', T('lancer une nouvelle session (dossier, premier message, modèle)', 'start a new session (folder, first message, model)')], ['d', T('nouvelle session à partir de la session sélectionnée : elle reprend toute sa conversation (fork), l’originale n’est pas touchée', 'new session from the selected session: it carries over its whole conversation (fork), the original is not touched')],['h', T('basculer entre l’écran du terminal et la conversation complète (tout l’historique, relu dans le transcript)', 'switch between the terminal screen and the full conversation (the whole history, read from the transcript)')], ['b', T('revenir à la session consultée juste avant (liste « Consultées récemment » en tête)', 'go back to the session viewed just before ("Recently viewed" list at the top)')], ['x', T('fermer la session sélectionnée (avec confirmation ; elle reste reprenable) — sur une session déjà fermée : la masquer / ré-afficher', 'close the selected session (with confirmation; it can still be reopened) — on a session already closed: hide / show it again')], [T('Échap', 'Esc'), T('vider la recherche, puis revenir à cette vue', 'clear the search, then come back to this view')],
                         [T('sélection', 'selection'), T('tout texte sélectionné à la souris est copié dans le presse-papier au relâchement', 'any text selected with the mouse is copied to the clipboard on release')], ['Ctrl+K Ctrl+U', T('zone de saisie : couper jusqu’à la fin / au début de la ligne', 'text box: cut to the end / start of the line')], ['Ctrl+Y', T('zone de saisie : recoller le dernier texte coupé', 'text box: paste back the last cut text')], ['Ctrl+E', T('zone de saisie : aller en fin de ligne', 'text box: go to the end of the line')], ['Alt+B Alt+F', T('zone de saisie : reculer / avancer d’un mot', 'text box: move back / forward one word')], ['Ctrl+_', T('zone de saisie : annuler (comme Ctrl+Z)', 'text box: undo (like Ctrl+Z)')]]) {
     const kk = el('span'); k.split(' ').forEach((x, i) => { if (i) kk.append(' '); kk.append(el('kbd', null, x)); }); keys.append(kk, el('span', null, d));
   }
