@@ -17,7 +17,7 @@ const actions = (): Actions => new Actions({
   setSeen: () => undefined,
   driver: { call: async (op: string, args: Record<string, unknown>) => { calls.push({ op, args }); return op === 'suggestion' ? onScreen : 0; } },
 } as unknown as Dashboard);
-const sent = (): Call[] => calls.filter((c) => c.op !== 'suggestion');
+const sent = (): Call[] => calls.filter((c) => c.op !== 'suggestion' && c.op !== 'read');
 const log = (): Record<string, unknown> => JSON.parse(readFileSync(join(dir, 'sessions-dashboard-sent.jsonl'), 'utf8').trim().split('\n').at(-1)!) as Record<string, unknown>;
 
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'sd-cut-')); calls = []; onScreen = null; status = 'idle'; });

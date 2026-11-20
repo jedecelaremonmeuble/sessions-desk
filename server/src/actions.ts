@@ -5,12 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { run } from './gitpr.ts';
+import { draftHolds, promptDraft } from './prompt.ts';
 import { isRelance } from './quiet.ts';
 import { checkTag, type Dashboard, type Session } from './state.ts';
 import { addContent, GUID, ieq, isDir, netTrim, nowMs, psArray, psIntZero, psString, sleep } from './util.ts';
 
 const KEY_NAMES = ['Enter', 'Esc', 'Up', 'Down', 'Left', 'Right', 'Tab', 'ShiftTab', 'Space', 'Backspace'];
 const NOT_EMPTY = "l'invite de la session n'est pas vide (brouillon, menu ou dialogue ouvert)";
+const NOT_GONE = "tapé dans l'invite de la session, mais pas parti : le texte y est resté — envoie-le ou vide l'invite depuis le panneau « Invite occupée »";
 /** « ; » sépare les commandes de wt.exe, même entre guillemets : un dossier qui en contient couperait la ligne en deux
  *  commandes. Ouvrir, rouvrir ou relancer une session dans un tel dossier est refusé. */
 export const SEMICOLON_REFUSED = 'dossier refusé : son chemin contient « ; », que Windows Terminal lirait comme une seconde commande';
@@ -25,6 +27,10 @@ export const SHELL_RESUME: Record<string, (cwd: string, resume: string) => strin
 
 /** Nettoyage d'une ligne envoyée : ni saut de ligne, ni tabulation, ni caractère de contrôle. */
 export function cleanLine(text: string): string { return text.replace(/[\r\n\t]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, ''); }
+/** Ligne prête à être tapée puis validée par Entrée. Une barre oblique inverse en fin de ligne est retirée : dans
+ *  Claude Code, « \ » puis Entrée va à la ligne au lieu d'envoyer — le message resterait dans l'invite, qui refuserait
+ *  ensuite tout envoi. */
+export function submitLine(text: string): string { return netTrim(netTrim(cleanLine(text)).replace(/[\\\s]+$/, '')); }
 
 function alive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } }
 async function waitExit(pid: number, ms: number): Promise<boolean> {
@@ -56,7 +62,7 @@ export class Actions {
    *  allowBusy : MESSAGE EN FILE — une session au travail garde son invite vide et active ; Claude Code met en file
    *  ce qu'on y tape. Réponse à une session seulement (ni message groupé, ni proposition). */
   async send(pid: number, text: string, suggested = false, allowBusy = false): Promise<string | null> {
-    const line = netTrim(cleanLine(text));
+    const line = submitLine(text);
     if (!line) return 'message vide';
     if (line.length > 4000) return 'message trop long (4 000 caractères au plus)';
     const sess = await this.session(pid);
@@ -74,27 +80,53 @@ export class Actions {
     try { code = cut ? await this.d.driver.call('sendKeys', { pid, items: ['\u0001Tab', '\u0001Enter'] }) : await this.d.driver.call('send', { pid, line }); } catch { /* inaccessible */ }
     addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, code, text: line, suggested, queued, ...(cut ? { cut: true } : {}) }));
     // Une relance du veilleur n'est pas toi : elle ne marque pas « vue » une réponse que tu n'as pas encore lue.
-    if (code === 0) { if (!isRelance(line)) this.d.setSeen([sess.sessionId]); return null; }
+    if (code === 0) {
+      // « Envoyé » se vérifie : si le texte est encore dans l'invite, il n'est pas parti (Entrée lue comme un collage,
+      // caractère qui change le sens d'Entrée…). Le dire tout de suite, plutôt qu'un refus incompris au message suivant.
+      if (!cut && await this.stuck(pid, line)) {
+        addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid, sessionId: sess.sessionId, title: sess.title, code: 6, text: line, notGone: true }));
+        return NOT_GONE;
+      }
+      if (!isRelance(line)) this.d.setSeen([sess.sessionId]);
+      return null;
+    }
     return code === 5 ? NOT_EMPTY : 'console de la session inaccessible';
   }
 
-  /** Invoke-Keys : réponse à un dialogue d'une session qui ATTEND ; l'option visée est relue à l'écran juste avant. */
+  /** Délai laissé à l'invite pour se vider après Entrée, avant de la relire. */
+  settleMs = 400;
+  /** Le texte tapé est-il resté dans l'invite ? Écran illisible ou invite absente : on ne conclut pas. */
+  async stuck(pid: number, line: string): Promise<boolean> {
+    await sleep(this.settleMs);
+    let scr: unknown = null;
+    try { scr = await this.d.driver.call('read', { pid }); } catch { /* idem */ }
+    if (typeof scr !== 'string' || !draftHolds(promptDraft(scr, null), line)) return false;
+    // Curseur resté juste après « ❯ » : rien n'est tapé dans l'invite, ce qu'on y lit est une proposition de prompt.
+    let sg: unknown = null;
+    try { sg = await this.d.driver.call('suggestion', { pid }); } catch { /* idem */ }
+    return !(typeof sg === 'string' && sg);
+  }
+
+  /** Invoke-Keys : réponse à un dialogue d'une session qui ATTEND ; l'option visée est relue à l'écran juste avant.
+   *  Session INACTIVE : accepté aussi, pour débloquer une invite occupée (texte resté, menu) ou un dialogue ouvert
+   *  hors attente — mais seulement avec un texte à retrouver à l'écran (expect) : jamais de touche à l'aveugle. */
   async keys(pid: number, keys: unknown, expect: string): Promise<string | null> {
     const items: string[] = []; let len = 0;
     for (const raw of psArray(keys)) {
       const k = (raw && typeof raw === 'object' ? raw : {}) as { k?: unknown; t?: unknown };
       if (k.k) { const name = psString(k.k); if (!KEY_NAMES.includes(name)) return 'touche inconnue'; items.push('\u0001' + name); }
-      else if (k.t !== null && k.t !== undefined) { const t = cleanLine(psString(k.t)); if (t) { items.push(t); len += t.length; } }
+      else if (k.t !== null && k.t !== undefined) { const t = cleanLine(psString(k.t)).replace(/\\+$/, ''); if (t) { items.push(t); len += t.length; } }
     }
     if (!items.length) return 'rien à envoyer';
     if (items.length > 20 || len > 4000) return 'trop de touches ou texte trop long';
     const sess = await this.session(pid);
     if (!sess) return 'session introuvable';
-    if (!ieq(sess.status, 'waiting')) return `la session n'attend plus de réponse (statut ${psString(sess.status)})`;
+    const unblock = !!expect && (ieq(sess.status, 'idle') || ieq(sess.status, 'shell'));
+    if (!ieq(sess.status, 'waiting') && !unblock) return `la session n'attend plus de réponse (statut ${psString(sess.status)})`;
     if (expect) {
-      let scr: string | null = null;
+      let scr: unknown = null;
       try { scr = await this.d.driver.call('read', { pid }); } catch { /* idem */ }
-      if (!scr || !scr.includes(expect)) return `le dialogue a changé : « ${expect} » n'est plus à l'écran`;
+      if (typeof scr !== 'string' || !scr.includes(expect)) return `le dialogue a changé : « ${expect} » n'est plus à l'écran`;
     }
     let code = 2;
     try { code = await this.d.driver.call('sendKeys', { pid, items }); } catch { /* idem */ }
