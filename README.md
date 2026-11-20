@@ -126,6 +126,9 @@ registers a scheduled task that starts the server at logon and restarts it if it
 `server/scripts/restart-idle-sessions.ps1` is an optional helper that restarts idle sessions.
 `server/watchdog/Deploy.ps1` does it all from a clean, pushed clone: it reinstalls the server and copies the tagger
 and the Teams watcher to `~/.claude/scripts`, creating their scheduled tasks on first run.
+When only `page/` changed since the running commit, it swaps the page files in place instead of restarting the
+server: no downtime, and open pages reload themselves (`-Restart` forces a restart; decision and tests in
+`server/watchdog/Deploy-Plan.ps1` and `deploy-plan-tests.ps1`).
 
 ## Keyboard shortcuts
 
