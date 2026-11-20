@@ -10,7 +10,7 @@ function extract(name: string, sig: string): (...a: unknown[]) => any {
   if (!m) throw new Error(`${name} introuvable dans la page`);
   return new Function(`${m[0]}; return ${name};`)() as (...a: unknown[]) => any;
 }
-const automationGroups = extract('automationGroups', 'autos, open');
+const automationGroups = extract('automationGroups', 'autos, open, keep');
 const automationCard = extract('automationCard', 'a, now');
 
 const NOW = Date.UTC(2026, 10, 20, 14, 0); const M = 60000;
@@ -28,8 +28,14 @@ describe('automationGroups', () => {
     const g = automationGroups([a, auto({ id: 'vide', label: 'Vide', icon: '' })], open);
     expect(g.groups.map((x: any) => [x.key, x.title, x.states[0]])).toEqual([['automation:menage', '🧹 Ménage', 'auto:menage'], ['automation:vide', 'Vide', 'auto:vide']]);
     expect([...g.absorbed]).toEqual(['live']);
-    expect(g.items.map((i: any) => [i.key, i.look])).toEqual([['pass:menage:r3', 'busy'], ['pass:menage:r2', 'waiting'], ['pass:menage:r1', 'idle'], ['pass:menage:r0', 'ask'], ['pass:menage:rok', 'done']]);
+    expect(g.items.map((i: any) => [i.key, i.look])).toEqual([['pass:menage:r3', 'busy'], ['pass:menage:r2', 'waiting']]);
     expect(g.items[0]).toMatchObject({ running: true, sessionId: 'live', model: 'claude-opus-5-5', tokens: 900, pass: null });
+  });
+  test('une seule passe terminée par automate, sauf celles à garder (sélection, lien de notification)', () => {
+    const a = auto({ passes: [pass({ run: 'r2' }), pass({ run: 'r1', status: 'dry-run' }), pass({ run: 'r0', level: 'warn', status: 'conflict' })] });
+    const b = auto({ id: 'purge', passes: [pass({ run: 'p1' }), pass({ run: 'p0' })] });
+    expect(automationGroups([a, b], []).items.map((i: any) => i.key)).toEqual(['pass:menage:r2', 'pass:purge:p1']);
+    expect(automationGroups([a, b], [], [null, 'pass:menage:r0']).items.map((i: any) => [i.key, i.look])).toEqual([['pass:menage:r2', 'done'], ['pass:menage:r0', 'ask'], ['pass:purge:p1', 'done']]);
   });
   test('sans module : rien', () => {
     expect(automationGroups(undefined, [])).toMatchObject({ groups: [], items: [] });
