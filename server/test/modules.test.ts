@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 import { parseArgs } from '../src/config.ts';
 import { runLauncherOrder } from '../src/launcher.ts';
-import { expandPath, loadModules, loadSettings, modulesView, NO_MODULES, NO_UI, parseModules, parseUi, ticketPattern } from '../src/modules.ts';
+import { DEFAULT_MODELS, expandPath, loadModules, loadSettings, modulesView, NO_MODULES, NO_UI, parseModels, parseModules, parseUi, ticketPattern } from '../src/modules.ts';
 import { readClaudeUsage, readUsageRaw } from '../src/usage.ts';
 
 const env = { home: 'C:\\Users\\moi', localAppData: 'C:\\Users\\moi\\AppData\\Local', temp: 'C:\\Temp' };
@@ -60,8 +60,18 @@ describe('réglages d\'affichage du poste (ui)', () => {
   });
   test('seules des adresses http(s) et un chemin absolu sont gardés', () => {
     expect(parseUi({ ui: { pathPrefix: '%USERPROFILE%\\code', prUrl: 'https://github.com/o/r/pull/', ticketUrl: 'http://tickets.example.com/t/', ticketLabel: '  Ticket  ' } }, env))
-      .toEqual({ pathPrefix: 'C:\\Users\\moi\\code', prUrl: 'https://github.com/o/r/pull/', ticketUrl: 'http://tickets.example.com/t/', ticketLabel: 'Ticket', language: '' });
+      .toEqual({ pathPrefix: 'C:\\Users\\moi\\code', prUrl: 'https://github.com/o/r/pull/', ticketUrl: 'http://tickets.example.com/t/', ticketLabel: 'Ticket', language: '', models: [...DEFAULT_MODELS] });
     expect(parseUi({ ui: { prUrl: 'https://x/"onmouseover="y' } }, env).prUrl).toBe('');
+  });
+  test('coût des modèles : la table du poste remplace la table par défaut', () => {
+    expect(NO_UI.models.find(m => m.match === 'fable')!.cost).toBeGreaterThan(NO_UI.models.find(m => m.match === 'opus')!.cost);
+    expect(parseUi({ ui: { models: [{ match: ' Claude-Opus-5-5 ', cost: 1 }, { match: 'fable', label: 'Fable', cost: '3', note: 'n' }] } }, env).models)
+      .toEqual([{ match: 'claude-opus-5-5', label: 'claude-opus-5-5', cost: 1, note: '' }, { match: 'fable', label: 'Fable', cost: 3, note: 'n' }]);
+  });
+  test('coût des modèles mal décrit : entrée ignorée, liste vide ⇒ table par défaut', () => {
+    expect(parseModels([{ match: '', cost: 1 }, { match: 'x', cost: 0 }, { match: 'y', cost: -2 }, 'z', null])).toEqual([...DEFAULT_MODELS]);
+    expect(parseModels([{ match: 'x', cost: 'abc' }, { match: 'ok', cost: 0.5 }])).toEqual([{ match: 'ok', label: 'ok', cost: 0.5, note: '' }]);
+    expect(parseModels('opus')).toEqual([...DEFAULT_MODELS]);
   });
 });
 
