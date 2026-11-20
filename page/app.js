@@ -137,6 +137,9 @@ function quotaView(q, now) {
 const PLAN_FR = p => { const m = /max_(\d+)x/i.exec(p || ''); return m ? 'Max ' + m[1] + 'x' : /pro/i.test(p || '') ? 'Pro' : (p || '').replace(/^default_claude_/, ''); };
 const atFr = ms => new Date(ms).toLocaleString(LOCALE, { weekday:'short', hour:'2-digit', minute:'2-digit' });
 const inFr = ms => { const m = Math.max(0, Math.round(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60); return d ? d + T(' j ', ' d ') + h + ' h' : h ? h + ' h ' + String(m % 60).padStart(2, '0') : m + ' min'; };
+// Compte à rebours court de la ligne de quota : jours entiers s'il en reste au moins un, sinon heures, puis minutes.
+const leftFr = ms => { const m = Math.max(0, Math.floor(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor(m / 60);
+  return d ? T('dans ' + d + ' j', 'in ' + d + ' d') : h ? T('dans ' + h + ' h', 'in ' + h + ' h') : T('dans ' + m + ' min', 'in ' + m + ' min'); };
 const pts = n => (n > 0 ? '+' : '') + n + ' pt' + (Math.abs(n) > 1 ? 's' : '');
 const quotas = () => ((data && data.quota) || []).map(q => quotaView(q, Date.now()));
 function quotaBar(v) {
@@ -171,16 +174,19 @@ function renderQuota() {
   const box = $('quota'); if (!box) return;
   const vs = quotas().filter(v => v.ok);
   const sm = suggestionMode(data && data.quota, data && data.promptSuggestion, Date.now());
-  const sig = vs.map(v => [v.alias, v.pct, v.level, v.fullAt, v.stale, Math.round(v.elapsed || 0), v.models.map(m => m.name + '=' + m.pct + m.level).join(',')].join(':')).join('|') + '|' + (sm ? sm.text + sm.back : '');
+  const sig = vs.map(v => [v.alias, v.pct, v.level, v.fullAt, v.stale, Math.round(v.elapsed || 0), v.reset ? leftFr(v.reset - Date.now()) : '', v.models.map(m => m.name + '=' + m.pct + m.level).join(',')].join(':')).join('|') + '|' + (sm ? sm.text + sm.back : '');
   const sigA = sig + '|' + vs.map(v => v.active ? 1 : 0).join('');           // compte connecté : la mise en avant suit la bascule /login
   if (box.dataset.sig === sigA) return; box.dataset.sig = sigA; box.replaceChildren();
   for (const v of vs) {
     const d = el('div', 'qline' + (v.stale ? ' stale' : '') + (v.active && vs.length > 1 ? ' active' : ''));
     d.title = T('Quota hebdomadaire Claude', 'Claude weekly quota') + (vs.length > 1 ? ' — ' + v.alias : '') + (v.active ? T(' (compte connecté, celui que consomment les sessions)', ' (signed-in account, the one sessions use)') : '') + T(' · cliquer : détail dans la vue d\'ensemble', ' · click: details in the overview');
     const txt = el('span', 'qt');
-    txt.append(el('b', null, Math.round(v.pct) + ' %'), T(' semaine', ' week') + (vs.length > 1 ? ' · ' + v.alias.split('@')[0] : ''));
-    const info = v.expired ? T('relevé d\'avant la remise', 'reading from before the reset') : v.fullAt ? '100 % ' + atFr(v.fullAt) : v.reset ? T('remise ', 'reset ') + atFr(v.reset) : '';
-    const main = el('div', 'qcell'); main.append(txt, el('span', 'qx' + (v.fullAt ? ' warn' : ''), info), quotaBar(v)); d.append(main);
+    txt.append(el('b', null, Math.round(v.pct) + ' %'), (vs.length > 1 ? ' ' + v.alias.split('@')[0] : T(' semaine', ' week')));   // plusieurs comptes : le nom prend la place de « semaine » (dit par l'infobulle)
+    // Bandeau étroit : toujours le compte à rebours jusqu'à la remise, orange si le quota sera plein avant ; les dates en infobulle.
+    const info = v.expired ? T('relevé d\'avant la remise', 'reading from before the reset') : v.reset ? T('remise ', 'reset ') + leftFr(v.reset - Date.now()) : '';
+    const qx = el('span', 'qx' + (v.fullAt ? ' warn' : ''), info);
+    if (v.reset && !v.expired) qx.title = T('Remise du quota ', 'Quota reset ') + atFr(v.reset) + (v.fullAt ? T(' · 100 % atteint ', ' · 100% reached ') + atFr(v.fullAt) : '');
+    const main = el('div', 'qcell'); main.append(txt, qx, quotaBar(v)); d.append(main);
     for (const m of v.models) {                                                 // même ligne : une barre par modèle limité à part
       const mc = el('div', 'qcell'), mt = el('span', 'qt'); mt.append(el('b', null, Math.round(m.pct) + ' %'), ' ' + m.name);
       mc.title = T('Quota hebdomadaire propre au modèle ' + m.name, 'Weekly quota of the ' + m.name + ' model');
