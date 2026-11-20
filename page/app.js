@@ -2154,6 +2154,23 @@ function parseDialog(text) {
   }
   return { opts, q: q.join('\n'), tabs, submit, multi: opts.some(o => /^\[[ ✔xX]\]/.test(o.label)), foot: end < L.length ? L[end].trim() : '' };
 }
+function renderStuckPrompt(it, box, draft) {
+  const sig = 'stuck:' + draft;
+  if (sig === lastDialogSig && box.dataset.pid === String(it.pid)) return;
+  lastDialogSig = sig; box.dataset.pid = it.pid; box.replaceChildren();
+  const expect = draft.split('\n').map(s => s.trim()).find(Boolean) || '';
+  box.append(el('h2', null, 'Invite occupée — un texte y est resté'));
+  const c = el('div', 'dlg');
+  c.append(el('div', 'q', draft));
+  const row = el('div', 'row');
+  const go = el('button', 'primary', 'Envoyer ce texte'); go.title = 'Appuie sur Entrée dans le terminal de la session : le texte resté dans l’invite part tel quel';
+  go.onclick = () => sendKeys(it, [{ k: 'Enter' }], expect, 'texte de l’invite envoyé');
+  const clr = el('button', null, 'Vider l’invite'); clr.title = 'Appuie deux fois sur Échap dans le terminal de la session : le texte est effacé, rien n’est envoyé';
+  clr.onclick = () => sendKeys(it, [{ k: 'Esc' }, { k: 'Esc' }], expect, 'invite vidée');
+  row.append(go, clr); c.append(row);
+  c.append(el('div', 'hint', 'Tant que ce texte est dans l’invite, aucun message ne peut être envoyé à la session. Envoie-le ou vide l’invite ; le texte est revérifié à l’écran juste avant.'));
+  box.append(c);
+}
 let keying = false, lastDialogSig = null;
 async function sendKeys(it, keys, expect, what) {
   if (keying) return; keying = true; document.querySelectorAll('#dialog button').forEach(b => b.disabled = true);
@@ -2163,9 +2180,17 @@ async function sendKeys(it, keys, expect, what) {
   } catch { say('échec de la demande'); }
   keying = false; lastDialogSig = null; setTimeout(refreshScreen, 350); setTimeout(refreshScreen, 1200);
 }
-function renderDialog(it, text) {
+// Session INACTIVE : deux blocages se lèvent aussi d'ici. Un DIALOGUE ouvert hors attente (plus d'invite à l'écran,
+// pied « Enter to select · Esc to cancel » présent) ; une INVITE OCCUPÉE — un texte y est resté (brouillon tapé dans
+// le terminal, message tapé mais jamais parti, menu « / ») et tout envoi est refusé tant qu'il y est. `draft` vient de
+// /api/screen : null = pas d'invite à l'écran, '' = invite libre, sinon le texte resté.
+function renderDialog(it, text, draft) {
   const box = $('dialog'); if (!box) return;
-  const d = it.status === 'waiting' ? parseDialog(text) : null;
+  const free = it.status === 'idle' || it.status === 'shell';
+  let d = it.status === 'waiting' ? parseDialog(text) : null;
+  if (!d && free && draft == null) { const x = parseDialog(text); if (x && x.foot) d = x; }
+  const stuck = !d && free && draft ? draft : null;
+  if (stuck) { renderStuckPrompt(it, box, stuck); return; }
   const sig = d ? JSON.stringify(d) : '';
   if (sig === lastDialogSig && box.dataset.pid === String(it.pid)) return;
   // Ne pas écraser une saisie en cours dans le panneau.
@@ -2204,7 +2229,8 @@ function renderDialog(it, text) {
   }
   const kr = el('div', 'row keys');
   for (const [k, t, h] of [['Up', '↑', 'Monter'], ['Down', '↓', 'Descendre'], ['Space', 'Espace', 'Cocher / décocher (choix multiple)'], ['Enter', 'Entrée', 'Valider'], ['Left', '←', 'Question précédente'], ['Right', '→', 'Question suivante / Submit'], ['Tab', 'Tab', 'Champ suivant'], ['Esc', 'Échap', 'Annuler le dialogue']]) {
-    const b = el('button', null, t); b.title = h; b.onclick = () => sendKeys(it, [{ k }], null, t); kr.append(b);
+    // Hors attente, le serveur n'accepte une touche qu'avec un texte à retrouver à l'écran : la première option.
+    const b = el('button', null, t); b.title = h; b.onclick = () => sendKeys(it, [{ k }], it.status === 'waiting' ? null : d.opts[0].expect, t); kr.append(b);
   }
   c.append(kr);
   c.append(el('div', 'hint', (d.foot ? 'Dans le terminal : ' + d.foot + '. ' : '') + 'Chaque clic est tapé dans le terminal de la session ; l’option visée est revérifiée à l’écran juste avant. Touches 1 à 9 : choisir une option.'));
@@ -2425,7 +2451,7 @@ async function refreshScreen() {
     if (selected !== it.key) return;
     const text = r.text == null ? '(écran illisible : la session n\'est pas dans une console accessible)' : r.text;
     if (text !== lastScreen && !String(getSelection())) { lastScreen = text; pre.textContent = screenText(text); pre.scrollTop = pre.scrollHeight; }
-    renderDialog(it, r.text || '');
+    renderDialog(it, r.text || '', r.draft);
     renderSuggest(it, r.suggestion || null);
   } catch {}
 }

@@ -382,7 +382,9 @@ describe.each(KINDS)('serveur %s', (kind) => {
     test('option plus à l\'écran, session qui n\'attend pas, touche inconnue, rien à envoyer, trop de touches', async () => {
       const d = fx.consoles.D!; const before = d.keys().length;
       expect((await post(s, `/api/keys?pid=${fx.pids.D}`, { keys: [{ t: '1' }], expect: '3. Peut-être' })).json().error).toBe("le dialogue a changé : « 3. Peut-être » n'est plus à l'écran");
-      expect((await post(s, `/api/keys?pid=${fx.pids.A}`, { keys: [{ t: '1' }], expect: '1. ZZZ' })).json().error).toBe("la session n'attend plus de réponse (statut idle)");
+      expect((await post(s, `/api/keys?pid=${fx.pids.A}`, { keys: [{ t: '1' }] })).json().error).toBe("la session n'attend plus de réponse (statut idle)");
+      // Session inactive : une touche n'est acceptée qu'avec un texte attendu, relu à l'écran comme pour un dialogue.
+      expect((await post(s, `/api/keys?pid=${fx.pids.A}`, { keys: [{ t: '1' }], expect: '1. ZZZ' })).json().error).toBe("le dialogue a changé : « 1. ZZZ » n'est plus à l'écran");
       expect((await post(s, `/api/keys?pid=${fx.pids.D}`, { keys: [{ k: 'Delete' }] })).json().error).toBe('touche inconnue');
       expect((await post(s, `/api/keys?pid=${fx.pids.D}`, { keys: [{ t: '\u0007' }] })).json().error).toBe('rien à envoyer');
       expect((await post(s, `/api/keys?pid=${fx.pids.D}`, { keys: Array(21).fill({ k: 'Up' }) })).json().error).toBe('trop de touches ou texte trop long');

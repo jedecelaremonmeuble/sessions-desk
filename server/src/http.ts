@@ -13,6 +13,7 @@ import { Actions } from './actions.ts';
 import type { Config } from './config.ts';
 import { startGitRefresh } from './gitpr.ts';
 import { Launcher, lookupDeliveryDiff, lookupHd, runLauncherOrder } from './launcher.ts';
+import { promptDraft } from './prompt.ts';
 import { Search } from './search.ts';
 import type { Dashboard } from './state.ts';
 import { readTranscript } from './transcript.ts';
@@ -277,7 +278,7 @@ export class Server {
           let t: string | null = null; let sg: string | null = null;
           try { t = await this.d.driver.call('read', { pid }); } catch { /* illisible */ }
           if (t !== null) { try { sg = await this.d.driver.call('suggestion', { pid }); } catch { /* idem */ } }
-          json(res, 200, { text: t, suggestion: sg });
+          json(res, 200, { text: t, suggestion: sg, draft: promptDraft(t, sg) });
           return;
         }
       }
