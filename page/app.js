@@ -2082,6 +2082,17 @@ const attList = key => attachSets[key] || (attachSets[key] = []);
 const attBusy = key => attList(key).some(a => !a.path);
 // Texte envoyé : le message, puis un libellé + chemin entre guillemets par pièce (une seule ligne : l'envoi la tape telle quelle).
 // Zones de saisie de prompt : textarea de 4 lignes au moins, qui grandit avec le texte (jusqu'à ~12 lignes, puis défile).
+// ── Brouillon de réponse : gardé PAR SESSION dans l'onglet (sessionStorage). Il survit au passage à une autre
+// session, au re-rendu du détail et au rechargement de la page (nouvelle version déployée, reconnexion) ; il est
+// effacé à l'envoi réussi. Calcul pur (testé) sur un stockage passé en argument. ──
+function draftSave(store, key, text) {
+  try { if (text && text.trim()) store.setItem('cc.draft.' + key, text); else store.removeItem('cc.draft.' + key); } catch { /* stockage plein ou refusé : tant pis */ }
+}
+function draftLoad(store, key) {
+  try { return store.getItem('cc.draft.' + key) || ''; } catch { return ''; }
+}
+function keepDraft() { const t = $('sendtext'); if (t && t.dataset.key) draftSave(sessionStorage, t.dataset.key, t.value); }
+addEventListener('pagehide', keepDraft);
 function growArea(t) { if (!t) return; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight + 2, 300) + 'px'; }
 function promptArea(id, rows = 4) {
   const t = el('textarea', 'parea'); t.id = id; t.rows = rows; t.autocomplete = 'off'; t.spellcheck = true;
@@ -2202,7 +2213,7 @@ async function sendReply() {
   sending = true; inp.disabled = $('sendbtn').disabled = true; say((queued ? 'mise en file pour « ' : 'envoi à « ') + label(it) + ' »…');
   try {
     const r = await (await fetch('/api/send?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ text }) })).json();
-    if (r.error) say('non envoyé : ' + r.error); else { inp.value = ''; growArea(inp); clearAttachments(akey); say(queued ? 'mis en file pour « ' + label(it) + ' » — Claude Code le prendra dès qu’il peut' : 'envoyé à « ' + label(it) + ' »'); }
+    if (r.error) say('non envoyé : ' + r.error); else { draftSave(sessionStorage, it.key, ''); inp.value = ''; growArea(inp); clearAttachments(akey); say(queued ? 'mis en file pour « ' + label(it) + ' » — Claude Code le prendra dès qu’il peut' : 'envoyé à « ' + label(it) + ' »'); }
   } catch { say('échec de la demande'); }
   sending = false; tick();
 }
@@ -2536,6 +2547,7 @@ function promptResizer(split) {
 }
 
 function renderDetail(force) {
+  keepDraft();   // avant tout re-rendu : la zone de réponse peut être recréée (ou quittée)
   $('newbtn').classList.toggle('on', newMode); $('bcbtn').classList.toggle('on', bcMode); $('boardbtn').classList.toggle('on', boardMode);
   $('launchbtn').classList.toggle('on', launchMode); $('chatsbtn').classList.toggle('on', chatsMode);
   document.body.classList.toggle('finding', findMode);
@@ -2570,10 +2582,12 @@ function renderDetail(force) {
       body.append(el('h2', null, 'Répondre'));
       const sg = el('div', 'suggest'); sg.id = 'suggest'; sg.hidden = true; body.append(sg);
       const box = el('div', 'sendbox'); const inp = promptArea('sendtext'); inp.maxLength = 4000;
+      inp.dataset.key = it.key; inp.value = draftLoad(sessionStorage, it.key); inp.addEventListener('input', keepDraft);
       const btn = el('button', 'primary', 'Envoyer'); btn.id = 'sendbtn'; btn.onclick = () => sendReply();
       box.append(inp, btn);
       for (const q of ['go', 'oui', 'non', 'continue']) { const b = el('button', 'quick', q); b.title = 'Pré-remplit la réponse (n\'envoie pas)'; b.onclick = () => { inp.value = q; growArea(inp); inp.focus(); }; box.append(b); }
       const hint = el('div', 'hint'); hint.id = 'sendhint'; box.append(attachBar('reply:' + it.key), hint); body.append(box);
+      if (inp.value) growArea(inp);   // brouillon repris : la zone reprend sa hauteur
     }
     const pr = el('div', 'prompts'); pr.id = 'prompts';
     if (it.headless && it.reply) { body.append(el('h2', null, 'Dernier message'), el('div', 'reply', it.reply)); }
@@ -3132,9 +3146,12 @@ async function loadClosed() { try { closedData = await (await fetch('/api/closed
 // (page). Coupure ⇒ bandeau « reconnexion en cours », actions suspendues, la lecture continue toutes les 2 s.
 // Retour ⇒ démarrage différent : resynchronisation complète ; page différente : rechargement (différé si une
 // saisie est en cours, pour ne rien perdre).
+// Saisie en cours = un champ rempli qui a le focus, le formulaire de nouvelle session ou d'envoi groupé, ou une pièce
+// jointe en attente (non gardée). Un brouillon de réponse seul n'empêche plus le rechargement : il est gardé.
 function typing() {
-  const a = document.activeElement, t = $('sendtext');
-  return !!((t && t.value.trim()) || newMode || bcMode || (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'search')) && a.value));
+  const a = document.activeElement;
+  return !!(newMode || bcMode || Object.values(attachSets).some(l => l.length)
+    || (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'search')) && a.value));
 }
 function drawLink() {
   const b = $('offline'); if (!b) return;
