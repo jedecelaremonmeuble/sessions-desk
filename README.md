@@ -90,7 +90,7 @@ server never fails to start because of this file.
 | Module | What it turns on | Settings |
 |---|---|---|
 | `launcher` | A view of runs started by an external orchestrator (headless sessions), their files, alerts and orders | `root`: the orchestrator's data folder · `cli`: the command that receives orders · `ticketApi`: the command that reads a ticket · `python` |
-| `teams` | Sessions that wait for a Microsoft Teams reply or an Outlook email reply (opt-in `"mail": true`), with reminders | `enabled` |
+| `teams` | Sessions that wait for a Microsoft Teams reply or an Outlook email reply (opt-in `"mail": true`), with reminders; opt-in `"markRead": true` marks a chat as read in Teams once a session has read it or replied to it (needs `Chat.ReadWrite`, granted by running `login` again) | `enabled` |
 | `tickets` | The "current subject" of a session, from ticket references in your prompts | `pattern`: a regular expression |
 | `quota` | An account usage banner | `file`: a usage file written by a collector of your own |
 
