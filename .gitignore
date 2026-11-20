@@ -1,0 +1,5 @@
+# Sorties de build du pilote et dépendances du serveur Node
+.build/
+driver/bin/
+driver/obj/
+server/node_modules/

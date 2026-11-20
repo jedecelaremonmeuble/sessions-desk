@@ -1,0 +1,20 @@
+{
+  "name": "sessions-desk-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Serveur Node du poste de pilotage des sessions (lot 2b)",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/main.ts",
+    "build:driver": "dotnet build ../driver/SessionsDesk.Driver.csproj -c Release -o ../.build/driver",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "6.0.3",
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
+  }
+}

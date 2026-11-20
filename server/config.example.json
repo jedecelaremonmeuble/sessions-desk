@@ -1,0 +1,13 @@
+{
+  "modules": {
+    "launcher": {
+      "root": "%LOCALAPPDATA%\\my-orchestrator",
+      "cli": "C:\\path\\to\\orchestrator.py",
+      "python": "python"
+    },
+    "teams": { "enabled": true },
+    "tickets": { "pattern": "ABC-\\d{4}" },
+    "quota": { "file": "%LOCALAPPDATA%\\my-orchestrator\\claude-usage.json" }
+  },
+  "claudeArgs": ""
+}

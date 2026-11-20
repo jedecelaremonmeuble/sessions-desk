@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Pilote Windows Terminal du poste de pilotage (lot 2b, étape 1).
+    Process RÉSIDENT lancé par le serveur Node : une requête JSON par ligne sur stdin, une réponse par ligne sur stdout.
+    net10.0-windows10.0.19041.0 : API WinRT des notifications (toasts) ; UseWPF : UI Automation (focus d'onglet).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>sessions-desk-driver</AssemblyName>
+    <RootNamespace>SessionsDesk.Driver</RootNamespace>
+    <Version>0.1.0</Version>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>fr</SatelliteResourceLanguages>
+    <!-- ConScreen est extraite telle quelle du .ps1 : ses avertissements (noms courts, champs non lus) ne sont pas à corriger ici. -->
+    <NoWarn>$(NoWarn);CS0649;CS0169;CA1401;SYSLIB1054;CS8625;CS8600</NoWarn>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lignes de commande des process (vue Lanceur), comme Get-CimInstance Win32_Process. -->
+    <PackageReference Include="System.Management" Version="10.0.13" />
+  </ItemGroup>
+
+</Project>

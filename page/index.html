@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><title>Sessions Claude Code</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="app">
+  <aside>
+    <div id="resizer" title="Glisser pour redimensionner · double-clic : largeur par défaut"></div>
+    <div class="sidehead">
+      <div class="row"><h1>Sessions Claude Code</h1><span id="live">…</span></div>
+      <div id="quota"></div>
+      <div class="qrow">
+        <input id="q" type="search" placeholder="Rechercher…  ( / )" title="Titre, prompt, numéro de PR, dossier, identifiant" autocomplete="off" spellcheck="false">
+        <button id="favonly" title="N'afficher que les favoris">★</button>
+        <button id="bell" title="Notifications récentes">🔔<span id="belln"></span></button>
+        <button id="launchbtn" title="Lanceur (diagnostic auto) : runs en cours, tickets qui attendent, runs récents  ( l )">🤖</button>
+        <button id="boardbtn" title="Tableau par projet : à cadrer → en cours → en recette → à merger → livré  ( t )">▦</button>
+        <button id="bcbtn" title="Écrire le même message à plusieurs sessions">✉</button>
+        <button id="newbtn" title="Lancer une nouvelle session  ( + )">+</button>
+      </div>
+    </div>
+    <button id="mfind" title="Afficher les passages trouvés dans les conversations">Passages trouvés dans les conversations →</button>
+    <div id="list"></div>
+  </aside>
+  <div id="mbar"><button id="mback" title="Revenir à la liste des sessions  ( Échap )">← Sessions</button><span id="mtitle"></span></div>
+  <main id="main"></main>
+</div>
+<script src="/app.js"></script>
+</body></html>
