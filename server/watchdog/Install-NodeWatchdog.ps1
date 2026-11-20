@@ -139,16 +139,20 @@ try {
     # L'ancienne copie de secours part AVANT l'arrêt : la coupure ne dure que l'échange des dossiers.
     if (Test-Path "$runDir.previous") { Remove-Item "$runDir.previous" -Recurse -Force }
     $cut = Get-Date   # début de la coupure : jusqu'à la première réponse du nouveau serveur
+    # Étapes de la coupure, en secondes depuis son début (cumulées) : écrites au journal avec sa durée.
+    $steps = [ordered]@{}; $mark = { param([string]$n) $steps[$n] = [math]::Round(((Get-Date) - $cut).TotalSeconds, 1) }
     Stop-NodeServer
     # Sur 8765, http.sys (le .ps1) ne figure pas comme écouteur TCP d'un process : on vérifie qu'aucun serveur ne répond.
     if ($Port -eq 8765) {
         $busy = (Test-Listening) -and $(try { $null = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 2; $true } catch { $false })
         if ($busy) { if ($existing) { $null = Enable-ScheduledTask -TaskName $taskName }; throw "un serveur répond encore sur $Port (le .ps1 ?) : passer par Switch-SessionsDesk.ps1 -To node" }
     }
+    & $mark 'arrêté, port libre'
     if (Test-Path $runDir) {
         Move-Item $runDir "$runDir.previous"
     }
     Move-Item $stage $runDir
+    & $mark 'dossiers échangés'
 
     # 3. Tâche : mêmes réglages que celle du .ps1 (ouverture de session + toutes les 2 min, sans fenêtre).
     $watchdog = Join-Path $runDir 'server\watchdog\sessions-desk-node-watchdog.ps1'
@@ -170,13 +174,22 @@ try {
     # 4. Lancer et attendre le serveur. Le marqueur dit au watchdog que ce démarrage est un déploiement : il démarre
     #    sans son délai de grâce et ne le trace pas comme une panne (« serveur muet => relance »).
     Set-Content $marker $sha.Substring(0, 10)
+    & $mark 'tâche posée'
     Start-ScheduledTask -TaskName $taskName
+    & $mark 'tâche lancée'
     $up = $false
     for ($i = 0; $i -lt 40 -and -not $up; $i++) {
         Start-Sleep -Milliseconds 500
         if (Test-Listening) { try { $null = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 3; $up = $true } catch {} }
     }
-    if ($up) { Write-DeployLog $Port "serveur $($sha.Substring(0, 10)) en service : coupure de $([math]::Round(((Get-Date) - $cut).TotalSeconds, 1)) s (arrêt => première réponse)" }
+    if ($up) {
+        & $mark 'première réponse'
+        # Lancement de node par le watchdog : heure d'écriture du fichier pid, juste après son Start-Process.
+        $pf = Join-Path $env:TEMP "sessions-desk-node-$Port.pid"
+        if ((Test-Path $pf) -and (Get-Item $pf).LastWriteTime -gt $cut) { $steps['node lancé'] = [math]::Round(((Get-Item $pf).LastWriteTime - $cut).TotalSeconds, 1) }
+        $detail = ($steps.GetEnumerator() | Sort-Object Value | ForEach-Object { "$($_.Key) $($_.Value)" }) -join ' · '
+        Write-DeployLog $Port "serveur $($sha.Substring(0, 10)) en service : coupure de $($steps['première réponse']) s (s depuis l'arrêt demandé : $detail)"
+    }
     if (-not $up) { throw "le serveur ne répond pas sur $Port (voir $env:TEMP\sessions-desk-node-watchdog.log et sessions-desk-node-$Port.err.log)" }
     $w = Invoke-RestMethod "http://localhost:$Port/api/whoami"
     if ([bool]$w.write -ne [bool]$AllowWrite) { throw "serveur en $(if ($w.write) { 'écriture' } else { 'lecture seule' }) alors que demandé : $(if ($AllowWrite) { 'écriture' } else { 'lecture seule' })" }

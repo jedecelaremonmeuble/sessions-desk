@@ -70,7 +70,8 @@ if (-not $Node) { Write-Log 'node introuvable'; return }
 $cands = @()
 $old = 0
 if ((Test-Path $pidFile) -and [int]::TryParse("$(Get-Content $pidFile -Raw)".Trim(), [ref]$old)) { $cands += $old }
-$cands += @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Object OwningProcess)
+# Get-NetTCPConnection coûte ~1 s : seulement si quelqu'un écoute (jamais après un arrêt de déploiement).
+if (Test-Listening) { $cands += @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Object OwningProcess) }
 foreach ($id in ($cands | Sort-Object -Unique)) {
     $p = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
     if (Test-OurServer $p) {
@@ -79,7 +80,7 @@ foreach ($id in ($cands | Sort-Object -Unique)) {
         Start-Sleep -Seconds 2
     }
 }
-$holder = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Object OwningProcess) | Select-Object -First 1
+$holder = if (Test-Listening) { @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Object OwningProcess) | Select-Object -First 1 }
 if ($holder) { Write-Log "port $Port tenu par un autre process (pid $holder) : pas de relance"; return }
 
 # Garder la trace de l'erreur du serveur précédent avant qu'elle soit écrasée.
