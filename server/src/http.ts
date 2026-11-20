@@ -7,7 +7,7 @@
 // En plus du .ps1 : --allow-write absent ⇒ toute action est refusée (serveur À CÔTÉ en lecture seule).
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { createServer as createTcpServer, connect, type Server as TcpServer, type Socket } from 'node:net';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Actions } from './actions.ts';
 import { Automations } from './automations.ts';
@@ -25,6 +25,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { applyAction } from './teams-watcher.ts';
 
+/** Identifiant de CE démarrage du serveur : la page sait ainsi qu'il a redémarré, même entre deux lectures. */
+const BOOT = `${Date.now().toString(36)}-${process.pid}`;
 const PAGE: Record<string, [string, string]> = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
@@ -290,6 +292,12 @@ export class Server {
     this.#wake?.();
   }
 
+  /** Empreinte des fichiers de la page (date + taille) : la page ouverte la compare à la sienne et se recharge, après
+   *  un redémarrage, quand ce qu'elle exécute n'est plus ce que le serveur sert. */
+  #pageVersion(): string {
+    return Object.values(PAGE).map(([f]) => { try { const st = statSync(join(this.cfg.pageDir, f)); return `${Math.round(st.mtimeMs)}.${st.size}`; } catch { return '-'; } }).join('/');
+  }
+
   async #wait(get: () => Buffer | null, seconds: number): Promise<Buffer | null> {
     const until = nowMs() + seconds * 1000; let v: Buffer | null;
     while ((v = get()) === null && nowMs() < until) await sleep(100);
@@ -322,7 +330,7 @@ export class Server {
         lastState = now;
         try {
           const st = await this.d.state();
-          this.#state = Buffer.from(JSON.stringify(st)); this.beat();
+          this.#state = Buffer.from(JSON.stringify({ ...st, server: { boot: BOOT, page: this.#pageVersion() } })); this.beat();
           if (!this.cfg.noBackground && now - lastWatch >= 2000) {
             lastWatch = now;
             try { await this.watch.tick(st as never); } catch { /* idem */ }
@@ -365,7 +373,7 @@ export class Server {
       if (headless) { status = 409; body = '{"code":4,"error":"automate sans terminal (claude -p) : il se pilote depuis son lanceur"}'; }
       else if ((!this.launcher.enabled && LAUNCHER_ROUTES.has(path)) || (!this.cfg.modules.teams && TEAMS_ROUTES.has(path)) || (!this.automations.enabled && AUTOMATION_ROUTES.has(path))) { req.resume(); status = 404; body = '{}'; }
       else switch (path) {
-        case '/api/state': body = JSON.stringify(await this.d.state()); break;
+        case '/api/state': body = JSON.stringify({ ...(await this.d.state()), server: { boot: BOOT, page: this.#pageVersion() } }); break;
         case '/api/closed': body = JSON.stringify(await this.d.closed()); break;
         case '/api/focus':
           if (knownPid) body = JSON.stringify({ code: await this.actions.focus(target) }); else { status = 400; body = '{}'; }
