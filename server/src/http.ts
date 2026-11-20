@@ -519,8 +519,9 @@ export class Server {
           const action = psString(pget(j, 'action')), chatId = psString(pget(j, 'chatId')), sid = psString(pget(j, 'sessionId'));
           const dir = this.d.sf('teams-waits');
           // Facultatifs : message de référence, consigne de l'utilisateur, remise unique (sans suivre la suite du fil).
-          const anchor = psString(pget(j, 'anchor')), note = psString(pget(j, 'note'));
-          const more = { ...(/^\d{6,24}$/.test(anchor) ? { anchor } : {}), ...(note.trim() ? { note } : {}), ...(psTruthy(pget(j, 'once')) ? { once: true } : {}) };
+          const note = psString(pget(j, 'note'));
+          const anchors = arr(pget(j, 'anchors')).map((x) => psString(x)).filter((x) => /^\d{6,24}$/.test(x)).slice(0, 20);
+          const more = { ...(anchors.length ? { anchors } : {}), ...(note.trim() ? { note } : {}), ...(psTruthy(pget(j, 'once')) ? { once: true } : {}) };
           let err: string | null = 'demande invalide';
           if (chatId.length <= 240 && /^[\w:@.-]+$/.test(chatId)) {
             if (action === 'detach') err = unlinkConversation(dir, chatId, nowMs());
