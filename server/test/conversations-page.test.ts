@@ -11,6 +11,7 @@ function extract(name: string, sig: string): (...a: unknown[]) => any {
   return new Function(`${m[0]}; return ${name};`)() as (...a: unknown[]) => any;
 }
 const chatGroups = extract('chatGroups', 'rows');
+const chatWho = extract('chatWho', 'm');
 const row = (o: Record<string, unknown>) => ({ chatId: 'c', lastAt: 1000, ball: null, unseen: false, sessions: [], ...o });
 
 describe('chatGroups', () => {
@@ -23,5 +24,12 @@ describe('chatGroups', () => {
   });
   test('liste absente : trois groupes vides', () => {
     expect(chatGroups(null).map((x: any) => x.rows.length)).toEqual([0, 0, 0]);
+  });
+});
+
+describe('chatWho', () => {
+  test('toi, une session en ton nom, le collègue, une application', () => {
+    expect([{ by: 'me', from: 'Alex' }, { by: 'session', from: 'Alex' }, { by: 'other', from: 'Camille MARTIN' }, { by: 'app', from: null }].map((m) => chatWho(m)))
+      .toEqual(['toi', '🤖 une session, en ton nom', 'Camille MARTIN', 'une application']);
   });
 });

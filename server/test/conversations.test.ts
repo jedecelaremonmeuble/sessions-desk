@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
-  conversationCounts, conversationRows, conversationsView, convFromPreview, defaultConversations, markConversationSeen, mentionsOwner, runConversations, saveWait, setOwner, writeSummary,
-  type ConvChat, type ConvState, type InboundState, type Wait,
+  conversationCounts, conversationRows, conversationsView, conversationThread, convFromPreview, convMsgFrom, convThread, defaultConfig, defaultConversations, htmlLines, loginScope, markConversationSeen,
+  mentionsOwner, replyHtml, runConversations, saveWait, sendChatReply, setOwner, writeSummary,
+  type ConvChat, type ConvMsg, type ConvState, type GraphMessage, type InboundState, type Wait,
 } from '../src/teams-watcher.ts';
 
 const ME = 'me-id', OTHER = 'other-id';
@@ -98,7 +99,7 @@ describe('lignes de la vue', () => {
       vieux: chat({ lastAt: T0 - 20 * DAY }),
     }), undefined, [], undefined, NOW);
     expect(rows.map((r) => r.chatId)).toEqual(['rep', 'vu2', 'vu', 'ok']);
-    expect(conversationCounts(rows, 7)).toEqual({ reply: 1, unseen: 2, total: 4, at: 7 });
+    expect(conversationCounts(rows, 7)).toEqual({ reply: 1, unseen: 2, total: 4, at: 7, send: false });
   });
 });
 
@@ -106,7 +107,7 @@ describe('passe et fichiers', () => {
   let dir = '';
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'tc-')); setOwner('Alex Durand'); });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
-  const cfg = { conversations: { ...defaultConversations, enabled: true } };
+  const cfg = { conversations: { ...defaultConversations, enabled: true, threads: 0 } };
   const readState = () => JSON.parse(readFileSync(join(dir, '_conversations.json'), 'utf8')) as ConvState;
   function graphOf(pages: Record<string, unknown>, calls: string[] = []) {
     return async <T>(path: string): Promise<T> => {
@@ -174,7 +175,7 @@ describe('passe et fichiers', () => {
     saveWait(dir, wait({ chatId: 'c2' }));
     writeSummary(dir, NOW);
     const summary = () => JSON.parse(readFileSync(join(dir, '_summary.json'), 'utf8')) as { conversations?: unknown };
-    expect(summary().conversations).toEqual({ reply: 2, unseen: 1, total: 3, at: T0 + MIN });
+    expect(summary().conversations).toEqual({ reply: 2, unseen: 1, total: 3, at: T0 + MIN, send: false });
     expect(conversationsView(dir, NOW)!.rows.map((r) => [r.chatId, r.ball, r.unseen])).toEqual([['c3', 'reply', true], ['c1', 'reply', true], ['c2', null, true]]);
 
     expect(markConversationSeen(dir, 'inconnu', 'seen', T0, NOW)).toBe('conversation introuvable');
@@ -188,5 +189,155 @@ describe('passe et fichiers', () => {
     expect(summary().conversations).toMatchObject({ reply: 0, unseen: 0, total: 3 });
     expect(markConversationSeen(dir, 'c1', 'unseen', 0, NOW)).toBeNull();
     expect(conversationsView(dir, NOW)!.rows[0]).toMatchObject({ chatId: 'c1', ball: 'reply', unseen: true });
+  });
+});
+
+// ─────────────── lot 10 : fil relu, messages en entier, réponse depuis la page ───────────────
+
+const gm = (id: string, at: number, uid: string, content: string, o: Record<string, unknown> = {}): GraphMessage => ({
+  id, createdDateTime: iso(at), messageType: 'message', from: { user: { id: uid, displayName: uid === ME ? 'Alex Durand' : 'Camille MARTIN' } }, body: { contentType: 'html', content }, ...o,
+});
+const msg = (id: string, at: number, o: Partial<ConvMsg> = {}): ConvMsg => ({ id, at, from: 'Camille MARTIN', who: 'other', text: 't', ack: false, mention: false, quotesMe: false, named: false, question: false, ...o });
+const withThread = (recent: ConvMsg[], o: Partial<ConvChat> = {}): ConvChat => {
+  const last = recent.at(-1)!;
+  return chat({ type: 'group', lastId: last.id, lastAt: last.at, who: last.who, recent, recentFor: last.id, ...o });
+};
+const row1 = (c: ConvChat, seen?: number, waits: Wait[] = []) => conversationRows(state({ c1: c }), seen === undefined ? undefined : { v: 1, chats: { c1: seen } }, waits, undefined, NOW)[0]!;
+
+describe('un message du fil (lot 10)', () => {
+  beforeEach(() => setOwner('Alex Durand'));
+  test('texte en entier, retours à la ligne et puces gardés', () => {
+    expect(htmlLines('<p>Bonjour,</p><p>Deux points :</p><ul><li>un</li><li>deux &amp; trois</li></ul><p>Merci</p>')).toBe('Bonjour,\nDeux points :\n• un\n• deux & trois\nMerci');
+    const long = 'x'.repeat(600);
+    expect(convFromPreview(preview({ body: { contentType: 'html', content: `<p>${long}</p><p>fin</p>` } }), ME)!.excerpt).toBe(`${long}\nfin`);
+  });
+  test('ce qui l’adresse à l’utilisateur : mention, prénom, question, citation d’un de ses messages', () => {
+    expect(convMsgFrom(gm('1', T0, OTHER, '<at id="0">Alex Durand</at> tu valides ?'), ME)).toMatchObject({ who: 'other', mention: true, named: false, question: true, quotesMe: false, ack: false });
+    expect(convMsgFrom(gm('2', T0, OTHER, 'Alex, tu peux regarder le dossier'), ME)).toMatchObject({ mention: false, named: true, question: false });
+    expect(convMsgFrom(gm('2b', T0, OTHER, '<at id="0">Camille MARTIN</at> ton avis ?'), ME)).toMatchObject({ mention: false, question: false });
+    const quote = { attachments: [{ contentType: 'messageReference', content: JSON.stringify({ messageId: '9', messageSender: { user: { id: ME } } }) }] };
+    expect(convMsgFrom(gm('3', T0, OTHER, '<attachment id="9"></attachment><p>oui mais lequel</p>', quote), ME)).toMatchObject({ quotesMe: true, text: 'oui mais lequel' });
+    expect(convMsgFrom(gm('4', T0, OTHER, '<p>Merci Alex, parfait</p>'), ME)).toMatchObject({ ack: true, named: true });
+  });
+  test('pièces jointes nommées ; événement système, message supprimé ou vide écartés ; les siens ne portent aucun drapeau', () => {
+    expect(convMsgFrom(gm('1', T0, OTHER, '<p>voilà</p>', { attachments: [{ name: 'devis.pdf', contentType: 'reference' }] }), ME)!.text).toBe('voilà\n📎 devis.pdf');
+    expect(convMsgFrom(gm('2', T0, OTHER, 'x', { messageType: 'systemEventMessage' }), ME)).toBeNull();
+    expect(convMsgFrom(gm('3', T0, OTHER, 'x', { deletedDateTime: iso(T0) }), ME)).toBeNull();
+    expect(convMsgFrom(gm('4', T0, OTHER, ''), ME)).toBeNull();
+    expect(convMsgFrom(gm('5', T0, ME, 'Alex ici, une question ?'), ME)).toMatchObject({ who: 'me', named: false, question: false });
+    expect(convThread([gm('b', T0 + MIN, OTHER, 'deux'), gm('a', T0, ME, 'un'), gm('s', T0, OTHER, 'x', { messageType: 'systemEventMessage' })], ME).map((m) => m.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('à toi de répondre, sur tout le fil (lot 10)', () => {
+  test('groupe : une question sans mention qui suit son message est pour lui ; une question entre collègues, non', () => {
+    const mine = msg('1', T0 - 3 * MIN, { who: 'me', from: 'Alex Durand' });
+    expect(row1(withThread([mine, msg('2', T0, { question: true })]))).toMatchObject({ ball: 'reply', why: 'question' });
+    expect(row1(withThread([mine, msg('2', T0 - MIN), msg('3', T0, { question: true })]))).toMatchObject({ ball: null, why: null, unseen: true });
+    expect(row1(withThread([msg('2', T0 - MIN), msg('3', T0, { question: true })]))).toMatchObject({ ball: null });
+  });
+  test('groupe : une mention suivie d’autres messages reste à répondre ; prénom et citation aussi', () => {
+    const r = row1(withThread([msg('1', T0 - 2 * MIN, { mention: true, text: 'tu valides ?' }), msg('2', T0 - MIN, { text: 'moi oui' }), msg('3', T0, { ack: true, text: 'merci' })]));
+    expect(r).toMatchObject({ ball: 'reply', why: 'mention' });
+    expect(r.news.map((m) => m.text)).toEqual(['tu valides ?', 'moi oui', 'merci']);
+    expect(row1(withThread([msg('1', T0, { named: true })]))).toMatchObject({ ball: 'reply', why: 'named' });
+    expect(row1(withThread([msg('1', T0, { quotesMe: true })]))).toMatchObject({ ball: 'reply', why: 'quote' });
+    expect(row1(withThread([msg('1', T0, { named: true, ack: true })]))).toMatchObject({ ball: null });
+  });
+  test('il a répondu depuis : plus rien à répondre ; « Rien à répondre » éteint jusqu’au prochain message adressé', () => {
+    expect(row1(withThread([msg('1', T0 - 2 * MIN, { mention: true }), msg('2', T0 - MIN, { who: 'me' }), msg('3', T0)]))).toMatchObject({ ball: null });
+    const t = [msg('1', T0 - 2 * MIN, { mention: true }), msg('2', T0)];
+    expect(row1(withThread(t), T0)).toMatchObject({ ball: null, unseen: false, news: [] });
+    expect(row1(withThread([...t, msg('3', T0 + MIN, { mention: true })]), T0)).toMatchObject({ ball: 'reply', unseen: true });
+  });
+  test('1:1 : un vrai message suivi d’un merci reste à répondre ; que des politesses, non', () => {
+    expect(row1(withThread([msg('1', T0 - MIN, { text: 'tu as le devis ?' }), msg('2', T0, { ack: true })], { type: 'oneOnOne' }))).toMatchObject({ ball: 'reply', why: null });
+    expect(row1(withThread([msg('1', T0 - MIN, { ack: true }), msg('2', T0, { ack: true })], { type: 'oneOnOne' }))).toMatchObject({ ball: null });
+  });
+  test('à voir : son propre message tapé vaut pointage ; celui d’une session, non — et il est montré', () => {
+    const typed = [msg('1', T0 - 2 * MIN), msg('2', T0 - MIN, { who: 'me', from: 'Alex Durand' })];
+    expect(row1(withThread(typed))).toMatchObject({ by: 'me', unseen: false, news: [] });
+    const r = row1(withThread([msg('1', T0 - 2 * MIN, { text: 'question' }), msg('900', T0 - MIN, { who: 'me', from: 'Alex Durand', text: 'réponse de la session' })]), undefined, [wait({ messageId: '900', status: 'noreply' })]);
+    expect(r).toMatchObject({ by: 'session', unseen: true });
+    expect(r.news).toEqual([{ id: '1', at: T0 - 2 * MIN, from: 'Camille MARTIN', by: 'other', text: 'question' }, { id: '900', at: T0 - MIN, from: 'Alex Durand', by: 'session', text: 'réponse de la session' }]);
+  });
+  test('fil périmé (dernier message plus récent que le fil lu) : on retombe sur le dernier message seul', () => {
+    const c = withThread([msg('1', T0 - MIN, { mention: true })]);
+    expect(row1({ ...c, lastId: '2', lastAt: T0, mention: false })).toMatchObject({ ball: null, news: [], unseen: true });
+  });
+});
+
+describe('passe, fil et réponse (lot 10)', () => {
+  let dir = '';
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'tc-')); setOwner('Alex Durand'); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  const LIST = '/me/chats?$expand=lastMessagePreview';
+  const readState = () => JSON.parse(readFileSync(join(dir, '_conversations.json'), 'utf8')) as ConvState;
+  const cfgOf = (o: Record<string, unknown> = {}) => ({ conversations: { ...defaultConversations, enabled: true, ...o } });
+  function graphOf(pages: Record<string, unknown>, calls: string[]) {
+    return async <T>(path: string): Promise<T> => {
+      calls.push(path);
+      const hit = Object.entries(pages).find(([k]) => path.startsWith(k));
+      if (!hit) throw new Error(`Graph 404 sur ${path}`);
+      return hit[1] as T;
+    };
+  }
+  const list = (ids: [string, string][]) => ({ value: ids.map(([id, last], i) => ({ id, chatType: 'group', topic: `Sujet ${id}`, lastMessagePreview: preview({ id: last, createdDateTime: iso(T0 - i * MIN) }) })) });
+
+  test('le fil n’est relu que si le dernier message a changé, dans la limite de la passe, les plus récents d’abord', async () => {
+    const calls: string[] = [];
+    const threads = { '/chats/a/messages': { value: [gm('1001', T0, OTHER, 'un')] }, '/chats/b/messages': { value: [gm('1002', T0 - MIN, OTHER, 'deux')] }, '/chats/c/messages': { value: [gm('1003', T0 - 2 * MIN, OTHER, 'trois')] } };
+    const world = (l: [string, string][]) => graphOf({ [LIST]: list(l), ...threads }, calls);
+    expect(await runConversations(dir, cfgOf({ threads: 2 }), ME, world([['a', '1001'], ['b', '1002'], ['c', '1003']]), { dryRun: false, now: NOW })).toMatchObject({ listed: 3, threads: 2 });
+    expect(calls.filter((c) => c.includes('/messages'))).toEqual(['/chats/a/messages?$top=30&$orderby=createdDateTime desc', '/chats/b/messages?$top=30&$orderby=createdDateTime desc']);
+    expect(readState().chats.a).toMatchObject({ recentFor: '1001', recent: [{ id: '1001', text: 'un' }] });
+    expect(readState().chats.c!.recent).toBeUndefined();
+    // Passe suivante : seul le fil pas encore lu l'est ; puis plus rien tant que rien ne bouge.
+    calls.length = 0;
+    expect((await runConversations(dir, cfgOf({ threads: 2 }), ME, world([['a', '1001'], ['b', '1002'], ['c', '1003']]), { dryRun: false, now: NOW + 2 * MIN })).threads).toBe(1);
+    expect(calls.filter((c) => c.includes('/messages'))).toEqual(['/chats/c/messages?$top=30&$orderby=createdDateTime desc']);
+    calls.length = 0;
+    expect((await runConversations(dir, cfgOf({ threads: 2 }), ME, world([['a', '1001'], ['b', '1002'], ['c', '1003']]), { dryRun: false, now: NOW + 4 * MIN })).threads).toBeUndefined();
+    expect(calls.filter((c) => c.includes('/messages'))).toEqual([]);
+    // Un nouveau message dans b : son fil seul est relu.
+    await runConversations(dir, cfgOf({ threads: 2 }), ME, world([['b', '2000'], ['a', '1001'], ['c', '1003']]), { dryRun: false, now: NOW + 6 * MIN });
+    expect(calls.filter((c) => c.includes('/messages'))).toEqual(['/chats/b/messages?$top=30&$orderby=createdDateTime desc']);
+    expect(readState().chats.b).toMatchObject({ lastId: '2000', recentFor: '2000' });
+  });
+  test('fil illisible : l’ancien est gardé, périmé, et relu à la passe suivante', async () => {
+    const calls: string[] = [];
+    await runConversations(dir, cfgOf(), ME, graphOf({ [LIST]: list([['a', '1001']]), '/chats/a/messages': { value: [gm('1001', T0, OTHER, 'un')] } }, calls), { dryRun: false, now: NOW });
+    await runConversations(dir, cfgOf(), ME, graphOf({ [LIST]: list([['a', '2000']]) }, calls), { dryRun: false, now: NOW + 2 * MIN });
+    expect(readState().chats.a).toMatchObject({ lastId: '2000', recentFor: '1001', recent: [{ id: '1001' }] });
+    expect(conversationThread(dir, 'a')).toMatchObject({ fresh: false, messages: [{ id: '1001', by: 'other', text: 'un' }] });
+    expect(conversationThread(dir, 'inconnu')).toBeNull();
+  });
+
+  test('réponse depuis la page : éteinte par défaut ; allumée, elle poste le texte échappé et tient la vue à jour', async () => {
+    writeFileSync(join(dir, '_conversations.json'), JSON.stringify(state({ c1: withThread([msg('1', T0, { text: 'tu as le devis ?' })], { type: 'oneOnOne' }) })));
+    const posts: { path: string; body: unknown }[] = [];
+    const post = async (path: string, body: unknown) => { posts.push({ path, body }); return { id: '5000', createdDateTime: iso(T0 + 2 * MIN) }; };
+    expect(await sendChatReply(dir, cfgOf(), 'c1', 'oui', NOW, post)).toMatch(/éteinte/);
+    const on = cfgOf({ reply: true });
+    expect(await sendChatReply(dir, on, 'c1', '   ', NOW, post)).toBe('message vide');
+    expect(await sendChatReply(dir, on, 'inconnu', 'oui', NOW, post)).toBe('conversation introuvable');
+    expect(posts).toEqual([]);
+    expect(conversationsView(dir, NOW)!.rows[0]).toMatchObject({ ball: 'reply' });
+    expect(await sendChatReply(dir, on, 'c1', 'Oui, <b>le voici</b> & merci\nÀ demain', NOW, post)).toBeNull();
+    expect(posts).toEqual([{ path: '/chats/c1/messages', body: { body: { contentType: 'html', content: 'Oui, &lt;b&gt;le voici&lt;/b&gt; &amp; merci<br>À demain' } } }]);
+    const r = conversationsView(dir, NOW)!.rows[0]!;
+    expect(r).toMatchObject({ by: 'me', ball: null, unseen: false, lastAt: T0 + 2 * MIN, excerpt: 'Oui, <b>le voici</b> & merci\nÀ demain' });
+    expect(conversationThread(dir, 'c1')!.messages.map((m) => [m.id, m.by])).toEqual([['1', 'other'], ['5000', 'me']]);
+  });
+  test('envoi refusé par Graph : l’erreur remonte, rien ne change', async () => {
+    writeFileSync(join(dir, '_conversations.json'), JSON.stringify(state({ c1: chat() })));
+    const err = await sendChatReply(dir, cfgOf({ reply: true }), 'c1', 'oui', NOW, async () => { throw new Error('Graph 403 sur /chats/<chat>/messages'); });
+    expect(err).toBe('envoi refusé : Graph 403 sur /chats/<chat>/messages');
+    expect(conversationsView(dir, NOW)!.rows[0]).toMatchObject({ by: 'other', ball: 'reply' });
+  });
+  test('portée d’envoi demandée au « login » seulement quand la réponse est allumée ; corps de réponse', () => {
+    expect(loginScope(defaultConfig)).not.toContain('ChatMessage.Send');
+    expect(loginScope({ ...defaultConfig, conversations: { ...defaultConversations, reply: true } })).toContain('ChatMessage.Send');
+    expect(replyHtml('  a < b\r\nc  ')).toBe('a &lt; b<br>c');
   });
 });
