@@ -15,6 +15,14 @@ const NOT_EMPTY = "l'invite de la session n'est pas vide (brouillon, menu ou dia
  *  commandes. Ouvrir, rouvrir ou relancer une session dans un tel dossier est refusé. */
 export const SEMICOLON_REFUSED = 'dossier refusé : son chemin contient « ; », que Windows Terminal lirait comme une seconde commande';
 
+/** Shells à l'invite desquels une reprise peut être tapée (nom du process → ligne : se replacer dans le dossier de
+ *  la conversation, puis reprendre). Tout autre parent : la session reprend dans un nouvel onglet. */
+export const SHELL_RESUME: Record<string, (cwd: string, resume: string) => string> = {
+  pwsh: (cwd, resume) => `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'; ${resume}`,
+  powershell: (cwd, resume) => `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'; ${resume}`,
+  cmd: (cwd, resume) => `cd /d "${cwd}" && ${resume}`,
+};
+
 /** Nettoyage d'une ligne envoyée : ni saut de ligne, ni tabulation, ni caractère de contrôle. */
 export function cleanLine(text: string): string { return text.replace(/[\r\n\t]+/g, ' ').replace(/[\x00-\x1f\x7f]/g, ''); }
 
@@ -152,6 +160,96 @@ export class Actions {
     if (was && (code !== 0 || !await waitExit(pid, 15000))) { kill(pid); if (!await waitExit(pid, 5000)) return "le process n'a pas pu être arrêté"; }
     try { rmSync(join(this.d.sessionsDir, `${pid}.json`), { force: true }); } catch { /* idem */ }
     return this.reopen(sess.sessionId);
+  }
+
+  /** Attente, après une relance groupée, que les sessions relancées soient de nouveau listées (0 : pas de contrôle). */
+  backWaitMs = 45000;
+  /** Délai laissé au shell pour reprendre la main après la sortie de la session, avant d'y taper la reprise. */
+  promptWaitMs = 1500;
+
+  /** Relance GROUPÉE : chaque session inactive reçoit /exit puis reprend sa conversation (`--resume`). Sert quand le
+   *  process doit vraiment redémarrer : compte changé, serveurs MCP à réinitialiser.
+   *  Reprise dans le MÊME onglet quand la session a été lancée d'un shell connu : la ligne est tapée à son invite une
+   *  fois la session sortie. Sinon dans un nouvel onglet, comme la relance d'une seule session.
+   *  Trois temps, pour ne pas attendre chaque sortie l'une après l'autre : /exit à toutes, attente commune, reprises.
+   *  Une session au travail, bloquée sur un dialogue ou dont l'invite porte un brouillon est sautée, jamais arrêtée. */
+  async relaunchMany(pids: unknown): Promise<Record<string, unknown>> {
+    const all = await this.d.openSessions();
+    const relaunched: { title: string | null; sameTab: boolean }[] = []; const skipped: { title: string | null; why: string }[] = [];
+    const parents = new Map<number, number>(); const shells = new Map<number, string>();
+    try { for (const p of await this.d.driver.call('procs', { name: 'claude', commandLine: true }) as { pid: number; parent?: number }[]) if (p.parent) parents.set(p.pid, p.parent); } catch { /* sans parent connu : nouvel onglet */ }
+    for (const name of Object.keys(SHELL_RESUME)) {
+      try { for (const p of await this.d.driver.call('procs', { name }) as { pid: number }[]) shells.set(p.pid, name); } catch { /* idem */ }
+    }
+    const log = (s: Session, pid: number, code: number, result: string): void => {
+      addContent(this.d.sf('restart-idle-sessions.jsonl'), JSON.stringify({ at: nowMs(), pid, name: psString(s.title ?? s.name), sessionId: s.sessionId, code, result }));
+    };
+
+    // 1. /exit à chaque session qui peut la recevoir. Tout ce qui empêcherait la reprise est vérifié AVANT.
+    const out: { s: Session; pid: number; cwd: string; shell: number | null; line: string; sameTab: boolean }[] = [];
+    const seen = new Set<number>();
+    for (const p of psArray(pids).slice(0, 60)) {
+      const pid = psIntZero(p);
+      const s = all.find((x) => Number(x.pid) === pid);
+      if (!s || seen.has(pid)) continue;
+      seen.add(pid);
+      const skip = (why: string): void => { skipped.push({ title: s.title, why }); };
+      if (s.headless) { skip('automate sans terminal'); continue; }
+      if (!ieq(s.status, 'idle')) { skip(`n'est pas inactive (statut ${psString(s.status)})`); continue; }
+      const m = this.d.meta(s.sessionId);
+      if (!m.path) { skip('aucun transcript : elle ne pourrait pas être reprise'); continue; }
+      if (!m.cwd || !isDir(m.cwd)) { skip('dossier de lancement introuvable'); continue; }
+      const par = parents.get(pid); const kind = par === undefined ? undefined : shells.get(par);
+      if (!kind && m.cwd.includes(';')) { skip(SEMICOLON_REFUSED); continue; }
+      if (!alive(pid)) { skip('process introuvable'); continue; }
+      let code = 2; try { code = await this.d.driver.call('send', { pid, line: '/exit' }); } catch { /* idem */ }
+      if (code !== 0) { skip(code === 5 ? NOT_EMPTY : 'console de la session inaccessible'); continue; }
+      const resume = `claude ${this.d.cfg.claudeArgs} --resume ${s.sessionId}`;
+      out.push({ s, pid, cwd: m.cwd, shell: kind ? par! : null, line: kind ? SHELL_RESUME[kind]!(m.cwd, resume) : '', sameTab: false });
+    }
+
+    // 2. Sorties attendues ensemble ; une session qui ne sort pas est arrêtée (sa conversation est sur disque).
+    const gone = await Promise.all(out.map((o) => waitExit(o.pid, 15000)));
+    const ready: typeof out = [];
+    for (const [i, o] of out.entries()) {
+      if (!gone[i]) { kill(o.pid); if (!await waitExit(o.pid, 5000)) { skipped.push({ title: o.s.title, why: "le process n'a pas pu être arrêté" }); log(o.s, o.pid, 3, 'pas sortie : relance non tapée'); continue; } }
+      try { rmSync(join(this.d.sessionsDir, `${o.pid}.json`), { force: true }); } catch { /* idem */ }
+      ready.push(o);
+    }
+
+    // 3. Reprises : à l'invite du shell d'origine, sinon dans un nouvel onglet (un seul appel à Windows Terminal).
+    if (ready.some((o) => o.shell)) await sleep(this.promptWaitMs);
+    const tabs: typeof out = []; const typed: typeof out = [];
+    for (const o of ready) {
+      if (o.shell && alive(o.shell)) {
+        let code = 2; try { code = await this.d.driver.call('sendKeys', { pid: o.shell, items: [o.line, '\u0001Enter'] }); } catch { /* idem */ }
+        if (code === 0) { o.sameTab = true; typed.push(o); continue; }
+      }
+      if (o.cwd.includes(';')) { skipped.push({ title: o.s.title, why: 'fermée, non reprise : ' + SEMICOLON_REFUSED }); log(o.s, o.pid, 2, 'fermée, non reprise'); continue; }
+      tabs.push(o);
+    }
+    if (tabs.length) {
+      try { await this.wt('-w 0 ' + tabs.map((o) => this.resumeTab(o.s.sessionId, o.cwd)).join(' ; ')); typed.push(...tabs); }
+      catch { for (const o of tabs) { skipped.push({ title: o.s.title, why: 'fermée, non reprise : nouvel onglet impossible (elle est dans « Fermées »)' }); log(o.s, o.pid, 2, 'fermée, non reprise'); } }
+    }
+
+    // 4. Contrôle : une session relancée redevient listée. Celle qui ne revient pas est dite, pas comptée.
+    let back: Set<string> | null = null;
+    const until = Date.now() + this.backWaitMs;
+    while (typed.length && Date.now() < until) {
+      await sleep(Math.min(2000, this.backWaitMs));
+      back = new Set((await this.d.openSessions()).map((x) => x.sessionId));
+      if (typed.every((o) => back!.has(o.s.sessionId))) break;
+    }
+    for (const o of typed) {
+      const where = o.sameTab ? 'dans son onglet' : 'dans un nouvel onglet';
+      if (back && !back.has(o.s.sessionId)) {
+        skipped.push({ title: o.s.title, why: `reprise demandée ${where}, mais pas réapparue : voir son onglet (sinon elle est dans « Fermées »)` });
+        log(o.s, o.pid, 6, `reprise demandée ${where}, pas réapparue`);
+      } else { relaunched.push({ title: o.s.title, sameTab: o.sameTab }); log(o.s, o.pid, 0, `relancée ${where}`); }
+      addContent(this.sentLog, JSON.stringify({ at: nowMs(), pid: o.pid, sessionId: o.s.sessionId, title: o.s.title, text: '(relance groupée)' }));
+    }
+    return { relaunched, skipped };
   }
 
   resumeTab(id: string, cwd: string): string { return `nt -d "${cwd}" pwsh -NoExit -Command "claude ${this.d.cfg.claudeArgs} --resume ${id}"`; }

@@ -2,7 +2,7 @@
 import type { Config } from './config.ts';
 import { mtimeMs, psString, readJson, stripBom } from './util.ts';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /**
  * ConvertTo-LaunchMs. Côté PowerShell, ConvertFrom-Json a déjà converti les chaînes ISO en DateTime ; ici elles
@@ -61,6 +61,27 @@ export function readClaudeUsage(cfg: Config): unknown[] {
   cache = { stamp, value };
   return value;
 }
+/**
+ * Compte Claude CONNECTÉ : `oauthAccount.accountUuid` de la configuration globale de Claude Code — `.claude.json` du
+ * dossier de configuration quand CLAUDE_CONFIG_DIR le déplace, sinon celui du dossier personnel (à côté de ~/.claude).
+ * Plusieurs comptes partagent le même profil (bascule par /login) : c'est celui-là que consomment les sessions.
+ * Relu seulement quand le fichier change ; null si illisible ou déconnecté.
+ */
+let acctCache: { file: string; stamp: number; value: string | null } = { file: '', stamp: -1, value: null };
+export function activeAccountUuid(cfg: Config): string | null {
+  const inDir = join(cfg.claude, '.claude.json');
+  const f = mtimeMs(inDir) ? inDir : join(dirname(cfg.claude), '.claude.json');
+  const stamp = mtimeMs(f);
+  if (f === acctCache.file && stamp === acctCache.stamp) return acctCache.value;
+  let value: string | null = null;
+  try { const j = JSON.parse(stripBom(readFileSync(f, 'utf8'))) as { oauthAccount?: { accountUuid?: unknown } }; value = psString(j.oauthAccount?.accountUuid) || null; } catch { /* illisible : inconnu */ }
+  acctCache = { file: f, stamp, value };
+  return value;
+}
+/** Marque `active` le relevé du compte connecté (pure). Compte connecté inconnu ⇒ aucun n'est marqué. */
+export const markActiveAccount = (quota: unknown[], uuid: string | null): unknown[] =>
+  quota.map((q) => ({ ...(q as Record<string, unknown>), active: !!uuid && (q as { uuid?: unknown }).uuid === uuid }));
+
 /** Fichier du relevé : celui du module « quota », '' s'il est éteint. */
 export const usageFile = (cfg: Config): string => cfg.modules.quota?.file ?? '';
 export const readUsageRaw = (cfg: Config): unknown => { const f = usageFile(cfg); return f ? readJson(f) : undefined; };
