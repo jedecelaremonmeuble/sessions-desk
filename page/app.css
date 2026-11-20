@@ -270,6 +270,13 @@ h2.viewtabs { display:flex; gap:4px; } .viewtabs .vtab { font:inherit; text-tran
 .cm .md th, .cm .md td { border:1px solid var(--line); padding:3px 8px; text-align:left; vertical-align:top; } .cm .md th { background:var(--bg); }
 .cm .md a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
 .cm.user { border-left:4px solid var(--shell); } .cm.assistant { border-left:4px solid var(--done); }
+/* Provenance : consigne d'un automate (tirets, gris), collage (gris), agents du lanceur (une couleur par étape). */
+.cm.user.auto { border-left:4px dashed var(--idle); background:none; } .cm.user.paste { border-left-color:var(--closed); }
+.cm.user.auto .tx { max-height:9.5em; overflow:auto; color:var(--mute); }
+.cm.agent .who { font-weight:600; } .cm.ag-diag { border-left-color:var(--done); } .cm.ag-diag .who { color:var(--done); }
+.cm.ag-dev { border-left-color:var(--busy); } .cm.ag-dev .who { color:var(--busy); } .cm.ag-review { border-left-color:var(--ask); } .cm.ag-review .who { color:var(--ask); }
+.cm.ag-recette { border-left-color:var(--fav); } .cm.ag-recette .who { color:var(--fav); } .cm.ag-other { border-left-color:var(--idle); }
+.cm.res.task summary { font-family:inherit; }
 .cm.tool { font:12px ui-monospace, Consolas, monospace; color:var(--mute); padding:0 12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .cm.tool .tn { color:var(--ink); font-weight:600; }
 .cm.res, .cm.sum { font-size:12px; color:var(--mute); padding:0 12px; } .cm.res summary, .cm.sum summary { cursor:pointer; font-family:ui-monospace, Consolas, monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .cm.res.err summary { color:var(--waiting); } .cm.sum summary { color:var(--ink); font-family:inherit; }

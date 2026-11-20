@@ -45,12 +45,20 @@ function resultText(content: J): string {
   return netTrimEnd(sb);
 }
 
-export interface Item { at: string; r: string; t: string; n?: string; e?: true }
-function item(out: Item[], at: string | null, role: string, text: string | null, name: string | null, err: boolean): void {
+/** `o` : provenance d'un message « user » qui ne vient PAS de la personne — 'task' (fin d'une tâche de fond, injectée par
+ *  Claude Code) ou 'sdk' (consigne d'un lancement sans terminal, `claude -p`). Absent : tapé ou collé dans la session. */
+export interface Item { at: string; r: string; t: string; n?: string; e?: true; o?: 'task' | 'sdk' }
+function item(out: Item[], at: string | null, role: string, text: string | null, name: string | null, err: boolean, origin: 'task' | 'sdk' | null = null): void {
   const it: Item = { at: at ?? '', r: role, t: text ?? '' };
   if (name !== null) it.n = name;
   if (err) it.e = true;
+  if (origin !== null) it.o = origin;
   out.push(it);
+}
+/** Provenance d'une ligne « user », telle que Claude Code l'écrit (`origin.kind`, `promptSource`) ; null = la personne. */
+function userOrigin(r: Record<string, J>): 'task' | 'sdk' | null {
+  if (prop(r.origin, 'kind') === 'task-notification') return 'task';
+  return prop(r, 'promptSource') === 'sdk' ? 'sdk' : null;
 }
 
 /** Une ligne du transcript → 0..n éléments affichables. */
@@ -64,6 +72,7 @@ export function transcriptLine(line: string, out: Item[]): void {
   if (!isObj(msg) || !('content' in msg)) return;
   const content = msg.content;
   const at = prop(r, 'timestamp');
+  const origin = type === 'user' ? userOrigin(o) : null;
   if (prop(r, 'isCompactSummary') === 'true') { item(out, at, 'summary', cut(resultText(content), 4000), null, false); return; }
   if (prop(r, 'isMeta') === 'true') return;
   if (typeof content === 'string') {
@@ -77,13 +86,13 @@ export function transcriptLine(line: string, out: Item[]): void {
         if (so) { if (netTrim(so[2]!).length > 0) item(out, at, 'result', cut(netTrim(so[2]!), 1500), null, so[1] === 'err'); return; }
       }
     }
-    if (netTrim(s).length > 0) item(out, at, type, cut(s, 30000), null, false);
+    if (netTrim(s).length > 0) item(out, at, type, cut(s, 30000), null, false, origin);
     return;
   }
   if (!Array.isArray(content)) return;
   for (const b of content) {
     switch (prop(b, 'type')) {
-      case 'text': { const s = prop(b, 'text'); if (!blank(s)) item(out, at, type, cut(s, 30000), null, false); break; }
+      case 'text': { const s = prop(b, 'text'); if (!blank(s)) item(out, at, type, cut(s, 30000), null, false, origin); break; }
       case 'image': item(out, at, type, '[image jointe]', null, false); break;
       case 'tool_use': item(out, at, 'tool', toolSummary(isObj(b) ? b.input : undefined), prop(b, 'name') ?? 'outil', false); break;
       case 'tool_result': {
