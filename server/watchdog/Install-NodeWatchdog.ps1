@@ -48,6 +48,9 @@ $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 
 . (Join-Path $PSScriptRoot 'Deploy-Plan.ps1')   # verrou et journal des déploiements
 
+# Port sans écouteur : réponse immédiate (un ping HTTP vers un port fermé coûte ~4 s sous Windows).
+function Test-Listening { [bool]([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Where-Object Port -eq $Port) }
+
 function Stop-NodeServer {
     $ids = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Object OwningProcess)
     $pidFile = Join-Path $env:TEMP "sessions-desk-node-$Port.pid"
@@ -81,7 +84,7 @@ function Stop-NodeServer {
         Write-DeployLog $Port "arrêt FORCÉ du serveur (pid $id) : pas de réponse à /api/stop ou pas sorti à temps"
         Stop-Process -Id $id -Force
     }
-    for ($i = 0; $i -lt 20 -and (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 250 }
+    for ($i = 0; $i -lt 40 -and (Test-Listening); $i++) { Start-Sleep -Milliseconds 125 }
     if (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) { throw "port $Port toujours tenu par un process qui n'est pas un serveur Node de ce port" }
 }
 
@@ -133,15 +136,16 @@ try {
     # 2. Remplacer le dossier d'exécution, tâche désactivée pour que le watchdog ne relance pas en plein échange.
     $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     if ($existing) { $null = Disable-ScheduledTask -TaskName $taskName }
+    # L'ancienne copie de secours part AVANT l'arrêt : la coupure ne dure que l'échange des dossiers.
+    if (Test-Path "$runDir.previous") { Remove-Item "$runDir.previous" -Recurse -Force }
     $cut = Get-Date   # début de la coupure : jusqu'à la première réponse du nouveau serveur
     Stop-NodeServer
     # Sur 8765, http.sys (le .ps1) ne figure pas comme écouteur TCP d'un process : on vérifie qu'aucun serveur ne répond.
     if ($Port -eq 8765) {
-        try { $null = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 2; $busy = $true } catch { $busy = $false }
+        $busy = (Test-Listening) -and $(try { $null = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 2; $true } catch { $false })
         if ($busy) { if ($existing) { $null = Enable-ScheduledTask -TaskName $taskName }; throw "un serveur répond encore sur $Port (le .ps1 ?) : passer par Switch-SessionsDesk.ps1 -To node" }
     }
     if (Test-Path $runDir) {
-        if (Test-Path "$runDir.previous") { Remove-Item "$runDir.previous" -Recurse -Force }
         Move-Item $runDir "$runDir.previous"
     }
     Move-Item $stage $runDir
@@ -170,7 +174,7 @@ try {
     $up = $false
     for ($i = 0; $i -lt 40 -and -not $up; $i++) {
         Start-Sleep -Milliseconds 500
-        try { $null = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 3; $up = $true } catch {}
+        if (Test-Listening) { try { $null = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 3; $up = $true } catch {} }
     }
     if ($up) { Write-DeployLog $Port "serveur $($sha.Substring(0, 10)) en service : coupure de $([math]::Round(((Get-Date) - $cut).TotalSeconds, 1)) s (arrêt => première réponse)" }
     if (-not $up) { throw "le serveur ne répond pas sur $Port (voir $env:TEMP\sessions-desk-node-watchdog.log et sessions-desk-node-$Port.err.log)" }

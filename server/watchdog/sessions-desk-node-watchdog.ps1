@@ -35,7 +35,10 @@ $pidFile = Join-Path $StateDir "sessions-desk-node-$Port.pid"
 $ping = "http://localhost:$Port/api/ping"
 
 function Write-Log([string]$m) { Add-Content $log "$(Get-Date -Format s) [$Port] $m" }
-function Test-Up { try { $null = Invoke-RestMethod $ping -TimeoutSec 5; $true } catch { $false } }
+# Port sans écouteur : réponse immédiate. Un ping HTTP vers un port fermé coûte ~4 s sous Windows (::1 puis
+# 127.0.0.1, chacun relancé) — autant de coupure en plus à chaque relance.
+function Test-Listening { [bool]([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Where-Object Port -eq $Port) }
+function Test-Up { if (-not (Test-Listening)) { return $false }; try { $null = Invoke-RestMethod $ping -TimeoutSec 5; $true } catch { $false } }
 # Un serveur Node DE CE PORT lancé depuis n'importe quel dossier (main.ts, et --port <Port> ou port par défaut 8767).
 function Test-OurServer($p) {
     if (-not $p -or $p.Name -ne 'node.exe' -or $p.CommandLine -notmatch 'server[\\/]src[\\/]main\.ts') { return $false }
