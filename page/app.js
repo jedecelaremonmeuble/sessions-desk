@@ -799,7 +799,7 @@ function openRun(hd) {
 const runGroup = () => { const g = launcherGroup(runData ? runData.runs : [], runData ? runData.waiting : [], data ? data.sessions : [], midnight()); return { items: runsByHd(g.items), absorbed: g.absorbed }; };
 const money = v => (Math.round(v * 100) / 100).toLocaleString('fr-FR') + ' $';
 // ── Passes des AUTOMATES du poste (module « automations ») : scripts planifiés déclarés dans la configuration du
-// poste. Un groupe par automate dans la liste (passes du jour qui ont agi ou échoué, et la passe en cours), une carte
+// poste. Un groupe par automate dans la liste (la passe en cours et la DERNIÈRE passe du jour qui a agi ou échoué), une carte
 // par automate dans la vue d'ensemble, le détail d'une passe (résumé, fichiers, conversation). Source :
 // /api/automations?since=<minuit>, relu toutes les 30 s page visible et juste après un « Lancer maintenant ».
 // Les passes sans effet (quiet) n'ont pas de ligne : l'en-tête du groupe les compte et redit la dernière.
@@ -815,8 +815,10 @@ async function loadAutomations() {
 // automationGroups est PURE (testée par server/test/automations-page.test.ts) : vue du serveur → un groupe par
 // automate et ses éléments de liste. La session sans terminal de la passe en cours (même sessionId, ou même pid) est
 // ABSORBÉE par la ligne de la passe : elle ne figure plus seule dans la liste.
+// Une seule passe terminée par automate : la plus récente (l'historique du jour se lit dans la carte et l'en-tête).
+// `keep` : clés de passes à garder quand même (la passe sélectionnée, celle qu'un lien de notification ouvre).
 // Couleur (look) : en cours = busy · passe en erreur = waiting · alerte = ask · à blanc = idle · réussie = done.
-function automationGroups(autos, open) {
+function automationGroups(autos, open, keep) {
   const look = p => p.level === 'error' ? 'waiting' : p.level === 'warn' ? 'ask' : p.status === 'dry-run' ? 'idle' : 'done';
   const groups = [], items = [], absorbed = new Set();
   for (const a of autos || []) {
@@ -828,15 +830,18 @@ function automationGroups(autos, open) {
       items.push({ kind:'pass', key:'pass:' + a.id + ':' + a.running.run, auto:a, pass:null, running:true, look:'busy', sessionId:a.running.sessionId,
         title:name + ' · passe en cours', at:a.running.at, since:a.running.at, model:s ? s.model || null : null, tokens:s ? s.tokens || null : null, reply:s ? s.reply || null : null });
     }
+    let shown = 0;
     for (const p of a.passes || []) {
       if (a.running && p.run === a.running.run) continue;
+      if (shown++ && !(keep || []).includes('pass:' + a.id + ':' + p.run)) continue;
       items.push({ kind:'pass', key:'pass:' + a.id + ':' + p.run, auto:a, pass:p, running:false, look:look(p), sessionId:p.sessionId || null,
         title:name + ' · ' + new Date(p.at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }), at:p.at, since:p.at + Math.round((p.minutes || 0) * 60000) });
     }
   }
   return { groups, items, absorbed };
 }
-const autoGroup = () => automationGroups(autoData ? autoData.automations : [], data ? data.sessions : []);
+let passKeep = null;      // passe qu'un lien de notification demande d'ouvrir, gardée dans la liste même si ce n'est plus la dernière
+const autoGroup = () => automationGroups(autoData ? autoData.automations : [], data ? data.sessions : [], [selected, passKeep]);
 // Groupes de la liste : ceux de la page, plus un par automate, juste avant « Fermées ».
 const groupList = () => { const ag = autoGroup().groups; if (!ag.length) return GROUPS; const i = GROUPS.findIndex(g => g.key === 'closed'); return GROUPS.slice(0, i).concat(ag, GROUPS.slice(i)); };
 const PASS_FR = { ok:'a agi', nothing:'rien à faire', 'dry-run':'à blanc', conflict:'conflit', rejected:'refusée', failed:'échec', unknown:'issue inconnue' };
@@ -918,7 +923,8 @@ async function runAutomationOrder(a, o) {
 // Notification d'échec (cloche ou notification Windows ?pass=<automate>:<passe>) : la passe, si elle est du jour.
 let pendingPass = new URLSearchParams(location.search).get('pass');
 function openPass(ref) {
-  const it = byKey('pass:' + ref);
+  passKeep = 'pass:' + ref;
+  const it = byKey(passKeep);
   if (!it) { say('passe introuvable dans la liste (d’avant minuit ?)'); return; }
   if (launchMode) closeLauncher();
   select(it.key, true);
