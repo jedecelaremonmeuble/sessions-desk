@@ -981,7 +981,7 @@ function launcherGroup(runs, waiting, open, since) {
       : OK.test(r.outcome || '') && r.verdict !== 'a-reprendre' ? 'done' : 'idle';
     const sessionId = (s && s.sessionId) || r.liveSessionId || r.sessionId || null;
     items.push({ kind:'run', key:'run:' + r.dir, run:r, wait:w, look, sessionId, scripted: SCRIPTED.includes(r.phase) && !sessionId,
-      title: 'HD-' + r.hd + ' · ' + r.phase + (r.title ? ' — ' + r.title : ''), outcome: r.running ? 'en cours' : o,
+      title: 'HD-' + r.hd + ' · ' + r.phase + (r.title ? ' — ' + r.title : ''), outcome: r.running ? T('en cours', 'running') : o,
       at: r.at, since: r.running || r.minutes == null ? r.at : r.at + Math.round(r.minutes * 60000),
       model: (s && s.model) || r.model || null, tokens: (s && s.tokens) || r.tokens || null, reply: (s && s.reply) || r.reply || null,
       pid: r.pid || null, cwd: s ? s.cwd : null,
@@ -1078,7 +1078,7 @@ function automationGroups(autos, open, keep) {
       const s = (open || []).find(x => x.headless && (x.sessionId === a.running.sessionId || (a.running.pid && x.pid === a.running.pid))) || null;
       if (s) absorbed.add(s.sessionId);
       items.push({ kind:'pass', key:'pass:' + a.id + ':' + a.running.run, auto:a, pass:null, running:true, look:'busy', sessionId:a.running.sessionId,
-        title:name + ' · passe en cours', at:a.running.at, since:a.running.at, model:s ? s.model || null : null, tokens:s ? s.tokens || null : null, reply:s ? s.reply || null : null });
+        title:name + T(' · passe en cours', ' · pass running'), at:a.running.at, since:a.running.at, model:s ? s.model || null : null, tokens:s ? s.tokens || null : null, reply:s ? s.reply || null : null });
     }
     let shown = 0;
     for (const p of a.passes || []) {
@@ -1094,9 +1094,9 @@ let passKeep = null;      // passe qu'un lien de notification demande d'ouvrir, 
 const autoGroup = () => automationGroups(autoData ? autoData.automations : [], data ? data.sessions : [], [selected, passKeep]);
 // Groupes de la liste : ceux de la page, plus un par automate, juste avant « Fermées ».
 const groupList = () => { const ag = autoGroup().groups; if (!ag.length) return GROUPS; const i = GROUPS.findIndex(g => g.key === 'closed'); return GROUPS.slice(0, i).concat(ag, GROUPS.slice(i)); };
-const PASS_FR = { ok:'a agi', nothing:'rien à faire', 'dry-run':'à blanc', conflict:'conflit', rejected:'refusée', failed:'échec', unknown:'issue inconnue' };
+const PASS_FR = { ok:T('a agi', 'acted'), nothing:T('rien à faire', 'nothing to do'), 'dry-run':T('à blanc', 'dry run'), conflict:T('conflit', 'conflict'), rejected:T('refusée', 'rejected'), failed:T('échec', 'failed'), unknown:T('issue inconnue', 'unknown outcome') };
 function passSub(it) {
-  if (it.running) return ['travaille' + (it.at ? ' depuis ' + ago(Date.now() - it.at) : ''), it.reply ? lastLine(it.reply) : null].filter(Boolean).join(' · ');
+  if (it.running) return [T('travaille' + (it.at ? ' depuis ' + ago(Date.now() - it.at) : ''), 'working' + (it.at ? ' for ' + ago(Date.now() - it.at) : '')), it.reply ? lastLine(it.reply) : null].filter(Boolean).join(' · ');
   const p = it.pass;
   return [p.summary, p.minutes != null ? (p.minutes < 1 ? '< 1 min' : Math.round(p.minutes) + ' min') : null, p.costUsd != null ? money(p.costUsd) : null].filter(Boolean).join(' · ');
 }
@@ -1104,31 +1104,31 @@ function passSub(it) {
 // sans effet du jour.
 function autoGroupTitle(a) {
   const parts = [];
-  if (a.running) parts.push('en cours');
-  if (a.last) parts.push('dernière il y a ' + ago(Date.now() - a.last.at) + (a.last.quiet ? ' : ' + a.last.summary : ''));
-  else if (!a.present) parts.push('historique absent');
-  if (a.quietToday) parts.push(a.quietToday + ' sans effet aujourd’hui');
+  if (a.running) parts.push(T('en cours', 'running'));
+  if (a.last) parts.push(T('dernière il y a ' + ago(Date.now() - a.last.at) + (a.last.quiet ? ' : ' + a.last.summary : ''), 'last ' + ago(Date.now() - a.last.at) + ' ago' + (a.last.quiet ? ': ' + a.last.summary : '')));
+  else if (!a.present) parts.push(T('historique absent', 'no history'));
+  if (a.quietToday) parts.push(T(a.quietToday + ' sans effet aujourd’hui', a.quietToday + ' with no effect today'));
   return parts.length ? parts.join(' · ') : '';
 }
 // automationCard est PURE (testée par server/test/automations-page.test.ts) : la carte d'un automate dans la vue
 // d'ensemble — couleur, résumé de la dernière passe, et les lignes « dernière passe », « prochaine », « 7 jours »,
 // « dernier échec ».
 function automationCard(a, now) {
-  const fr = { ok:'a agi', nothing:'rien à faire', 'dry-run':'à blanc', conflict:'conflit', rejected:'refusée', failed:'échec', unknown:'issue inconnue' };
-  const since = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') : Math.floor(m / 1440) + ' j'; };
+  const fr = { ok:T('a agi', 'acted'), nothing:T('rien à faire', 'nothing to do'), 'dry-run':T('à blanc', 'dry run'), conflict:T('conflit', 'conflict'), rejected:T('refusée', 'rejected'), failed:T('échec', 'failed'), unknown:T('issue inconnue', 'unknown outcome') };
+  const since = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') : Math.floor(m / 1440) + T(' j', ' d'); };
   const usd = v => (Math.round(v * 100) / 100).toLocaleString('fr-FR') + ' $';
   const l = a.last, w = a.week || {};
   const look = a.running ? 'busy' : !a.present || !l ? 'idle' : l.level === 'error' ? 'waiting' : l.level === 'warn' || a.late ? 'ask' : 'done';
   const lines = [];
-  if (!a.present) lines.push(['historique', 'introuvable — l’automate a-t-il déjà tourné ? (chemin dans la configuration du poste)']);
-  if (a.running) lines.push(['en cours', 'depuis ' + since(now - a.running.at)]);
-  if (l) lines.push(['dernière passe', 'il y a ' + since(now - l.at) + ' · ' + (fr[l.status] || l.status) + (l.dryRun && l.status !== 'dry-run' ? ' (à blanc)' : '')]);
-  if (a.late) lines.push(['en retard', (l ? 'aucune passe depuis ' + since(now - l.at) : 'aucune passe') + ' — la tâche planifiée tourne toutes les ' + a.everyMinutes + ' min']);
-  else if (a.next && !a.running) lines.push(['prochaine', 'dans ' + since(a.next - now)]);
-  if (w.count) lines.push(['7 jours', [w.count + (w.count > 1 ? ' passes' : ' passe'), w.failures ? w.failures + (w.failures > 1 ? ' échecs' : ' échec') : 'aucun échec',
-    w.warnings ? w.warnings + (w.warnings > 1 ? ' alertes' : ' alerte') : null, w.costUsd != null ? usd(w.costUsd) + ' (' + usd(w.costAvg) + ' par passe)' : null].filter(Boolean).join(' · ')]);
-  if (w.lastFailure) lines.push(['dernier échec', 'il y a ' + since(now - w.lastFailure.at) + ' : ' + w.lastFailure.summary]);
-  return { look, title:(a.icon ? a.icon + ' ' : '') + a.label, summary: l ? l.summary : a.running ? 'première passe en cours' : 'aucune passe sur 8 jours', lines };
+  if (!a.present) lines.push([T('historique', 'history'), T('introuvable — l’automate a-t-il déjà tourné ? (chemin dans la configuration du poste)', 'not found — has the automation ever run? (path in the configuration of this machine)')]);
+  if (a.running) lines.push([T('en cours', 'running'), T('depuis ' + since(now - a.running.at), 'for ' + since(now - a.running.at))]);
+  if (l) lines.push([T('dernière passe', 'last pass'), T('il y a ' + since(now - l.at), since(now - l.at) + ' ago') + ' · ' + (fr[l.status] || l.status) + (l.dryRun && l.status !== 'dry-run' ? T(' (à blanc)', ' (dry run)') : '')]);
+  if (a.late) lines.push([T('en retard', 'late'), (l ? T('aucune passe depuis ' + since(now - l.at), 'no pass for ' + since(now - l.at)) : T('aucune passe', 'no pass')) + T(' — la tâche planifiée tourne toutes les ' + a.everyMinutes + ' min', ' — the scheduled task runs every ' + a.everyMinutes + ' min')]);
+  else if (a.next && !a.running) lines.push([T('prochaine', 'next'), T('dans ' + since(a.next - now), 'in ' + since(a.next - now))]);
+  if (w.count) lines.push([T('7 jours', '7 days'), [w.count + (w.count > 1 ? ' passes' : T(' passe', ' pass')), w.failures ? w.failures + (w.failures > 1 ? T(' échecs', ' failures') : T(' échec', ' failure')) : T('aucun échec', 'no failure'),
+    w.warnings ? w.warnings + (w.warnings > 1 ? T(' alertes', ' warnings') : T(' alerte', ' warning')) : null, w.costUsd != null ? usd(w.costUsd) + T(' (' + usd(w.costAvg) + ' par passe)', ' (' + usd(w.costAvg) + ' per pass)') : null].filter(Boolean).join(' · ')]);
+  if (w.lastFailure) lines.push([T('dernier échec', 'last failure'), T('il y a ' + since(now - w.lastFailure.at) + ' : ' + w.lastFailure.summary, since(now - w.lastFailure.at) + ' ago: ' + w.lastFailure.summary)]);
+  return { look, title:(a.icon ? a.icon + ' ' : '') + a.label, summary: l ? l.summary : a.running ? T('première passe en cours', 'first pass running') : T('aucune passe sur 8 jours', 'no pass in 8 days'), lines };
 }
 function automationSection() {
   const list = autoData ? autoData.automations : []; if (!list.length) return null;
@@ -1139,7 +1139,7 @@ function automationSection() {
     const h = el('div', 'qhead'); h.append(el('b', null, v.title)); c.append(h);
     const sm = el('div', 'asum', v.summary);
     const it = a.running ? allItems().find(x => x.kind === 'pass' && x.running && x.auto.id === a.id) : a.last && allItems().find(x => x.key === 'pass:' + a.id + ':' + a.last.run);
-    if (it) { sm.classList.add('lnk'); sm.title = 'Ouvrir cette passe'; sm.onclick = () => select(it.key, true); }
+    if (it) { sm.classList.add('lnk'); sm.title = T('Ouvrir cette passe', 'Open this pass'); sm.onclick = () => select(it.key, true); }
     c.append(sm);
     const dl = el('dl'); for (const [k, x] of v.lines) dl.append(el('dt', null, k), el('dd', null, x)); c.append(dl);
     const ob = automationOrders(a); if (ob) c.append(ob);
@@ -1153,7 +1153,7 @@ function automationOrders(a) {
   const box = el('div', 'actions');
   for (const o of a.orders) {
     const b = el('button', null, '▶ ' + o.label);
-    b.title = 'Lancer maintenant : ' + o.label + (a.week && a.week.costAvg != null ? ' — coût moyen d’une passe sur 7 jours : ' + money(a.week.costAvg) : '');
+    b.title = T('Lancer maintenant : ', 'Run now: ') + o.label + (a.week && a.week.costAvg != null ? T(' — coût moyen d’une passe sur 7 jours : ', ' — average cost of a pass over 7 days: ') + money(a.week.costAvg) : '');
     b.onclick = e => { e.stopPropagation(); runAutomationOrder(a, o); };
     box.append(b);
   }
@@ -1162,12 +1162,12 @@ function automationOrders(a) {
 async function runAutomationOrder(a, o) {
   if (!canWrite) return;
   if (o.confirm && !confirm(o.confirm)) return;
-  say((a.icon ? a.icon + ' ' : '') + a.label + ' : ' + o.label + '…');
+  say((a.icon ? a.icon + ' ' : '') + a.label + T(' : ', ': ') + o.label + '…');
   try {
     const r = await fetch('/api/automations/order', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ id: a.id, order: o.id }) });
     const j = await r.json().catch(() => ({}));
-    say(j.error ? 'refusé : ' + j.error : j.done ? a.label + ' : terminé' + (j.output ? ' — ' + j.output : '') : a.label + ' : passe lancée — elle apparaît dans son groupe dès que sa session démarre');
-  } catch { say('échec de la demande'); }
+    say(j.error ? T('refusé : ', 'refused: ') + j.error : j.done ? a.label + T(' : terminé', ': done') + (j.output ? ' — ' + j.output : '') : a.label + T(' : passe lancée — elle apparaît dans son groupe dès que sa session démarre', ': pass started — it shows up in its group as soon as its session starts'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   setTimeout(loadAutomations, 3000); setTimeout(loadAutomations, 15000);
 }
 // Notification d'échec (cloche ou notification Windows ?pass=<automate>:<passe>) : la passe, si elle est du jour.
@@ -1175,7 +1175,7 @@ let pendingPass = new URLSearchParams(location.search).get('pass');
 function openPass(ref) {
   passKeep = 'pass:' + ref;
   const it = byKey(passKeep);
-  if (!it) { say('passe introuvable dans la liste (d’avant minuit ?)'); return; }
+  if (!it) { say(T('passe introuvable dans la liste (d’avant minuit ?)', 'pass not found in the list (from before midnight?)')); return; }
   if (launchMode) closeLauncher();
   select(it.key, true);
 }
@@ -1185,7 +1185,7 @@ async function openPassFile(it, name) {
   if (passFile === key) { passFile = null; passFileText = null; return renderDetail(true); }
   passFile = key; passFileText = name.endsWith('.png') ? null : '…'; renderDetail(true);
   if (name.endsWith('.png')) return;
-  try { const r = await fetch(passFileUrl(it, name), { cache:'no-store' }); passFileText = r.ok ? await r.text() : '(illisible : ' + r.status + ')'; } catch { passFileText = '(illisible)'; }
+  try { const r = await fetch(passFileUrl(it, name), { cache:'no-store' }); passFileText = r.ok ? await r.text() : T('(illisible : ' + r.status + ')', '(unreadable: ' + r.status + ')'); } catch { passFileText = T('(illisible)', '(unreadable)'); }
   if (passFile === key) renderDetail(true);
 }
 const passFileUrl = (it, name) => '/api/automations/file?id=' + encodeURIComponent(it.auto.id) + '&run=' + encodeURIComponent(it.pass.run) + '&name=' + encodeURIComponent(name);
@@ -1198,7 +1198,7 @@ function renderPassDetail(it, force) {
     const head = el('div'); head.id = 'head'; const body = el('div'); body.id = 'body'; main.append(head, body);
     if (p) { const card = el('div', 'rcard ' + it.look); card.append(el('div', 'rtitle', p.summary)); body.append(card); }
     if (p && p.files && p.files.length && a.files) {
-      body.append(el('h2', null, 'Fichiers de la passe'));
+      body.append(el('h2', null, T('Fichiers de la passe', 'Pass files')));
       const fl = el('div', 'lf');
       for (const f of p.files) { const b = el('button', 'quick' + (passFile === it.key + '/' + f ? ' on' : ''), f); b.onclick = () => openPassFile(it, f); fl.append(b); }
       body.append(fl);
@@ -1209,38 +1209,38 @@ function renderPassDetail(it, force) {
         else body.append(el('pre', 'lview', passFileText));
       }
     }
-    if (it.sessionId) { body.append(el('h2', null, 'Conversation complète'), convPane()); applyConvView(it); }
-    else body.append(el('div', 'empty', it.running ? 'Session de la passe pas encore repérée.' : 'Passe sans session Claude : pas de conversation (voir son résumé et ses fichiers).'));
+    if (it.sessionId) { body.append(el('h2', null, T('Conversation complète', 'Full conversation')), convPane()); applyConvView(it); }
+    else body.append(el('div', 'empty', it.running ? T('Session de la passe pas encore repérée.', 'Session of the pass not found yet.') : T('Passe sans session Claude : pas de conversation (voir son résumé et ses fichiers).', 'Pass without a Claude session: no conversation (see its summary and files).')));
   }
   const head = $('head'); head.replaceChildren(); head.className = it.look;
   head.append(el('div', 'dtitle', it.title));
-  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), it.running ? 'travaille · depuis ' + ago(Date.now() - it.at) : (PASS_FR[p.status] || p.status) + ' · il y a ' + ago(Date.now() - it.since));
-  if (p && p.dryRun && p.status !== 'dry-run') chip.append(el('span', 'tag cl', 'à blanc'));
+  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), it.running ? T('travaille · depuis ' + ago(Date.now() - it.at), 'working · for ' + ago(Date.now() - it.at)) : (PASS_FR[p.status] || p.status) + T(' · il y a ' + ago(Date.now() - it.since), ' · ' + ago(Date.now() - it.since) + ' ago'));
+  if (p && p.dryRun && p.status !== 'dry-run') chip.append(el('span', 'tag cl', T('à blanc', 'dry run')));
   head.append(chip);
-  if (it.model) head.append(el('span', 'tok', '  ·  modèle : ' + modelName(it.model)));
-  if (it.tokens) head.append(el('span', 'tok', '  ·  contexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens'));
-  head.append(el('div', 'meta', [(a.icon ? a.icon + ' ' : '') + a.label, 'lancée le ' + new Date(it.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
+  if (it.model) head.append(el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)));
+  if (it.tokens) head.append(el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString('fr-FR') + ' tokens'));
+  head.append(el('div', 'meta', [(a.icon ? a.icon + ' ' : '') + a.label, T('lancée le ', 'started ') + new Date(it.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
     p && p.minutes != null ? (p.minutes < 1 ? '< 1 min' : Math.round(p.minutes) + ' min') : null, p && p.costUsd != null ? money(p.costUsd) : null, it.sessionId].filter(Boolean).join(' · ')));
   const actions = el('div', 'actions');
   if (!it.running && it.sessionId && canWrite) {
-    const b = el('button', 'primary', '↻ Reprendre dans un onglet'); b.title = 'claude --resume ' + it.sessionId + ' — pour l’inspecter ou la questionner ; l’automate ne la reprend pas';
+    const b = el('button', 'primary', T('↻ Reprendre dans un onglet', '↻ Resume in a tab')); b.title = 'claude --resume ' + it.sessionId + T(' — pour l’inspecter ou la questionner ; l’automate ne la reprend pas', ' — to inspect or question it; the automation does not resume it');
     b.onclick = () => openPassConversation(it); actions.append(b);
   }
   const ob = automationOrders(a); if (ob) for (const b of [...ob.children]) actions.append(b);
   head.append(actions);
 }
 async function openPassConversation(it) {
-  if (!confirm('Rouvrir la conversation de cette passe (' + it.auto.label + ') dans un nouvel onglet (claude --resume) ?\n\nPour l’inspecter ou la questionner. L’automate ne la reprend pas.')) return;
-  try { const x = await post('/api/reopen?id=' + it.sessionId); say(x.error ? 'refusé : ' + x.error : 'onglet ouvert — la session apparaît dans quelques secondes'); } catch { say('échec de la demande'); }
+  if (!confirm(T('Rouvrir la conversation de cette passe (' + it.auto.label + ') dans un nouvel onglet (claude --resume) ?\n\nPour l’inspecter ou la questionner. L’automate ne la reprend pas.', 'Reopen the conversation of this pass (' + it.auto.label + ') in a new tab (claude --resume)?\n\nTo inspect or question it. The automation does not resume it.'))) return;
+  try { const x = await post('/api/reopen?id=' + it.sessionId); say(x.error ? T('refusé : ', 'refused: ') + x.error : T('onglet ouvert — la session apparaît dans quelques secondes', 'tab opened — the session shows up in a few seconds')); } catch { say(T('échec de la demande', 'request failed')); }
 }
 // Enchaînement des phases d'une demande, du premier au dernier run ; au-delà de 5, seules les 5 dernières.
 const phaseChain = phases => (phases.length > 5 ? ['…'].concat(phases.slice(-5)) : phases).map(p => RUN_FR[p] || p).join(' → ');
-const RUN_FR = { diagnostic:'diagnostic', suite:'suite', dev:'dev', relecture:'relecture', recette:'recette', reprise:'reprise', relance:'relance', reveil:'réveil', go:'go', merge:'merge', production:'production', doc:'doc' };
+const RUN_FR = { diagnostic:'diagnostic', suite:T('suite', 'follow-up'), dev:'dev', relecture:T('relecture', 'review'), recette:T('recette', 'testing'), reprise:T('reprise', 'rework'), relance:T('relance', 'restart'), reveil:T('réveil', 'wake-up'), go:'go', merge:'merge', production:'production', doc:'doc' };
 function runSub(it) {
   const r = it.run, multi = it.runCount > 1;
   const tail = multi ? [phaseChain(it.phases), it.runCount + ' runs' + (it.costTotal != null ? ' · ' + money(it.costTotal) : '')] : [];
-  if (r.running) return ['travaille' + (r.at ? ' depuis ' + ago(Date.now() - r.at) : '')].concat(tail, it.reply ? [lastLine(it.reply)] : []).join(' · ');
-  return [it.wait && STAGE_FR[it.wait.stage] ? STAGE_FR[it.wait.stage] : null, it.outcome || null, it.scripted ? 'étape scriptée' : null]
+  if (r.running) return [T('travaille' + (r.at ? ' depuis ' + ago(Date.now() - r.at) : ''), 'working' + (r.at ? ' for ' + ago(Date.now() - r.at) : ''))].concat(tail, it.reply ? [lastLine(it.reply)] : []).join(' · ');
+  return [it.wait && STAGE_FR[it.wait.stage] ? STAGE_FR[it.wait.stage] : null, it.outcome || null, it.scripted ? T('étape scriptée', 'scripted step') : null]
     .concat(multi ? tail : [r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.costUsd != null ? money(r.costUsd) : null]).filter(Boolean).join(' · ') || '—';
 }
 // ── Résultat d'un run : ce que le lanceur a CONSTATÉ, lu dans ses propres fichiers — report.json (production : verdict,
@@ -1250,18 +1250,18 @@ function runResult(report, verdict) {
   if (report && typeof report === 'object' && report.verdict) {
     const live = report.verdict === 'in-production';
     const lines = [[report.mergeSha ? 'merge ' + String(report.mergeSha).slice(0, 10) : null,
-      report.files != null ? report.files + ' fichier' + (report.files > 1 ? 's' : '') : null,
+      report.files != null ? report.files + T(' fichier', ' file') + (report.files > 1 ? 's' : '') : null,
       Array.isArray(report.sides) && report.sides.length ? report.sides.join(' + ') : null].filter(Boolean).join(' · ')].filter(Boolean);
     for (const d of Array.isArray(report.deployments) ? report.deployments : [])
       lines.push(String(d.name || '?').replace(/-deployment$/, '') + ' ' + (d.tag || '?') + ' · '
-        + (d.carries && d.rolledOut ? 'déployé' : d.carries ? 'pas encore déployé partout' : 'ne porte pas le correctif') + (d.reason ? ' (' + d.reason + ')' : ''));
-    return { look: live ? 'done' : 'ask', title: live ? '🚀 En production' : '⏳ Pas encore en production (' + report.verdict + ')', lines,
+        + (d.carries && d.rolledOut ? T('déployé', 'deployed') : d.carries ? T('pas encore déployé partout', 'not deployed everywhere yet') : T('ne porte pas le correctif', 'does not carry the fix')) + (d.reason ? ' (' + d.reason + ')' : ''));
+    return { look: live ? 'done' : 'ask', title: live ? T('🚀 En production', '🚀 In production') : T('⏳ Pas encore en production (' + report.verdict + ')', '⏳ Not in production yet (' + report.verdict + ')'), lines,
       pr: Number(report.pr) > 0 ? Number(report.pr) : null };
   }
   if (verdict && typeof verdict === 'object' && verdict.verdict) {
     const v = String(verdict.verdict).toLowerCase(), n = Array.isArray(verdict.steps) ? verdict.steps.length : 0;
-    const t = v === 'ok' ? ['done', '✅ Recette OK'] : v === 'ko' ? ['waiting', '❌ Recette KO'] : ['ask', '❔ Recette non concluante'];
-    return { look: t[0], title: t[1] + (n ? ' · ' + n + ' étape' + (n > 1 ? 's' : '') : ''), lines: verdict.summary ? [String(verdict.summary)] : [], pr: null };
+    const t = v === 'ok' ? ['done', T('✅ Recette OK', '✅ Testing OK')] : v === 'ko' ? ['waiting', T('❌ Recette KO', '❌ Testing failed')] : ['ask', T('❔ Recette non concluante', '❔ Testing inconclusive')];
+    return { look: t[0], title: t[1] + (n ? ' · ' + n + T(' étape', ' step') + (n > 1 ? 's' : '') : ''), lines: verdict.summary ? [String(verdict.summary)] : [], pr: null };
   }
   return null;
 }
@@ -1315,7 +1315,7 @@ async function viewRunFile(it, name) {
 async function openRunFile(it, name, quiet) {
   const key = it.run.dir + '/' + name;
   runFile = key; runFileText = name.endsWith('.png') ? null : '…'; if (!quiet) renderDetail(true);
-  if (!name.endsWith('.png')) { try { runFileText = await (await fetch('/api/launcher/file?path=' + encodeURIComponent(it.run.dir + '\\' + name), { cache:'no-store' })).text(); } catch { runFileText = '(illisible)'; } if (runFile === key) renderDetail(true); }
+  if (!name.endsWith('.png')) { try { runFileText = await (await fetch('/api/launcher/file?path=' + encodeURIComponent(it.run.dir + '\\' + name), { cache:'no-store' })).text(); } catch { runFileText = T('(illisible)', '(unreadable)'); } if (runFile === key) renderDetail(true); }
 }
 // Détail d'un run : en-tête (statut, modèle, coût, tours, PR), fichiers du run, conversation (suivie en direct pendant le run).
 function renderRunDetail(it, force) {
@@ -1343,14 +1343,14 @@ function renderRunDetail(it, force) {
     const ob = el('div', 'orders'); ob.id = 'orders'; body.append(ob); renderOrders(it);
     // Frise des runs de la demande (du plus récent au plus ancien) : un clic affiche ce run (fichiers, conversation).
     if (it.runs && it.runs.length > 1) {
-      body.append(el('h2', null, 'Runs de HD-' + r.hd + ' (' + it.runs.length + (it.costTotal != null ? ' · ' + money(it.costTotal) : '') + ')'));
+      body.append(el('h2', null, T('Runs de HD-' + r.hd, 'Runs of HD-' + r.hd) + ' (' + it.runs.length + (it.costTotal != null ? ' · ' + money(it.costTotal) : '') + ')'));
       const sp = runSpan(it.runs, Date.now());
       if (sp) body.append(el('div', 'rspan', [(RUN_FR[sp.from] || sp.from) + ' ' + hhmm(sp.fromAt) + ' → ' + (RUN_FR[sp.to] || sp.to) + ' ' + hhmm(sp.toAt),
-        dur(sp.totalMin) + (sp.running ? ' jusqu’ici' : ' de bout en bout'), dur(sp.workMin) + ' de travail du lanceur', dur(sp.waitMin) + ' d’attente (feu vert, file, déploiement)',
+        dur(sp.totalMin) + (sp.running ? T(' jusqu’ici', ' so far') : T(' de bout en bout', ' end to end')), dur(sp.workMin) + T(' de travail du lanceur', ' of launcher work'), dur(sp.waitMin) + T(' d’attente (feu vert, file, déploiement)', ' of waiting (go-ahead, queue, deployment)'),
         it.costTotal != null ? money(it.costTotal) : null].filter(Boolean).join(' · ')));
       const fr = el('div', 'lf runs-hd');
       for (const x of it.runs) {
-        const xr = x.run, o = xr.running ? 'en cours' : x.outcome || '—';
+        const xr = x.run, o = xr.running ? T('en cours', 'running') : x.outcome || '—';
         const b = el('button', 'quick ' + x.look + (xr.dir === r.dir ? ' on' : ''),
           [new Date(xr.at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }), RUN_FR[xr.phase] || xr.phase, o,
            xr.minutes != null ? Math.round(xr.minutes) + ' min' : null, xr.costUsd != null ? money(xr.costUsd) : null].filter(Boolean).join(' · '));
@@ -1361,9 +1361,9 @@ function renderRunDetail(it, force) {
       body.append(fr);
     }
     if (r.files && r.files.length) {
-      body.append(el('h2', null, 'Fichiers du run'));
+      body.append(el('h2', null, T('Fichiers du run', 'Run files')));
       const fl = el('div', 'lf');
-      for (const f of r.files) { const b = el('button', 'quick' + (runFile === r.dir + '/' + f.name ? ' on' : ''), f.name); b.title = Math.max(1, Math.round(f.size / 1024)) + ' Ko'; b.onclick = () => viewRunFile(it, f.name); fl.append(b); }
+      for (const f of r.files) { const b = el('button', 'quick' + (runFile === r.dir + '/' + f.name ? ' on' : ''), f.name); b.title = Math.max(1, Math.round(f.size / 1024)) + T(' Ko', ' KB'); b.onclick = () => viewRunFile(it, f.name); fl.append(b); }
       body.append(fl);
       if (runFile && runFile.startsWith(r.dir + '/')) {
         const name = runFile.slice(r.dir.length + 1);
@@ -1372,8 +1372,8 @@ function renderRunDetail(it, force) {
         else body.append(el('pre', 'lview', runFileText));
       }
     }
-    if (it.sessionId) { body.append(el('h2', null, 'Conversation complète'), convPane()); applyConvView(it); }
-    else body.append(el('div', 'empty', it.scripted ? 'Étape scriptée du lanceur : aucune session Claude, donc pas de conversation (voir ses fichiers).' : 'Conversation introuvable : identifiant de session inconnu pour ce run.'));
+    if (it.sessionId) { body.append(el('h2', null, T('Conversation complète', 'Full conversation')), convPane()); applyConvView(it); }
+    else body.append(el('div', 'empty', it.scripted ? T('Étape scriptée du lanceur : aucune session Claude, donc pas de conversation (voir ses fichiers).', 'Scripted launcher step: no Claude session, so no conversation (see its files).') : T('Conversation introuvable : identifiant de session inconnu pour ce run.', 'Conversation not found: unknown session id for this run.')));
   }
   // L'étape de la demande change sans changement de run (ordre pris, livraison démarrée) : le corps n'est pas reconstruit,
   // le bloc « Piloter » doit suivre quand même — sinon « Livrer la PR » reste offert alors que la livraison tourne.
@@ -1386,43 +1386,43 @@ function renderRunDetail(it, force) {
     } }
   const head = $('head'); head.replaceChildren(); head.className = it.look;
   head.append(el('div', 'dtitle', it.title));
-  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), (r.running ? 'travaille · depuis ' + ago(Date.now() - r.at) : (it.outcome || 'terminé') + ' · il y a ' + ago(Date.now() - it.since)));
+  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), (r.running ? T('travaille · depuis ' + ago(Date.now() - r.at), 'working · for ' + ago(Date.now() - r.at)) : (it.outcome || T('terminé', 'done')) + T(' · il y a ' + ago(Date.now() - it.since), ' · ' + ago(Date.now() - it.since) + ' ago')));
   if (it.wait && STAGE_FR[it.wait.stage]) chip.append(el('span', 'tag cl', STAGE_FR[it.wait.stage]));
   head.append(chip);
-  if (it.model) head.append(el('span', 'tok', '  ·  modèle : ' + modelName(it.model)));
-  if (it.tokens) head.append(el('span', 'tok', '  ·  contexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens'));
-  const meta = el('div', 'meta', ['🤖 lanceur · ' + (RUN_FR[r.phase] || r.phase), 'lancé le ' + new Date(r.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
-    r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + ' tours' : null, r.costUsd != null ? (Math.round(r.costUsd * 100) / 100).toLocaleString('fr-FR') + ' $' : null,
+  if (it.model) head.append(el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)));
+  if (it.tokens) head.append(el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString('fr-FR') + ' tokens'));
+  const meta = el('div', 'meta', [T('🤖 lanceur · ', '🤖 launcher · ') + (RUN_FR[r.phase] || r.phase), T('lancé le ', 'started ') + new Date(r.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
+    r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + T(' tours', ' turns') : null, r.costUsd != null ? (Math.round(r.costUsd * 100) / 100).toLocaleString('fr-FR') + ' $' : null,
     it.pid ? 'pid ' + it.pid : null, it.sessionId].filter(Boolean).join(' · '));
   const a = prLink(it); if (a) meta.append(' · ', a);
   head.append(meta);
   if (r.detail) head.append(el('div', 'meta', r.detail));
-  if (it.wait && it.wait.detail) head.append(el('div', 'meta', 'Demande : ' + it.wait.detail));
+  if (it.wait && it.wait.detail) head.append(el('div', 'meta', T('Demande : ', 'Request: ') + it.wait.detail));
   head.append(hdBlock(r.hd));
   const actions = el('div', 'actions');
-  if (!r.running && r.sessionId) { const b = el('button', 'primary', '↻ Reprendre dans un onglet'); b.title = 'claude --resume ' + r.sessionId + ' — pour l’inspecter ou la questionner ; le lanceur ne la reprend pas'; b.onclick = () => openRunConversation(r); actions.append(b); }
-  const bl = el('button', null, 'Vue 🤖 Lanceur'); bl.onclick = () => openLauncher(); actions.append(bl);
+  if (!r.running && r.sessionId) { const b = el('button', 'primary', T('↻ Reprendre dans un onglet', '↻ Resume in a tab')); b.title = 'claude --resume ' + r.sessionId + T(' — pour l’inspecter ou la questionner ; le lanceur ne la reprend pas', ' — to inspect or question it; the launcher does not resume it'); b.onclick = () => openRunConversation(r); actions.append(b); }
+  const bl = el('button', null, T('Vue 🤖 Lanceur', '🤖 Launcher view')); bl.onclick = () => openLauncher(); actions.append(bl);
   head.append(actions);
   head.append(el('div', 'banner', runBanner(!!r.running, !!(it.sessionId || r.sessionId))));
 }
 // La DEMANDE derrière un run (en-tête du détail) : demandeur, date, type, statut, assigné, client, liens Teams et
 // de tickets, début de la description — lue par GET /api/launcher/hd (commande de lecture des tickets du lanceur), gardée
 // ici par HD (l'en-tête se redessine toutes les 2 s ; le serveur garde 5 min). hdParts est PURE (testée par le .ps1).
-const HD_STATUS_FR = { New:'Nouveau', Open:'Ouvert', InProgress:'En cours', Pending:'En attente', Waiting:'En attente', Resolved:'Résolu', Closed:'Fermé' };
-const HD_KIND_FR = { Bug:'🐞 Bug', Idee:'💡 Idée' };
-const HD_PRIO_FR = { Low:'basse', Medium:'moyenne', High:'haute', Urgent:'urgente' };
+const HD_STATUS_FR = { New:T('Nouveau', 'New'), Open:T('Ouvert', 'Open'), InProgress:T('En cours', 'In progress'), Pending:T('En attente', 'Pending'), Waiting:T('En attente', 'Waiting'), Resolved:T('Résolu', 'Resolved'), Closed:T('Fermé', 'Closed') };
+const HD_KIND_FR = { Bug:'🐞 Bug', Idee:T('💡 Idée', '💡 Idea') };
+const HD_PRIO_FR = { Low:T('basse', 'low'), Medium:T('moyenne', 'medium'), High:T('haute', 'high'), Urgent:T('urgente', 'urgent') };
 function hdParts(h) {
   const when = h.createdAt ? new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(h.createdAt) ? h.createdAt : h.createdAt + 'Z') : null;
   return [
     h.kind ? (HD_KIND_FR[h.kind] || h.kind) : null,
     h.status ? (HD_STATUS_FR[h.status] || h.status) : null,
-    h.requester ? 'demandée par ' + h.requester : null,
-    when && !isNaN(when) ? 'le ' + when.toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : null,
-    h.domain ? 'domaine ' + h.domain : null,
-    h.severity ? 'sévérité ' + h.severity : null,
-    h.priority ? 'priorité ' + (HD_PRIO_FR[h.priority] || h.priority) : null,
-    h.assignee ? 'assignée à ' + h.assignee : null,
-    h.clients ? h.clients + (h.clients > 1 ? ' clients liés' : ' client lié') : null,
+    h.requester ? T('demandée par ', 'requested by ') + h.requester : null,
+    when && !isNaN(when) ? T('le ', 'on ') + when.toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : null,
+    h.domain ? T('domaine ', 'domain ') + h.domain : null,
+    h.severity ? T('sévérité ', 'severity ') + h.severity : null,
+    h.priority ? T('priorité ', 'priority ') + (HD_PRIO_FR[h.priority] || h.priority) : null,
+    h.assignee ? T('assignée à ', 'assigned to ') + h.assignee : null,
+    h.clients ? h.clients + (h.clients > 1 ? T(' clients liés', ' linked clients') : T(' client lié', ' linked client')) : null,
   ].filter(Boolean);
 }
 const hdInfo = {};                              // hd → { at, value } | { at, loading }
@@ -1431,18 +1431,18 @@ function hdBlock(hd) {
   const c = hdInfo[hd];
   if (!c || (!c.loading && Date.now() - c.at > (c.value.error ? 60000 : 300000))) {
     hdInfo[hd] = { at: Date.now(), loading: true, value: c && c.value };
-    fetch('/api/launcher/hd?hd=' + encodeURIComponent(hd), { cache:'no-store' }).then(x => x.json()).catch(() => ({ error: 'serveur injoignable' }))
+    fetch('/api/launcher/hd?hd=' + encodeURIComponent(hd), { cache:'no-store' }).then(x => x.json()).catch(() => ({ error: T('serveur injoignable', 'server unreachable') }))
       .then(v => { hdInfo[hd] = { at: Date.now(), value: v }; renderDetail(); });
   }
   const h = hdInfo[hd].value;
-  if (!h) { box.append(el('span', 'mute', '📨 Demande HD-' + hd + ' : lecture…')); return box; }
-  if (h.error) { box.append(el('span', 'mute', '📨 Demande HD-' + hd + ' : ' + h.error)); return box; }
-  const line = el('div', 'hdl'); line.append(el('b', null, '📨 Demande'), ' · ' + hdParts(h).join(' · '));
+  if (!h) { box.append(el('span', 'mute', T('📨 Demande HD-' + hd + ' : lecture…', '📨 Request HD-' + hd + ': loading…'))); return box; }
+  if (h.error) { box.append(el('span', 'mute', T('📨 Demande HD-' + hd + ' : ', '📨 Request HD-' + hd + ': ') + h.error)); return box; }
+  const line = el('div', 'hdl'); line.append(el('b', null, T('📨 Demande', '📨 Request')), ' · ' + hdParts(h).join(' · '));
   const link = (txt, url) => { const a = el('a', null, txt); a.href = url; a.target = '_blank'; a.rel = 'noopener'; return a; };
   if (ui().ticketUrl) line.append(' · ', link((ui().ticketLabel || 'Ticket') + ' ↗', ui().ticketUrl + h.hd));
   if (h.teamsUrl) line.append(' · ', link('Teams ↗', h.teamsUrl));
   box.append(line);
-  if (h.description) { const d = el('div', 'hdd', h.description); d.title = 'Début de la description de la demande'; box.append(d); }
+  if (h.description) { const d = el('div', 'hdd', h.description); d.title = T('Début de la description de la demande', 'Start of the request description'); box.append(d); }
   return box;
 }
 // Bandeau du détail d'un run : il ne parle de conversation (ni de « Reprendre ») que si le run en a une — une étape
@@ -1451,15 +1451,15 @@ function hdBlock(hd) {
 // (étiqueteur de sessions, automates divers) sont comptés à part — sinon l'étiqueteur passait pour un run en cours.
 function autoTitle(base, rows) {
   const runs = rows.filter(it => it.kind === 'run'), nAuto = rows.length - runs.length;
-  const parts = runs.length ? [runs.filter(it => it.run.running).length + ' en cours', runs.length + ' HD aujourd’hui'] : [];
-  if (nAuto) parts.push(nAuto + (nAuto > 1 ? ' automates' : ' automate'));
+  const parts = runs.length ? [runs.filter(it => it.run.running).length + T(' en cours', ' running'), runs.length + T(' HD aujourd’hui', ' HD today')] : [];
+  if (nAuto) parts.push(nAuto + (nAuto > 1 ? T(' automates', ' automations') : T(' automate', ' automation')));
   return parts.length ? base + ' — ' + parts.join(' · ') : base;
 }
 function runBanner(running, conv) {
-  if (running) return conv ? 'Run du lanceur en cours (claude -p, sans terminal) : on ne lui écrit pas — les ordres se donnent une fois le run terminé. La conversation défile en direct.'
-    : 'Étape scriptée du lanceur en cours : pas de session Claude ni de conversation ; les ordres se donnent une fois l’étape terminée.';
-  return conv ? 'Run du lanceur terminé. « Reprendre » rouvre sa conversation dans un onglet, sans rien changer pour le lanceur ; « Piloter » lui donne un ordre.'
-    : 'Étape scriptée du lanceur terminée : pas de session Claude ni de conversation à reprendre ; « Piloter » donne un ordre au lanceur.';
+  if (running) return conv ? T('Run du lanceur en cours (claude -p, sans terminal) : on ne lui écrit pas — les ordres se donnent une fois le run terminé. La conversation défile en direct.', 'Launcher run in progress (claude -p, no terminal): you do not write to it — orders are given once the run is over. The conversation scrolls live.')
+    : T('Étape scriptée du lanceur en cours : pas de session Claude ni de conversation ; les ordres se donnent une fois l’étape terminée.', 'Scripted launcher step in progress: no Claude session and no conversation; orders are given once the step is over.');
+  return conv ? T('Run du lanceur terminé. « Reprendre » rouvre sa conversation dans un onglet, sans rien changer pour le lanceur ; « Piloter » lui donne un ordre.', 'Launcher run over. "Resume" reopens its conversation in a tab, without changing anything for the launcher; "Control" gives it an order.')
+    : T('Étape scriptée du lanceur terminée : pas de session Claude ni de conversation à reprendre ; « Piloter » donne un ordre au lanceur.', 'Scripted launcher step over: no Claude session and no conversation to resume; "Control" gives the launcher an order.');
 }
 
 // ── Piloter le lanceur depuis le détail d'un run : go + consigne, livrer la PR (confirmation), relire,
@@ -1485,13 +1485,13 @@ function deliveringWait(it) { const w = ((it.runs || []).find(x => x.wait) || {}
 function deliveringNote(stage, since, mergeAt, now) {
   if (stage !== 'delivering') return null;
   const min = t => Math.max(0, Math.round((now - t) / 60000));
-  const head = '🚀 Livraison ' + (since ? 'demandée à ' + hhmm(since) + ' — ' : '') + (mergeAt ? 'en cours depuis ' + min(mergeAt) + ' min' : 'le lanceur la prend à sa prochaine passe');
-  return head + '. Rebase sur master, contrôles rejoués (20 à 40 min), puis squash-merge : rien à refaire ici, l’ordre est pris.';
+  const head = T('🚀 Livraison ', '🚀 Delivery ') + (since ? T('demandée à ' + hhmm(since) + ' — ', 'requested at ' + hhmm(since) + ' — ') : '') + (mergeAt ? T('en cours depuis ' + min(mergeAt) + ' min', 'running for ' + min(mergeAt) + ' min') : T('le lanceur la prend à sa prochaine passe', 'the launcher takes it on its next pass'));
+  return head + T('. Rebase sur master, contrôles rejoués (20 à 40 min), puis squash-merge : rien à refaire ici, l’ordre est pris.', '. Rebase on master, checks replayed (20 to 40 min), then squash-merge: nothing to redo here, the order is taken.');
 }
 // ── Décision de la Tech (carte ✅ posée par le lanceur sous sa dernière note, `techDecision` de son state.json) :
 // tranchée ICI comme sur la carte. decisionForm et decideBody sont PURES ; le
 // lanceur refait toutes les gardes (ordre « decide ») et pose la note de trace qui ferme la carte.
-const DECISION_KIND_FR = { validation:'✅ Validation Tech', cadrage:'📐 Ouvrir un cadrage', doc:'📝 Mémoire de domaine' };
+const DECISION_KIND_FR = { validation:T('✅ Validation Tech', '✅ Tech validation'), cadrage:T('📐 Ouvrir un cadrage', '📐 Open a scoping'), doc:T('📝 Mémoire de domaine', '📝 Domain memory') };
 function decisionForm(d) {
   let qs = [];
   try { qs = JSON.parse(d.questionsJson || '[]'); } catch { qs = []; }
@@ -1499,7 +1499,7 @@ function decisionForm(d) {
   const main = qs.find(q => q && q.id === 'decision') || { question:'', options:[] };
   const opts = q => (q.options || []).map(o => ({ id: String(o.id), label: String(o.label || o.id), recommended: !!o.recommended }));
   return {
-    title: DECISION_KIND_FR[d.kind] || '✅ Décision de la Tech',
+    title: DECISION_KIND_FR[d.kind] || T('✅ Décision de la Tech', '✅ Tech decision'),
     question: String(main.question || ''),
     choices: qs.filter(q => q && q.id !== 'decision').map(q => ({ id: String(q.id), header: String(q.header || q.id), question: String(q.question || ''), options: opts(q) })),
     decisions: opts(main).map(o => ({ ...o, needsText: d.kind === 'validation' && o.id === 'non' })),
@@ -1508,9 +1508,9 @@ function decisionForm(d) {
 function decideBody(hd, d, decision, picks, text) {
   const f = decisionForm(d);
   const dec = f.decisions.find(x => x.id === decision);
-  if (!dec) return { error: 'décision inconnue' };
+  if (!dec) return { error: T('décision inconnue', 'unknown decision') };
   const t = String(text || '').replace(/\s+/g, ' ').trim();
-  if (dec.needsText && !t) return { error: '« ' + dec.label + ' » demande un motif : il est dit au demandeur' };
+  if (dec.needsText && !t) return { error: T('« ' + dec.label + ' » demande un motif : il est dit au demandeur', '"' + dec.label + '" needs a reason: it is told to the requester') };
   const choices = {};
   for (const c of f.choices) { const v = picks && picks[c.id]; if (v && c.options.some(o => o.id === v)) choices[c.id] = v; }
   return { hd: String(hd), order: 'decide', value: decision, choices, text: t };
@@ -1524,17 +1524,17 @@ function renderDecision(box, it, d) {
     for (const c of f.choices) { const r = c.options.find(o => o.recommended); if (r) decideUi.picks[c.id] = r.id; }
   }
   const card = el('div', 'orderform decision');
-  card.append(el('div', null, f.title + ' — en attente depuis ' + (d.since ? ago(Date.now() - d.since) : '?')));
+  card.append(el('div', null, f.title + T(' — en attente depuis ', ' — waiting for ') + (d.since ? ago(Date.now() - d.since) : '?')));
   if (f.question) card.append(el('div', 'meta', f.question));
   for (const c of f.choices) {
     const line = el('div', 'meta'); line.append(c.header + ' — ' + c.question + ' ');
-    const sel = el('select'); sel.append(el('option', null, '— choisir —')); sel.firstChild.value = '';
-    for (const o of c.options) { const op = el('option', null, o.label + (o.recommended ? ' (recommandé)' : '')); op.value = o.id; if (decideUi.picks[c.id] === o.id) op.selected = true; sel.append(op); }
+    const sel = el('select'); sel.append(el('option', null, T('— choisir —', '— choose —'))); sel.firstChild.value = '';
+    for (const o of c.options) { const op = el('option', null, o.label + (o.recommended ? T(' (recommandé)', ' (recommended)') : '')); op.value = o.id; if (decideUi.picks[c.id] === o.id) op.selected = true; sel.append(op); }
     sel.onchange = () => { decideUi.picks[c.id] = sel.value; };
     line.append(sel); card.append(line);
   }
   const ta = el('textarea'); ta.value = decideUi.text; ta.maxLength = 2000; ta.rows = 2;
-  ta.placeholder = 'Consigne (Lancer), motif (Ne pas faire : obligatoire, dit au demandeur) ou texte « Autre »';
+  ta.placeholder = T('Consigne (Lancer), motif (Ne pas faire : obligatoire, dit au demandeur) ou texte « Autre »', 'Instruction (Start), reason (Do not do: required, told to the requester) or "Other" text');
   ta.oninput = () => { decideUi.text = ta.value; };
   card.append(ta);
   const a = el('div', 'actions');
@@ -1543,7 +1543,7 @@ function renderDecision(box, it, d) {
     b.onclick = () => { const body = decideBody(hd, d, dec.id, decideUi.picks, decideUi.text); if (body.error) { orderUi.result = { ok: false, text: '⛔ ' + body.error }; renderOrders(it); return; } sendOrder(it, body); };
     a.append(b);
   }
-  card.append(a, el('div', 'hint', 'Ordre « decide ' + hd + ' … » — rejouée comme un clic sur la carte ; une note visible le dit au demandeur et ferme la carte.'));
+  card.append(a, el('div', 'hint', T('Ordre « decide ' + hd + ' … » — rejouée comme un clic sur la carte ; une note visible le dit au demandeur et ferme la carte.', 'Order "decide ' + hd + ' …" — replayed as a click on the card; a visible note tells the requester and closes the card.')));
   box.append(card);
 }
 // ── Cartes de questions du lanceur (module « launcher », clé cardsApi — server/src/cards.ts) : ce que l'orchestrateur
@@ -1552,7 +1552,7 @@ function renderDecision(box, it, d) {
 // sont visibles ; rien ne part avant « Envoyer les réponses ». La réponse passe par la commande des cartes : dans le
 // ticket, c'est un clic de l'opérateur sur la carte. cardRuns, withCards, cardForm et cardAnswers sont PURES
 // (testées par server/test/page-cards.test.ts).
-const CARD_FR = { arbitrage:'⚖️ Question pour toi', question:'❓ Question pour toi', validation:'✅ Validation — lancer le développement ?', cadrage:'📐 Ouvrir un cadrage ?', doc:'📝 Mémoire de domaine' };
+const CARD_FR = { arbitrage:T('⚖️ Question pour toi', '⚖️ Question for you'), question:T('❓ Question pour toi', '❓ Question for you'), validation:T('✅ Validation — lancer le développement ?', '✅ Validation — start the development?'), cadrage:T('📐 Ouvrir un cadrage ?', '📐 Open a scoping?'), doc:T('📝 Mémoire de domaine', '📝 Domain memory') };
 // Le DERNIER run d'une demande dont une carte attend, quand il est antérieur à `since` (minuit) : la liste ne garde
 // que les runs du jour, et la carte se traite depuis le détail d'un run.
 function cardRuns(runs, cards, since) {
@@ -1570,7 +1570,7 @@ function withCards(items, cards) {
 function cardForm(card) {
   const qs = Array.isArray(card && card.questions) ? card.questions.filter(q => q && q.id != null) : [];
   return {
-    id: String(card.id), title: CARD_FR[card.flavor] || CARD_FR[card.kind] || 'Question pour toi', neighbours: Number(card.neighbours) || 0,
+    id: String(card.id), title: CARD_FR[card.flavor] || CARD_FR[card.kind] || T('Question pour toi', 'Question for you'), neighbours: Number(card.neighbours) || 0,
     questions: qs.map(q => {
       const options = (Array.isArray(q.options) ? q.options : []).map(o => ({ id: String(o.id), label: String(o.label || o.id), description: String(o.description || ''), recommended: !!o.recommended }));
       options.sort((a, b) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
@@ -1587,15 +1587,15 @@ function cardAnswers(card, picks, others) {
     let selected = ((picks && picks[q.id]) || []).filter(v => known.has(v));
     if (!q.multi) selected = selected.slice(0, 1);
     const other = String((others && others[q.id]) || '').trim();
-    if (other.length > 2000) return { error: '« ' + q.header + ' » : 2 000 caractères au plus' };
+    if (other.length > 2000) return { error: T('« ' + q.header + ' » : 2 000 caractères au plus', '"' + q.header + '": 2,000 characters at most') };
     if (selected.length || other) answers.push({ questionId: q.id, selected, other: other || null }); else missing.push(q.header);
   }
-  if (!answers.length) return { error: 'Réponds à au moins une question' };
+  if (!answers.length) return { error: T('Réponds à au moins une question', 'Answer at least one question') };
   const dec = f.questions.find(q => q.required);
   if (dec) {
     const a = answers.find(x => x.questionId === dec.id);
-    if (!a || a.selected.length !== 1) return { error: 'Choisis la décision : ' + dec.options.map(o => o.label).join(' / ') };
-    if (card.flavor === 'validation' && a.selected[0] === 'non' && !a.other) return { error: '« Ne pas faire » demande un motif : il est dit au demandeur' };
+    if (!a || a.selected.length !== 1) return { error: T('Choisis la décision : ', 'Choose the decision: ') + dec.options.map(o => o.label).join(' / ') };
+    if (card.flavor === 'validation' && a.selected[0] === 'non' && !a.other) return { error: T('« Ne pas faire » demande un motif : il est dit au demandeur', 'Declining needs a reason: it is told to the requester') };
   }
   return { answers, missing };
 }
@@ -1621,7 +1621,7 @@ function renderCard(box, it, card) {
   if (cardUi.key !== key) cardUi = { key, picks: {}, others: {}, busy: false };
   const c = el('div', 'dlg qcard');
   const since = card.postedAt ? Date.parse(String(card.postedAt).replace(/Z?$/, 'Z')) : 0;
-  c.append(el('div', 'tabs', f.title + (card.addressee ? ' · ' + card.addressee : '') + (since ? ' · posée il y a ' + ago(Date.now() - since) : '')));
+  c.append(el('div', 'tabs', f.title + (card.addressee ? ' · ' + card.addressee : '') + (since ? T(' · posée il y a ' + ago(Date.now() - since), ' · asked ' + ago(Date.now() - since) + ' ago') : '')));
   for (const q of f.questions) {
     const blk = el('div', 'qblock');
     blk.append(el('div', 'q', q.header + ' — ' + q.question));
@@ -1630,7 +1630,7 @@ function renderCard(box, it, card) {
       for (const o of q.options) {
         const on = (cardUi.picks[q.id] || []).includes(o.id);
         const b = el('button', 'opt' + (on ? ' sel' : '')); b.type = 'button'; b.disabled = cardUi.busy;
-        b.append(el('span', 'n', on ? '✔' : (q.options.indexOf(o) + 1) + '.'), el('span', null, o.label + (o.recommended ? ' (recommandé)' : '')));
+        b.append(el('span', 'n', on ? '✔' : (q.options.indexOf(o) + 1) + '.'), el('span', null, o.label + (o.recommended ? T(' (recommandé)', ' (recommended)') : '')));
         if (o.description) b.append(el('span', 'd', o.description));
         b.onclick = () => {
           const cur = cardUi.picks[q.id] || [];
@@ -1640,28 +1640,28 @@ function renderCard(box, it, card) {
         os.append(b);
       }
       blk.append(os);
-      if (q.multi) blk.append(el('div', 'hint', 'Plusieurs réponses possibles.'));
+      if (q.multi) blk.append(el('div', 'hint', T('Plusieurs réponses possibles.', 'Several answers allowed.')));
     }
     const row = el('div', 'row'); const ta = el('textarea'); ta.rows = q.open ? 2 : 1; ta.maxLength = 2000; ta.value = cardUi.others[q.id] || ''; ta.disabled = cardUi.busy;
-    ta.placeholder = q.open ? 'Ta réponse…' : q.required ? 'Consigne pour le développement (Lancer), ou motif (Ne pas faire : obligatoire, dit au demandeur)' : 'Autre réponse, ou une précision (facultatif)';
+    ta.placeholder = q.open ? T('Ta réponse…', 'Your answer…') : q.required ? T('Consigne pour le développement (Lancer), ou motif (Ne pas faire : obligatoire, dit au demandeur)', 'Instruction for the development (Start), or reason (Do not do: required, told to the requester)') : T('Autre réponse, ou une précision (facultatif)', 'Other answer, or a detail (optional)');
     ta.oninput = () => { cardUi.others[q.id] = ta.value; };
     row.append(ta); blk.append(row);
     c.append(blk);
   }
   const a = el('div', 'row');
-  const go = el('button', 'primary', 'Envoyer les réponses'); go.disabled = cardUi.busy || !canWrite;
+  const go = el('button', 'primary', T('Envoyer les réponses', 'Send the answers')); go.disabled = cardUi.busy || !canWrite;
   go.onclick = () => sendCard(it, card);
   a.append(go); c.append(a);
-  c.append(el('div', 'hint', 'La réponse part dans le ticket sous ton nom, comme un clic sur la carte, et la carte se ferme : une question laissée vide reste sans réponse.'
-    + (f.neighbours ? ' ' + plural(f.neighbours, 'autre carte reste ouverte', 'autres cartes restent ouvertes') + ' sous la même note.' : '')));
+  c.append(el('div', 'hint', T('La réponse part dans le ticket sous ton nom, comme un clic sur la carte, et la carte se ferme : une question laissée vide reste sans réponse.', 'The answer goes into the ticket under your name, like a click on the card, and the card closes: a question left empty stays unanswered.')
+    + (f.neighbours ? ' ' + T(plural(f.neighbours, 'autre carte reste ouverte', 'autres cartes restent ouvertes') + ' sous la même note.', plural(f.neighbours, 'other card stays open', 'other cards stay open') + ' under the same note.') : '')));
   box.append(c);
 }
 // Le message après « Envoyer les réponses » — PURE. L'orchestrateur prévenu dit ce qu'il a fait de la réponse
 // (`launcher` : travail mis en file, suite signalée…) ; une commande qui ne le dit pas garde la phrase d'avant.
 function cardAnsweredText(hd, missing, j) {
   const said = j && typeof j.launcher === 'string' && j.launcher.trim() ? j.launcher.trim() : '';
-  return '✅ Réponse enregistrée dans HD-' + hd + (missing.length ? ' — sans réponse : ' + missing.join(', ') : '') + '. '
-    + (said ? said.charAt(0).toUpperCase() + said.slice(1) + (/[.!?]$/.test(said) ? '' : '.') : 'Le lanceur la lit à sa prochaine passe.');
+  return T('✅ Réponse enregistrée dans HD-' + hd, '✅ Answer saved in HD-' + hd) + (missing.length ? T(' — sans réponse : ', ' — unanswered: ') + missing.join(', ') : '') + '. '
+    + (said ? said.charAt(0).toUpperCase() + said.slice(1) + (/[.!?]$/.test(said) ? '' : '.') : T('Le lanceur la lit à sa prochaine passe.', 'The launcher reads it on its next pass.'));
 }
 async function sendCard(it, card) {
   if (!canWrite || cardUi.busy) return;
@@ -1675,16 +1675,16 @@ async function sendCard(it, card) {
     const j = await r.json().catch(() => ({}));
     done = !!(r.ok && (j.ok === true || j.gone));
     res = r.ok && j.ok === true ? { ok: true, text: cardAnsweredText(hd, body.missing, j) }
-      : { ok: false, text: '⛔ ' + (j.error || 'réponse refusée (' + r.status + ')') };
-  } catch { res = { ok: false, text: '⛔ serveur injoignable' }; }
+      : { ok: false, text: '⛔ ' + (j.error || T('réponse refusée (' + r.status + ')', 'answer refused (' + r.status + ')')) };
+  } catch { res = { ok: false, text: T('⛔ serveur injoignable', '⛔ server unreachable') }; }
   cardUi.busy = false;
   if (done && runData) { runData.cards = (runData.cards || []).filter(c => !(String(c.hd) === hd && String(c.id) === String(card.id))); cardUi = { key: null, picks: {}, others: {}, busy: false }; renderList(); }
   say(res.text.split('\n')[0]);
   if (orderUi.key !== key) return;
   orderUi.result = res; renderOrders(it); setTimeout(loadRuns, 3000);
 }
-const ORDER_FR = { go:'▶ Feu vert (go)', merge:'🚀 Livrer la PR', review:'🔎 Relire la PR', 'recette-skip':'⏭ Sauter la recette', rework:'🔁 Reprendre la PR',
-  adopt:'🔎 Relire les commits ajoutés, puis livrer', retry:'↻ Relancer la livraison', session:'🧑‍💻 Reprendre en session' };
+const ORDER_FR = { go:T('▶ Feu vert (go)', '▶ Go-ahead (go)'), merge:T('🚀 Livrer la PR', '🚀 Ship the PR'), review:T('🔎 Relire la PR', '🔎 Review the PR'), 'recette-skip':T('⏭ Sauter la recette', '⏭ Skip testing'), rework:T('🔁 Reprendre la PR', '🔁 Rework the PR'),
+  adopt:T('🔎 Relire les commits ajoutés, puis livrer', '🔎 Review the added commits, then ship'), retry:T('↻ Relancer la livraison', '↻ Restart the delivery'), session:T('🧑‍💻 Reprendre en session', '🧑‍💻 Resume in a session') };
 // Livraison refusée (lot 1 des livraisons refusées) : la NATURE du refus, publiée par le
 // lanceur (stages.json → waiting.refusalKind), remplace « Livrer la PR » par la suite qui a un sens. Commits ajoutés après
 // les contrôles ⇒ les relire ici, puis livrer CE sha (merge --adopt-head) ; panne technique ⇒ relancer. Conflit,
@@ -1709,13 +1709,13 @@ function resumePrompt(hd, pr, kind, reason) {
 // Ce que dit l'en-tête du bloc de relecture (PURE, testée par le .ps1) : commits ajoutés, ou PR réécrite (rebase,
 // force-push) dont il faut tout relire, ou rien à relire (la PR porte de nouveau la tête contrôlée).
 function diffHeadline(d) {
-  if (!d || d.error) return '⛔ ' + ((d && d.error) || 'diff illisible');
-  if (d.merged || d.state === 'closed') return 'La PR n’est plus ouverte (' + (d.merged ? 'mergée' : 'fermée') + ') : rien à livrer.';
-  if (!d.changed) return 'La PR porte de nouveau le commit contrôlé par le lanceur : rien à relire, la livraison simple suffit.';
+  if (!d || d.error) return '⛔ ' + ((d && d.error) || T('diff illisible', 'unreadable diff'));
+  if (d.merged || d.state === 'closed') return T('La PR n’est plus ouverte (' + (d.merged ? 'mergée' : 'fermée') + ') : rien à livrer.', 'The PR is no longer open (' + (d.merged ? 'merged' : 'closed') + '): nothing to ship.');
+  if (!d.changed) return T('La PR porte de nouveau le commit contrôlé par le lanceur : rien à relire, la livraison simple suffit.', 'The PR carries the commit checked by the launcher again: nothing to review, a plain delivery is enough.');
   const n = (d.commits || []).length, files = (d.files || []).length;
-  const what = n + ' commit' + (n > 1 ? 's' : '') + ' · ' + files + ' fichier' + (files > 1 ? 's' : '');
-  return d.rewritten ? '⚠️ La PR a été réécrite (rebase ou force-push) depuis les contrôles : c’est TOUTE la PR qui est à relire — ' + what + '.'
-    : 'Arrivé sur la PR après les contrôles du lanceur, lu par personne : ' + what + '.';
+  const what = n + ' commit' + (n > 1 ? 's' : '') + ' · ' + files + T(' fichier', ' file') + (files > 1 ? 's' : '');
+  return d.rewritten ? T('⚠️ La PR a été réécrite (rebase ou force-push) depuis les contrôles : c’est TOUTE la PR qui est à relire — ' + what + '.', '⚠️ The PR was rewritten (rebase or force-push) since the checks: the WHOLE PR needs a review — ' + what + '.')
+    : T('Arrivé sur la PR après les contrôles du lanceur, lu par personne : ' + what + '.', 'Added to the PR after the launcher checks, read by nobody: ' + what + '.');
 }
 let orderUi = { key: null, open: null, text: '', busy: false, result: null, diff: null };
 function renderOrders(it) {
@@ -1730,7 +1730,7 @@ function renderOrders(it) {
   if (stage === 'delivering') {
     const mr = (it.runs || []).map(x => x.run).filter(x => x.phase === 'merge' && (!wait.since || x.at >= wait.since - 60000)).sort((a, b) => b.at - a.at)[0];
     const note = el('div', 'banner delivering', deliveringNote(stage, wait.since, mr ? mr.at : null, Date.now()));
-    if (mr && mr.dir !== r.dir) { const b = el('button', 'quick', 'Voir le run de livraison'); b.onclick = () => { const head = (it.runs.find(i => i.run.running) || it.runs[0]).run.dir; if (mr.dir === head) runPick.delete(it.key); else runPick.set(it.key, mr.dir); runFile = null; renderDetail(true); }; note.append(' ', b); }
+    if (mr && mr.dir !== r.dir) { const b = el('button', 'quick', T('Voir le run de livraison', 'See the delivery run')); b.onclick = () => { const head = (it.runs.find(i => i.run.running) || it.runs[0]).run.dir; if (mr.dir === head) runPick.delete(it.key); else runPick.set(it.key, mr.dir); runFile = null; renderDetail(true); }; note.append(' ', b); }
     box.append(note);
   }
   if (r.running) return;
@@ -1742,15 +1742,15 @@ function renderOrders(it) {
   const list = deliveryOrders(runOrders(r.phase, stage, pr).filter(o => !((dec || cards.some(c => c.kind === 'validation')) && o === 'go')), wait ? wait.refusalKind : null);
   const noToken = !!(runData && runData.cardsToken === 'absent' && (r.files || []).some(f => f.name === 'questions.json'));
   if (!list.length && !dec && !cards.length && !noToken) return;
-  box.append(el('h2', null, 'Piloter HD-' + hd));
+  box.append(el('h2', null, T('Piloter HD-' + hd, 'Control HD-' + hd)));
   for (const c of cards) renderCard(box, it, c);
-  if (noToken) box.append(el('div', 'meta', 'Ce run a posé des questions : pour y répondre ici, range le jeton des cartes sur ce poste. En attendant, elles se traitent dans le ticket.'));
+  if (noToken) box.append(el('div', 'meta', T('Ce run a posé des questions : pour y répondre ici, range le jeton des cartes sur ce poste. En attendant, elles se traitent dans le ticket.', 'This run asked questions: to answer them here, store the cards token on this machine. Meanwhile, they are handled in the ticket.')));
   if (dec) renderDecision(box, it, dec);
   const row = el('div', 'actions');
   for (const o of list) {
     if (o === 'verdict') {
-      row.append(el('span', 'meta', 'Verdict du diagnostic :'));
-      for (const v of ['ok', 'partiel', 'faux']) { const b = el('button', orderUi.open === 'verdict:' + v ? 'primary' : null, v); b.disabled = orderUi.busy; b.onclick = () => { orderUi.open = orderUi.open === 'verdict:' + v ? null : 'verdict:' + v; renderOrders(it); }; row.append(b); }
+      row.append(el('span', 'meta', T('Verdict du diagnostic :', 'Diagnosis verdict:')));
+      for (const v of ['ok', 'partiel', 'faux']) { const b = el('button', orderUi.open === 'verdict:' + v ? 'primary' : null, T(v, { ok:'ok', partiel:'partial', faux:'wrong' }[v])); b.disabled = orderUi.busy; b.onclick = () => { orderUi.open = orderUi.open === 'verdict:' + v ? null : 'verdict:' + v; renderOrders(it); }; row.append(b); }
       continue;
     }
     const b = el('button', orderUi.open === o ? 'primary' : null, ORDER_FR[o]); b.disabled = orderUi.busy;
@@ -1765,29 +1765,29 @@ function renderOrders(it) {
   if (open === 'go' || (open && open.startsWith('verdict:'))) {
     const f = el('div', 'orderform');
     const ta = el('textarea'); ta.value = orderUi.text; ta.maxLength = 2000; ta.rows = 3;
-    ta.placeholder = open === 'go' ? 'Consigne pour la session de développement (facultatif) — ex. « charge les agents à part, comme dans AppointmentEndpointSetup »' : 'Commentaire (facultatif)';
+    ta.placeholder = open === 'go' ? T('Consigne pour la session de développement (facultatif) — ex. « charge les agents à part, comme dans AppointmentEndpointSetup »', 'Instruction for the development session (optional) — e.g. "load the agents separately, as in AppointmentEndpointSetup"') : T('Commentaire (facultatif)', 'Comment (optional)');
     ta.oninput = () => { orderUi.text = ta.value; };
     const v = open.startsWith('verdict:') ? open.slice(8) : null;
-    const go = el('button', 'primary', v ? 'Noter « ' + v + ' »' : 'Envoyer le feu vert'); go.disabled = orderUi.busy;
+    const go = el('button', 'primary', v ? T('Noter « ' + v + ' »', 'Record "' + { ok:'ok', partiel:'partial', faux:'wrong' }[v] + '"') : T('Envoyer le feu vert', 'Send the go-ahead')); go.disabled = orderUi.busy;
     go.onclick = () => sendOrder(it, v ? { order: 'verdict', value: v, text: orderUi.text } : { order: 'go', text: orderUi.text });
-    const cancel = el('button', null, 'Annuler'); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
+    const cancel = el('button', null, T('Annuler', 'Cancel')); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
     const a = el('div', 'actions'); a.append(go, cancel);
-    f.append(ta, a, el('div', 'hint', v ? 'Ordre « verdict ' + hd + ' ' + v + ' » — noté à la prochaine passe.' : 'Ordre « go ' + hd + ' » — correctif en file, toujours en PR à relire (jamais de merge automatique).'));
+    f.append(ta, a, el('div', 'hint', v ? T('Ordre « verdict ' + hd + ' ' + v + ' » — noté à la prochaine passe.', 'Order "verdict ' + hd + ' ' + v + '" — recorded on the next pass.') : T('Ordre « go ' + hd + ' » — correctif en file, toujours en PR à relire (jamais de merge automatique).', 'Order "go ' + hd + '" — fix queued, always as a PR to review (never an automatic merge).')));
     box.append(f);
   } else if (open === 'adopt') {
     box.append(adoptForm(it, hd, pr));
   } else if (open === 'merge' || open === 'retry') {
     const f = el('div', 'orderform confirm');
-    if (open === 'retry') f.append(el('div', 'meta', 'La livraison précédente a échoué pour une raison technique, sans rapport avec la PR : ' + ((it.wait && it.wait.detail) || '') ));
-    f.append(el('div', null, '🚀 Livrer ' + (pr ? 'la PR #' + pr : 'la PR du lanceur') + ' de HD-' + hd + ' : rebase sur master, contrôles rejoués (20 à 40 min), puis squash-merge — elle part en PRODUCTION.'));
-    const link = prLink(it); if (link) { const m = el('div', 'meta'); m.append('Relire avant : ', link); f.append(m); }
-    const ok = el('button', 'primary', 'Confirmer la livraison'); ok.disabled = orderUi.busy; ok.onclick = () => sendOrder(it, { order: 'merge', confirm: true });
-    const cancel = el('button', null, 'Annuler'); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
+    if (open === 'retry') f.append(el('div', 'meta', T('La livraison précédente a échoué pour une raison technique, sans rapport avec la PR : ', 'The previous delivery failed for a technical reason, unrelated to the PR: ') + ((it.wait && it.wait.detail) || '') ));
+    f.append(el('div', null, T('🚀 Livrer ' + (pr ? 'la PR #' + pr : 'la PR du lanceur') + ' de HD-' + hd + ' : rebase sur master, contrôles rejoués (20 à 40 min), puis squash-merge — elle part en PRODUCTION.', '🚀 Ship ' + (pr ? 'PR #' + pr : 'the launcher PR') + ' of HD-' + hd + ': rebase on master, checks replayed (20 to 40 min), then squash-merge — it goes to PRODUCTION.')));
+    const link = prLink(it); if (link) { const m = el('div', 'meta'); m.append(T('Relire avant : ', 'Review first: '), link); f.append(m); }
+    const ok = el('button', 'primary', T('Confirmer la livraison', 'Confirm the delivery')); ok.disabled = orderUi.busy; ok.onclick = () => sendOrder(it, { order: 'merge', confirm: true });
+    const cancel = el('button', null, T('Annuler', 'Cancel')); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
     const a = el('div', 'actions'); a.append(ok, cancel); f.append(a);
     box.append(f);
   }
-  if (cardUi.busy) box.append(el('div', 'meta', 'Réponse en cours d’envoi…'));
-  if (orderUi.busy) box.append(el('div', 'meta', 'Ordre en cours de transmission au lanceur…'));
+  if (cardUi.busy) box.append(el('div', 'meta', T('Réponse en cours d’envoi…', 'Sending the answer…')));
+  if (orderUi.busy) box.append(el('div', 'meta', T('Ordre en cours de transmission au lanceur…', 'Sending the order to the launcher…')));
   else if (orderUi.result) box.append(el('pre', 'orderres ' + (orderUi.result.ok ? 'ok' : 'ko'), orderUi.result.text));
 }
 // « J'ai relu, livrer » : le diff est relu à chaque ouverture (jamais un cache) — le sha envoyé est celui affiché.
@@ -1795,14 +1795,14 @@ async function toggleAdopt(it) {
   if (orderUi.open === 'adopt') { orderUi.open = null; renderOrders(it); return; }
   const key = it.key; orderUi.open = 'adopt'; orderUi.diff = { loading: true }; renderOrders(it);
   let d;
-  try { const r = await fetch('/api/launcher/delivery-diff?hd=' + encodeURIComponent(String(it.run.hd))); d = await r.json().catch(() => ({ error: 'réponse illisible (' + r.status + ')' })); }
-  catch { d = { error: 'lanceur injoignable' }; }
+  try { const r = await fetch('/api/launcher/delivery-diff?hd=' + encodeURIComponent(String(it.run.hd))); d = await r.json().catch(() => ({ error: T('réponse illisible (' + r.status + ')', 'unreadable answer (' + r.status + ')') })); }
+  catch { d = { error: T('lanceur injoignable', 'launcher unreachable') }; }
   if (orderUi.key !== key || orderUi.open !== 'adopt') return;
   orderUi.diff = d; renderOrders(it);
 }
 function adoptForm(it, hd, pr) {
   const f = el('div', 'orderform confirm adopt'), d = orderUi.diff || {};
-  if (d.loading) { f.append(el('div', 'meta', 'Lecture du diff auprès du lanceur…')); return f; }
+  if (d.loading) { f.append(el('div', 'meta', T('Lecture du diff auprès du lanceur…', 'Reading the diff from the launcher…'))); return f; }
   f.append(el('div', null, diffHeadline(d)));
   if (!d.error && d.changed) {
     const ul = el('ul', 'commits');
@@ -1817,25 +1817,25 @@ function adoptForm(it, hd, pr) {
       det.append(sum);
       const pre = el('pre', 'diff');
       for (const line of String(x.patch || '').split('\n')) pre.append(el('span', line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : line.startsWith('@@') ? 'hunk' : null, line + '\n'));
-      if (x.patchTruncated || !x.patch) pre.append(el('span', 'hunk', x.patch ? '… (tronqué — voir la PR)' : '(pas de diff texte : binaire, renommage ou trop gros)'));
+      if (x.patchTruncated || !x.patch) pre.append(el('span', 'hunk', x.patch ? T('… (tronqué — voir la PR)', '… (truncated — see the PR)') : T('(pas de diff texte : binaire, renommage ou trop gros)', '(no text diff: binary, rename or too large)')));
       det.append(pre); f.append(det);
     }
-    if (d.truncated) f.append(el('div', 'meta', '⚠️ Diff tronqué : la suite est sur la PR.'));
+    if (d.truncated) f.append(el('div', 'meta', T('⚠️ Diff tronqué : la suite est sur la PR.', '⚠️ Diff truncated: the rest is on the PR.')));
   }
-  const link = prLink(it); if (link) { const m = el('div', 'meta'); m.append('Sur GitHub : ', link); f.append(m); }
+  const link = prLink(it); if (link) { const m = el('div', 'meta'); m.append(T('Sur GitHub : ', 'On GitHub: '), link); f.append(m); }
   const a = el('div', 'actions');
   if (!d.error && d.changed && !d.merged && d.state !== 'closed' && /^[0-9a-f]{40}$/.test(d.prHead || '')) {
-    const ok = el('button', 'primary', '✅ J’ai relu, livrer'); ok.disabled = orderUi.busy;
+    const ok = el('button', 'primary', T('✅ J’ai relu, livrer', '✅ Reviewed, ship')); ok.disabled = orderUi.busy;
     ok.onclick = () => sendOrder(it, { order: 'merge', confirm: true, adoptHead: d.prHead });
     a.append(ok);
   } else if (!d.error && !d.changed && !d.merged && d.state !== 'closed') {
-    const ok = el('button', 'primary', '🚀 Livrer'); ok.disabled = orderUi.busy; ok.onclick = () => sendOrder(it, { order: 'merge', confirm: true }); a.append(ok);
+    const ok = el('button', 'primary', T('🚀 Livrer', '🚀 Ship')); ok.disabled = orderUi.busy; ok.onclick = () => sendOrder(it, { order: 'merge', confirm: true }); a.append(ok);
   }
-  const again = el('button', null, '↻ Relire le diff'); again.onclick = () => { orderUi.open = null; toggleAdopt(it); };
-  const cancel = el('button', null, 'Annuler'); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
+  const again = el('button', null, T('↻ Relire le diff', '↻ Review the diff again')); again.onclick = () => { orderUi.open = null; toggleAdopt(it); };
+  const cancel = el('button', null, T('Annuler', 'Cancel')); cancel.onclick = () => { orderUi.open = null; renderOrders(it); };
   a.append(again, cancel); f.append(a);
-  f.append(el('div', 'hint', 'Ordre « merge ' + hd + ' --adopt-head ' + (d.prHead ? String(d.prHead).slice(0, 10) + '…' : '<sha>') + ' »'
-    + ' — seul ce commit est adopté : si la PR bouge encore, nouveau refus avec le nouveau diff. Rebase, contrôles rejoués (20 à 40 min), puis squash-merge en PRODUCTION.'));
+  f.append(el('div', 'hint', T('Ordre « merge ' + hd + ' --adopt-head ' + (d.prHead ? String(d.prHead).slice(0, 10) + '…' : '<sha>') + ' »'
+    + ' — seul ce commit est adopté : si la PR bouge encore, nouveau refus avec le nouveau diff. Rebase, contrôles rejoués (20 à 40 min), puis squash-merge en PRODUCTION.', 'Order "merge ' + hd + ' --adopt-head ' + (d.prHead ? String(d.prHead).slice(0, 10) + '…' : '<sha>') + '"' + ' — only this commit is adopted: if the PR moves again, a new refusal with the new diff. Rebase, checks replayed (20 to 40 min), then squash-merge to PRODUCTION.')));
   return f;
 }
 async function sendOrder(it, o) {
@@ -1845,8 +1845,8 @@ async function sendOrder(it, o) {
   try {
     const r = await fetch('/api/launcher/order', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ hd: String(it.run.hd), ...o }) });
     const j = await r.json().catch(() => ({}));
-    res = !r.ok || j.error ? { ok: false, text: '⛔ ' + (j.error || 'ordre refusé (' + r.status + ')') } : { ok: true, text: '✅ ' + (j.message || 'ordre transmis') };
-  } catch { res = { ok: false, text: '⛔ lanceur injoignable' }; }
+    res = !r.ok || j.error ? { ok: false, text: '⛔ ' + (j.error || T('ordre refusé (' + r.status + ')', 'order refused (' + r.status + ')')) } : { ok: true, text: '✅ ' + (j.message || T('ordre transmis', 'order sent')) };
+  } catch { res = { ok: false, text: T('⛔ lanceur injoignable', '⛔ launcher unreachable') }; }
   if (orderUi.key !== key) return;
   orderUi.busy = false; orderUi.result = res; if (res.ok) { orderUi.open = null; orderUi.text = ''; }
   say(res.text.split('\n')[0]);
@@ -1856,33 +1856,33 @@ async function sendOrder(it, o) {
 // ── Après un redémarrage de Windows : sessions qui étaient ouvertes, à rouvrir d'un coup ──
 const rebootPick = new Map();       // sessionId -> coché ?
 async function reopenMany(ids) {
-  if (!ids.length) return say('aucune session cochée');
-  say('réouverture de ' + plural(ids.length, 'session', 'sessions') + '…');
+  if (!ids.length) return say(T('aucune session cochée', 'no session ticked'));
+  say(T('réouverture de ' + plural(ids.length, 'session', 'sessions') + '…', 'reopening ' + plural(ids.length, 'session', 'sessions') + '…'));
   try {
     const r = await (await fetch('/api/reopen-many', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ ids }) })).json();
-    say(r.error ? 'refusé : ' + r.error : plural(r.opened, 'onglet ouvert', 'onglets ouverts') + (r.skipped ? ' (' + r.skipped + ' ignorée(s))' : '') + ' — les sessions réapparaissent dans quelques secondes');
-  } catch { say('échec de la demande'); }
+    say(r.error ? T('refusé : ', 'refused: ') + r.error : T(plural(r.opened, 'onglet ouvert', 'onglets ouverts') + (r.skipped ? ' (' + r.skipped + ' ignorée(s))' : '') + ' — les sessions réapparaissent dans quelques secondes', plural(r.opened, 'tab opened', 'tabs opened') + (r.skipped ? ' (' + r.skipped + ' skipped)' : '') + ' — the sessions reappear in a few seconds'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   tick();
 }
-async function dismissReboot() { try { await post('/api/reboot-dismiss'); say('liste d\'avant le redémarrage oubliée'); } catch { say('échec de la demande'); } tick(); }
+async function dismissReboot() { try { await post('/api/reboot-dismiss'); say(T('liste d\'avant le redémarrage oubliée', 'pre-restart list dismissed')); } catch { say(T('échec de la demande', 'request failed')); } tick(); }
 function rebootPanel() {
   const rb = data.reboot; if (!rb) return null;
   const box = el('div', 'reboot');
-  box.append(el('div', 'rt', 'Windows a redémarré — ' + plural(rb.sessions.length, 'session était ouverte', 'sessions étaient ouvertes') + ' le ' + new Date(rb.at).toLocaleString('fr-FR')));
+  box.append(el('div', 'rt', T('Windows a redémarré — ' + plural(rb.sessions.length, 'session était ouverte', 'sessions étaient ouvertes') + ' le ' + new Date(rb.at).toLocaleString('fr-FR'), 'Windows restarted — ' + plural(rb.sessions.length, 'session was open', 'sessions were open') + ' on ' + new Date(rb.at).toLocaleString('en-GB'))));
   const ul = el('div', 'rl');
   for (const s of rb.sessions) {
     if (!rebootPick.has(s.sessionId)) rebootPick.set(s.sessionId, true);
     const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = rebootPick.get(s.sessionId); cb.onchange = () => rebootPick.set(s.sessionId, cb.checked);
-    lab.append(cb, el('span', null, s.title), el('span', 'rm', (s.pr ? 'PR #' + s.pr + ' · ' : '') + 'active il y a ' + ago(data.now - s.lastActivity)));
+    lab.append(cb, el('span', null, s.title), el('span', 'rm', (s.pr ? 'PR #' + s.pr + ' · ' : '') + T('active il y a ' + ago(data.now - s.lastActivity), 'active ' + ago(data.now - s.lastActivity) + ' ago')));
     ul.append(lab);
   }
   box.append(ul);
   const act = el('div', 'actions');
-  const b1 = el('button', 'primary', 'Rouvrir la sélection'); b1.onclick = () => reopenMany(rb.sessions.map(s => s.sessionId).filter(id => rebootPick.get(id)));
-  const b2 = el('button', null, 'Tout cocher / décocher'); b2.onclick = () => { const all = rb.sessions.every(s => rebootPick.get(s.sessionId)); rb.sessions.forEach(s => rebootPick.set(s.sessionId, !all)); renderDetail(true); };
-  const b3 = el('button', null, 'Ignorer'); b3.title = 'Ne plus proposer ces sessions (elles restent dans « Fermées, reprenables »)'; b3.onclick = () => dismissReboot();
+  const b1 = el('button', 'primary', T('Rouvrir la sélection', 'Reopen selected')); b1.onclick = () => reopenMany(rb.sessions.map(s => s.sessionId).filter(id => rebootPick.get(id)));
+  const b2 = el('button', null, T('Tout cocher / décocher', 'Tick / untick all')); b2.onclick = () => { const all = rb.sessions.every(s => rebootPick.get(s.sessionId)); rb.sessions.forEach(s => rebootPick.set(s.sessionId, !all)); renderDetail(true); };
+  const b3 = el('button', null, T('Ignorer', 'Dismiss')); b3.title = T('Ne plus proposer ces sessions (elles restent dans « Fermées, reprenables »)', 'Stop offering these sessions (they stay in "Closed, reopenable")'); b3.onclick = () => dismissReboot();
   act.append(b1, b2, b3); box.append(act);
-  box.append(el('div', 'hint', 'Un onglet Windows Terminal par session, chacune reprise où elle s’était arrêtée (claude --resume).'));
+  box.append(el('div', 'hint', T('Un onglet Windows Terminal par session, chacune reprise où elle s’était arrêtée (claude --resume).', 'One Windows Terminal tab per session, each resumed where it stopped (claude --resume).')));
   return box;
 }
 
@@ -1897,12 +1897,12 @@ function renderList() {
   const items = allItems().filter(it => (!favOnly || it.fav) && (!it.hidden || tokens.length) && tokens.every(t => tagMatch(it, t) ?? it.hay.includes(t)));
   $('favonly').className = favOnly ? 'on' : '';
   $('sortbtn').className = sortMode === 'created' ? 'on' : '';
-  $('sortbtn').title = sortMode === 'created' ? 'Trié par date de création (la plus récente d’abord) — clic : par dernière activité' : 'Trié par dernière activité — clic : par date de création';
+  $('sortbtn').title = sortMode === 'created' ? T('Trié par date de création (la plus récente d’abord) — clic : par dernière activité', 'Sorted by creation date (newest first) — click: by last activity') : T('Trié par dernière activité — clic : par date de création', 'Sorted by last activity — click: by creation date');
   const expandAll = tokens.length || favOnly;     // recherche ou filtre favoris : on cherche aussi dans les groupes repliés
   const list = $('list'); list.replaceChildren(); flat = [];
   if (data.reboot) {               // après un redémarrage de Windows : rappel en tête, la vue d'ensemble propose la réouverture
-    const b = el('div', 'rbanner', '↻ ' + plural(data.reboot.sessions.length, 'session ouverte', 'sessions ouvertes') + ' avant le redémarrage — rouvrir…');
-    b.title = 'Afficher la liste dans la vue d\'ensemble'; b.onclick = () => select(null); list.append(b);
+    const b = el('div', 'rbanner', T('↻ ' + plural(data.reboot.sessions.length, 'session ouverte', 'sessions ouvertes') + ' avant le redémarrage — rouvrir…', '↻ ' + plural(data.reboot.sessions.length, 'session open', 'sessions open') + ' before the restart — reopen…'));
+    b.title = T('Afficher la liste dans la vue d\'ensemble', 'Show the list in the overview'); b.onclick = () => select(null); list.append(b);
   }
   // Consultées récemment : raccourci en tête de liste. Pas pendant une recherche ou le filtre favoris (bruit),
   // et ces lignes n'entrent pas dans la navigation ↑ ↓ (la session y figure déjà dans son groupe d'état).
@@ -1912,16 +1912,16 @@ function renderList() {
     if (rec.length) {
       const isCollapsed = collapsed.has('recent');
       const head = el('div', 'grp');
-      head.append(el('span', 'car', isCollapsed ? '▸' : '▾'), el('span', null, 'Consultées récemment'), el('span', 'n', rec.length));
-      head.title = 'Les dernières sessions ouvertes dans cette page  ( b : revenir à la précédente )';
+      head.append(el('span', 'car', isCollapsed ? '▸' : '▾'), el('span', null, T('Consultées récemment', 'Recently viewed')), el('span', 'n', rec.length));
+      head.title = T('Les dernières sessions ouvertes dans cette page  ( b : revenir à la précédente )', 'The last sessions opened in this page  ( b: back to the previous one )');
       head.onclick = () => { collapsed.has('recent') ? collapsed.delete('recent') : collapsed.add('recent'); localStorage.setItem('cc.collapsed', JSON.stringify([...collapsed])); renderList(); };
       list.append(head);
       if (!isCollapsed) for (const r of rec) {
         const it = all.get(r.k);
         const row = el('div', 'row-s ' + (it.look || it.state) + (it.key === selected ? ' sel' : ''));
         const tt = el('span', 't'); if (it.fav) tt.append(el('span', 'star', '★ ')); tt.append(label(it));
-        row.append(el('span', 'dot'), tt, el('span', 'age', 'vue il y a ' + ago(Date.now() - r.at)));
-        row.append(el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : (it.kind === 'closed' ? 'fermée — terminal disparu' : LABEL[it.state]) + (it.lastPrompt ? ' · ' + it.lastPrompt : '')));
+        row.append(el('span', 'dot'), tt, el('span', 'age', T('vue il y a ' + ago(Date.now() - r.at), 'viewed ' + ago(Date.now() - r.at) + ' ago')));
+        row.append(el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : (it.kind === 'closed' ? T('fermée — terminal disparu', 'closed — terminal gone') : LABEL[it.state]) + (it.lastPrompt ? ' · ' + it.lastPrompt : '')));
         row.title = label(it); row.onclick = () => select(it.key); row.ondblclick = () => primary(it);
         list.append(row);
       }
@@ -1941,19 +1941,19 @@ function renderList() {
     const urgent = g.key === 'auto' ? rows.filter(it => live(it) || it.look === 'waiting' || it.look === 'ask') : g.auto ? rows.filter(it => live(it) || it.look === 'waiting') : [];
     const head = el('div', 'grp');
     const gTitle = g.key === 'auto' ? autoTitle(g.title, rows) : g.auto ? g.title + (autoGroupTitle(g.auto) ? ' — ' + autoGroupTitle(g.auto) : '') : g.title;
-    head.append(el('span', 'car', isCollapsed ? '▸' : '▾'), el('span', null, gTitle + (g.key === 'closed' && closedData.days ? ' · ' + closedData.days + ' j' : '')), el('span', 'n', rows.length));
-    if (g.auto) head.title = 'Passes du jour qui ont agi ou échoué, et la passe en cours. Les passes sans effet sont comptées ici sans ligne. Replié : seulement en cours et en échec.' + (g.auto.last ? '\nDernière passe : ' + g.auto.last.summary : '');
-    if (g.key === 'auto') head.title = 'Runs du lanceur depuis minuit et tout run en cours, plus les autres claude -p. Replié : seulement en cours, en échec et PR qui attend ta validation. L’historique long est dans la vue 🤖 ( l ).';
+    head.append(el('span', 'car', isCollapsed ? '▸' : '▾'), el('span', null, gTitle + (g.key === 'closed' && closedData.days ? T(' · ' + closedData.days + ' j', ' · ' + closedData.days + ' d') : '')), el('span', 'n', rows.length));
+    if (g.auto) head.title = T('Passes du jour qui ont agi ou échoué, et la passe en cours. Les passes sans effet sont comptées ici sans ligne. Replié : seulement en cours et en échec.', "Today's passes that acted or failed, and the running pass. Passes with no effect are counted here without a row. Collapsed: only running and failed.") + (g.auto.last ? T('\nDernière passe : ', '\nLast pass: ') + g.auto.last.summary : '');
+    if (g.key === 'auto') head.title = T('Runs du lanceur depuis minuit et tout run en cours, plus les autres claude -p. Replié : seulement en cours, en échec et PR qui attend ta validation. L’historique long est dans la vue 🤖 ( l ).', 'Launcher runs since midnight and any running run, plus the other claude -p. Collapsed: only running, failed and PRs waiting for your approval. The long history is in the 🤖 view ( l ).');
     if (g.key === 'todo' && rows.some(it => it.state === 'done' || it.state === 'ask')) {
-      const all = el('a', null, 'tout marquer vu'); all.href = '#'; all.style.textTransform = 'none'; all.style.letterSpacing = '0'; all.style.fontWeight = '400';
-      all.onclick = async e => { e.preventDefault(); e.stopPropagation(); try { await post('/api/ack?all=1'); say('sessions terminées marquées comme vues'); tick(); } catch {} };
+      const all = el('a', null, T('tout marquer vu', 'mark all seen')); all.href = '#'; all.style.textTransform = 'none'; all.style.letterSpacing = '0'; all.style.fontWeight = '400';
+      all.onclick = async e => { e.preventDefault(); e.stopPropagation(); try { await post('/api/ack?all=1'); say(T('sessions terminées marquées comme vues', 'finished sessions marked as seen')); tick(); } catch {} };
       head.insertBefore(all, head.lastChild);
     }
     if (g.key === 'closed' && !expandAll) {
       const merged = rows.filter(it => it.prInfo && it.prInfo.state === 'MERGED');
       if (merged.length) {
-        const a = el('a', 'lnk', 'masquer les ' + merged.length + ' à PR mergée'); a.href = '#';
-        a.title = 'Retire de la liste les sessions fermées dont la PR est mergée (réversible, transcripts intacts)';
+        const a = el('a', 'lnk', T('masquer les ' + merged.length + ' à PR mergée', 'hide the ' + merged.length + ' with a merged PR')); a.href = '#';
+        a.title = T('Retire de la liste les sessions fermées dont la PR est mergée (réversible, transcripts intacts)', 'Removes from the list the closed sessions whose PR is merged (reversible, transcripts untouched)');
         a.onclick = e => { e.preventDefault(); e.stopPropagation(); setHidden(merged, true); };
         head.insertBefore(a, head.lastChild);
       }
@@ -1962,32 +1962,32 @@ function renderList() {
     list.append(head);
     if (isCollapsed && !urgent.length) continue;
     if (!rows.length && g.auto) continue;
-    if (!rows.length) { const e = el('div', 'row-s empty'); e.append(el('span'), el('span', 'sub', 'rien à traiter')); e.style.cursor = 'default'; list.append(e); continue; }
+    if (!rows.length) { const e = el('div', 'row-s empty'); e.append(el('span'), el('span', 'sub', T('rien à traiter', 'nothing to handle'))); e.style.cursor = 'default'; list.append(e); continue; }
     for (const it of isCollapsed ? urgent : rows) {
       flat.push(it.key);
       const r = el('div', 'row-s ' + (it.look || it.state) + (it.kind === 'run' || it.kind === 'pass' ? ' run' : '') + (it.key === selected ? ' sel' : ''));
       r.dataset.key = it.key;
       const tt = el('span', 't'); if (it.fav) tt.append(el('span', 'star', '★ ')); tt.append(label(it));
       { const d = driftTag(it); if (d) tt.append(d); }
-      if (it.hidden) tt.append(el('span', 'tag hid', 'masquée'));
-      r.append(el('span', 'dot'), tt, el('span', 'age', (it.model ? modelName(it.model) + ' · ' : '') + (it.tokens ? ktok(it.tokens) + ' · ' : '') + (sortMode === 'created' ? 'créée il y a ' + ago(data.now - createdOf(it)) : ago(data.now - it.since))));
-      const merged = (closable(it) ? '✓ peut se fermer · ' : it.prInfo && it.prInfo.state === 'MERGED' ? 'PR mergée · ' : '') + (it.status === 'shell' && it.state !== 'shell' ? 'commande en arrière-plan · ' : '');
-      const sub = el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : it.kind === 'open' ? merged + (it.state === 'idle' ? (it.lastPrompt || it.name) : LABEL[it.state] + (it.lastPrompt ? ' · ' + it.lastPrompt : '')) : 'fermée · ' + merged + (it.lastPrompt || short(it.cwd)));
+      if (it.hidden) tt.append(el('span', 'tag hid', T('masquée', 'hidden')));
+      r.append(el('span', 'dot'), tt, el('span', 'age', (it.model ? modelName(it.model) + ' · ' : '') + (it.tokens ? ktok(it.tokens) + ' · ' : '') + (sortMode === 'created' ? T('créée il y a ' + ago(data.now - createdOf(it)), 'created ' + ago(data.now - createdOf(it)) + ' ago') : ago(data.now - it.since))));
+      const merged = (closable(it) ? T('✓ peut se fermer · ', '✓ can be closed · ') : it.prInfo && it.prInfo.state === 'MERGED' ? T('PR mergée · ', 'PR merged · ') : '') + (it.status === 'shell' && it.state !== 'shell' ? T('commande en arrière-plan · ', 'background command · ') : '');
+      const sub = el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : it.kind === 'open' ? merged + (it.state === 'idle' ? (it.lastPrompt || it.name) : LABEL[it.state] + (it.lastPrompt ? ' · ' + it.lastPrompt : '')) : T('fermée · ', 'closed · ') + merged + (it.lastPrompt || short(it.cwd)));
       r.append(sub);
       const chips = tagChips(it, 'tags'); if (chips) r.append(chips);
       const inb = teamsInboundOf(it);
-      if (inb) { const x = el('span', 'tw inb', '📥 demande Teams de ' + (inb.chatLabel || inb.from)); x.title = 'Session ouverte automatiquement pour un message reçu en direct sur Teams : elle propose une réponse, rien ne part sans toi'; r.append(x); }
+      if (inb) { const x = el('span', 'tw inb', T('📥 demande Teams de ' + (inb.chatLabel || inb.from), '📥 Teams request from ' + (inb.chatLabel || inb.from))); x.title = T('Session ouverte automatiquement pour un message reçu en direct sur Teams : elle propose une réponse, rien ne part sans toi', 'Session opened automatically for a direct message received on Teams: it suggests a reply, nothing is sent without you'); r.append(x); }
       const tws = teamsWaitsOf(it);
       if (tws.length) {
         const tw = el('span', 'tw' + (tws.some(w => w.status === 'replied') ? ' rep' : tws.some(w => w.alertedAt) ? ' alert' : ''), teamsWaitLine(tws[0], data.now, data.teams.reminders) + (tws.length > 1 ? ' · +' + (tws.length - 1) : ''));
-        tw.title = tws.map(w => teamsWaitLine(w, data.now, data.teams.reminders) + '\n  « ' + w.excerpt + ' »').join('\n');
+        tw.title = tws.map(w => teamsWaitLine(w, data.now, data.teams.reminders) + T('\n  « ' + w.excerpt + ' »', '\n  "' + w.excerpt + '"')).join('\n');
         r.append(tw);
       }
       const vals = validationsOf(it), vb = validationBadge(vals);
       if (vb) { const x = el('span', 'tw val' + (vals.refused || vals.unqualified ? ' ref' : vals.expected ? ' pre' : ''), vb); x.title = vals.items.filter(i => !i.withdrawn).map(i => validationLine(i, data.now) + '\n  ' + i.question).join('\n'); r.append(x); }
       if (canWrite && closable(it)) {                    // « peut se fermer » (inactive, tout est mergé) : ✕ la ferme sans ouvrir la session
-        const line = el('span', 'sug'), bx = el('button', 'sgo', '✕ Fermer');
-        bx.title = 'Inactive et tout est mergé : quitter la session (/exit, après confirmation) — la conversation reste reprenable depuis « Fermées »';
+        const line = el('span', 'sug'), bx = el('button', 'sgo', T('✕ Fermer', '✕ Close'));
+        bx.title = T('Inactive et tout est mergé : quitter la session (/exit, après confirmation) — la conversation reste reprenable depuis « Fermées »', 'Idle and everything is merged: quit the session (/exit, after confirmation) — the conversation stays reopenable from "Closed"');
         bx.onclick = e => { e.stopPropagation(); closeSession(it); };
         bx.ondblclick = e => e.stopPropagation();
         line.append(bx); r.append(line);
@@ -1996,21 +1996,21 @@ function renderList() {
       if (sg) {                                          // proposition de Claude Code : ▶ la lance sans ouvrir la session
         const line = el('span', 'sug'), cut = sg.endsWith('…');
         const go = el('button', 'sgo', '▶');
-        go.title = cut ? 'Coupée à l’écran : lancée telle que Claude Code l’a écrite (Tab puis Entrée dans le terminal)' : 'Lancer cette proposition (revérifiée à l’écran juste avant)';
+        go.title = cut ? T('Coupée à l’écran : lancée telle que Claude Code l’a écrite (Tab puis Entrée dans le terminal)', 'Cut off on screen: launched as Claude Code wrote it (Tab then Enter in the terminal)') : T('Lancer cette proposition (revérifiée à l’écran juste avant)', 'Launch this suggestion (checked again on screen just before)');
         go.onclick = e => { e.stopPropagation(); launchSuggestion(it, sg); };
         go.ondblclick = e => e.stopPropagation();
-        line.append(go, el('span', 'stx', '💡 ' + sg)); line.title = 'Proposition de Claude Code : ' + sg; r.append(line);
+        line.append(go, el('span', 'stx', '💡 ' + sg)); line.title = T('Proposition de Claude Code : ' + sg, 'Claude Code suggestion: ' + sg); r.append(line);
       }
-      r.title = label(it) + (it.model ? '\nmodèle : ' + it.model : '') + (it.tokens ? '\ncontexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens' : '');
+      r.title = label(it) + (it.model ? T('\nmodèle : ', '\nmodel: ') + it.model : '') + (it.tokens ? T('\ncontexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens', '\ncontext: ' + it.tokens.toLocaleString('en-GB') + ' tokens') : '');
       r.onclick = () => select(it.key);
       r.ondblclick = () => primary(it);
       list.append(r);
     }
   }
-  if (!flat.length && expandAll) list.append(el('div', 'grp', favOnly && !tokens.length ? 'Aucun favori — touche f sur une session' : 'Aucun résultat'));
+  if (!flat.length && expandAll) list.append(el('div', 'grp', favOnly && !tokens.length ? T('Aucun favori — touche f sur une session', 'No favourites — press f on a session') : T('Aucun résultat', 'No results')));
   const unread = data.notifs.filter(nf => nf.at > Number(localStorage.getItem('cc.notifSeen') || 0)).length; $('belln').textContent = unread ? unread : '';
   const todo = allItems().filter(it => TODO.includes(it.state)).length;
-  document.title = (todo ? '(' + todo + ') ' : '') + 'Sessions Claude Code';
+  document.title = (todo ? '(' + todo + ') ' : '') + T('Sessions Claude Code', 'Claude Code sessions');
   refreshHoverCard();
 }
 
@@ -2035,7 +2035,7 @@ function refreshHoverCard() {
   const c = hoverCardEl(); c.className = it.look || it.state || '';
   const sig = hoverKey + '\n' + reply + '\n' + (it.suggestion || '');
   if (c.dataset.sig !== sig) {                     // même contenu : on ne touche pas au DOM (pas de saut de défilement)
-    c.dataset.sig = sig; c.replaceChildren(el('div', 'hh', 'Dernier message de Claude'), el('div', 'hb', reply));
+    c.dataset.sig = sig; c.replaceChildren(el('div', 'hh', T('Dernier message de Claude', "Claude's last message")), el('div', 'hb', reply));
     if (it.suggestion) c.append(el('div', 'hs', '💡 ' + it.suggestion));
   }
   c.hidden = false;
@@ -2068,7 +2068,7 @@ function touchRecent(key) {
 function back() {                                  // revenir à la session consultée juste avant
   const keys = new Set(allItems().map(it => it.key));
   const prev = recent.find(r => r.k !== selected && keys.has(r.k));
-  if (!prev) { say('aucune autre session consultée récemment'); return; }
+  if (!prev) { say(T('aucune autre session consultée récemment', 'no other recently viewed session')); return; }
   if (selected) touchRecent(selected);
   select(prev.k, true); touchRecent(prev.k); renderList();
 }
@@ -2084,7 +2084,7 @@ function setPane(detail) {
 }
 function setMobileTitle(text, state) {
   const t = $('mtitle'); t.className = 'chip ' + (state || ''); t.replaceChildren(); if (state) t.append(el('span', 'dot')); t.append(el('span', 't', text));
-  document.title = (text.length > 60 ? text.slice(0, 59) + '…' : text) + ' — Sessions Claude Code';   // le menu de Précédent / Suivant liste les écrans par leur nom
+  document.title = (text.length > 60 ? text.slice(0, 59) + '…' : text) + T(' — Sessions Claude Code', ' — Claude Code sessions');   // le menu de Précédent / Suivant liste les écrans par leur nom
 }
 
 // ── Navigation : l'adresse dit l'écran ouvert ──────────────────────────────────────────────────────────────────────
@@ -2170,29 +2170,29 @@ function select(key, scroll) {
 const REMOTE = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
 let canWrite = !REMOTE;
 function whoami() {
-  fetch('/api/whoami', { cache:'no-store' }).then(r => r.json()).then(w => { const was = canWrite; canWrite = !!w.write; document.body.classList.toggle('ro', !canWrite); if (canWrite && !was) say('écriture autorisée à distance (' + w.login + ')'); renderDetail(true); }).catch(() => {});
+  fetch('/api/whoami', { cache:'no-store' }).then(r => r.json()).then(w => { const was = canWrite; canWrite = !!w.write; document.body.classList.toggle('ro', !canWrite); if (canWrite && !was) say(T('écriture autorisée à distance (' + w.login + ')', 'remote writing allowed (' + w.login + ')')); renderDetail(true); }).catch(() => {});
 }
 if (REMOTE) { document.body.classList.add('ro', 'remote'); whoami(); }
 async function post(path) {
-  if (!canWrite) return { error: 'lecture seule à distance', code: 4 };
-  if (link.down) return { error: 'serveur injoignable — reconnexion en cours', code: 5 };
+  if (!canWrite) return { error: T('lecture seule à distance', 'read-only remotely'), code: 4 };
+  if (link.down) return { error: T('serveur injoignable — reconnexion en cours', 'server unreachable — reconnecting'), code: 5 };
   const r = await fetch(path, { method:'POST' }); return r.json();
 }
 async function openTab(it) {
-  say('ouverture de « ' + label(it) + ' »…');
+  say(T('ouverture de « ' + label(it) + ' »…', 'opening "' + label(it) + '"…'));
   try { const r = await post('/api/focus?pid=' + it.pid);
-    if (r.code === 0) { noTab.delete(it.key); say('onglet affiché'); }
-    else { noTab.add(it.key); say(r.code === 3 ? 'onglet introuvable — tu peux la relancer dans un nouvel onglet' : 'console de la session inaccessible — tu peux la relancer dans un nouvel onglet'); renderDetail(); } }
-  catch { say('échec de la demande'); }
+    if (r.code === 0) { noTab.delete(it.key); say(T('onglet affiché', 'tab shown')); }
+    else { noTab.add(it.key); say(r.code === 3 ? T('onglet introuvable — tu peux la relancer dans un nouvel onglet', 'tab not found — you can restart it in a new tab') : T('console de la session inaccessible — tu peux la relancer dans un nouvel onglet', 'session console unreachable — you can restart it in a new tab')); renderDetail(); } }
+  catch { say(T('échec de la demande', 'request failed')); }
 }
 const noTab = new Set();     // sessions dont l'onglet n'a pas pu être affiché : on propose la relance
 async function relaunch(it) {
   // Sans confirmation : rien ne se perd (session inactive, invite vide exigées par le serveur ; conversation reprise).
-  say('relance de « ' + label(it) + ' »…');
+  say(T('relance de « ' + label(it) + ' »…', 'restarting "' + label(it) + '"…'));
   relaunching = { key: it.key, until: Date.now() + 90000 };
   try { const r = await post('/api/relaunch?pid=' + it.pid);
-    if (r.error) { relaunching = null; say('non relancée : ' + r.error); } else { noTab.delete(it.key); say('relancée dans un nouvel onglet — elle réapparaît dans quelques secondes'); } }
-  catch { relaunching = null; say('échec de la demande'); }
+    if (r.error) { relaunching = null; say(T('non relancée : ', 'not restarted: ') + r.error); } else { noTab.delete(it.key); say(T('relancée dans un nouvel onglet — elle réapparaît dans quelques secondes', 'restarted in a new tab — it reappears in a few seconds')); } }
+  catch { relaunching = null; say(T('échec de la demande', 'request failed')); }
   tick();
 }
 // Entre la fermeture et la réapparition dans le nouvel onglet, la session n'est dans aucune liste pendant quelques
@@ -2201,35 +2201,35 @@ let relaunching = null;
 const awaitingRelaunch = key => !!relaunching && relaunching.key === key && Date.now() < relaunching.until;
 async function closeSession(it) {
   if (!it || it.kind !== 'open') return;
-  if (!confirm('Fermer « ' + label(it) + ' » ?\n\nLa conversation est conservée : elle passe dans « Fermées, reprenables ». L’onglet du terminal reste ouvert sur une invite PowerShell.')) return;
-  say('fermeture de « ' + label(it) + ' »…');
+  if (!confirm(T('Fermer « ' + label(it) + ' » ?\n\nLa conversation est conservée : elle passe dans « Fermées, reprenables ». L’onglet du terminal reste ouvert sur une invite PowerShell.', 'Close "' + label(it) + '"?\n\nThe conversation is kept: it moves to "Closed, reopenable". The terminal tab stays open on a PowerShell prompt.'))) return;
+  say(T('fermeture de « ' + label(it) + ' »…', 'closing "' + label(it) + '"…'));
   try {
     let r = await post('/api/close?pid=' + it.pid);
     if (r.needForce) {
-      if (!confirm(r.error + '.\n\nL’arrêter de force ? Le travail en cours dans ce tour sera perdu ; la conversation reste reprenable.')) { say('fermeture annulée'); return; }
+      if (!confirm(T(r.error + '.\n\nL’arrêter de force ? Le travail en cours dans ce tour sera perdu ; la conversation reste reprenable.', r.error + '.\n\nForce it to stop? The work in progress in this turn will be lost; the conversation stays reopenable.'))) { say(T('fermeture annulée', 'close cancelled')); return; }
       r = await post('/api/close?pid=' + it.pid + '&force=1');
     }
-    say(r.error ? 'non fermée : ' + r.error : (r.forced ? 'session arrêtée' : 'session fermée') + ' — reprenable depuis « Fermées »');
-  } catch { say('échec de la demande'); }
+    say(r.error ? T('non fermée : ', 'not closed: ') + r.error : T((r.forced ? 'session arrêtée' : 'session fermée') + ' — reprenable depuis « Fermées »', (r.forced ? 'session stopped' : 'session closed') + ' — reopenable from "Closed"'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   tick(); loadClosed();
 }
 // Masquer des sessions FERMÉES : elles sortent de la liste, des consultées et des compteurs ; la recherche les retrouve.
 let hiddenSet = new Set();
 async function setHidden(list, on) {
   list = list.filter(it => it && it.kind === 'closed'); if (!list.length) return;
-  if (on && list.length > 1 && !confirm('Masquer ' + list.length + ' sessions fermées ?\n\nElles restent trouvables par la recherche et peuvent être ré-affichées ; les transcripts ne sont pas touchés.')) return;
+  if (on && list.length > 1 && !confirm(T('Masquer ' + list.length + ' sessions fermées ?\n\nElles restent trouvables par la recherche et peuvent être ré-affichées ; les transcripts ne sont pas touchés.', 'Hide ' + list.length + ' closed sessions?\n\nThey can still be found by search and shown again; the transcripts are not touched.'))) return;
   for (const it of list) on ? hiddenSet.add(it.key) : hiddenSet.delete(it.key);
   if (on && list.some(it => it.key === selected)) select(null); else { renderList(); renderDetail(true); }
   try {
     await fetch('/api/hide', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ ids: list.map(it => it.key), on }) });
-    say(on ? (list.length > 1 ? list.length + ' sessions masquées' : 'session masquée') + ' — retrouvable par la recherche' : 'session ré-affichée');
-  } catch { say('échec de la demande'); }
+    say(on ? T((list.length > 1 ? list.length + ' sessions masquées' : 'session masquée') + ' — retrouvable par la recherche', (list.length > 1 ? list.length + ' sessions hidden' : 'session hidden') + ' — findable by search') : T('session ré-affichée', 'session shown again'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   tick();
 }
 async function toggleFav(it) {
   const on = !favs.has(it.key); on ? favs.add(it.key) : favs.delete(it.key);
   renderList(); renderDetail();
-  try { await post('/api/fav?id=' + it.sessionId + '&on=' + (on ? 1 : 0)); say(on ? 'ajoutée aux favoris' : 'retirée des favoris'); } catch { say('échec de la demande'); }
+  try { await post('/api/fav?id=' + it.sessionId + '&on=' + (on ? 1 : 0)); say(on ? T('ajoutée aux favoris', 'added to favourites') : T('retirée des favoris', 'removed from favourites')); } catch { say(T('échec de la demande', 'request failed')); }
 }
 // ── Pièces jointes : glisser-déposer n'importe où sur la page, coller une capture (Ctrl+V), bouton « Joindre » (téléphone).
 // Le fichier part au serveur dès qu'il est déposé (/api/upload, écrit sous ~/.claude/uploads) ; le message envoyé porte
@@ -2300,8 +2300,8 @@ function withAttachments(key, text) {
 }
 function clearAttachments(key) { for (const a of attList(key)) if (a.url) URL.revokeObjectURL(a.url); attachSets[key] = []; refreshAttach(key); }
 async function uploadFile(key, file) {
-  if (!canWrite) return say('lecture seule à distance');
-  if (file.size > ATT_MAX) return say('« ' + file.name + ' » non joint : trop gros (20 Mo au plus)');
+  if (!canWrite) return say(T('lecture seule à distance', 'read-only remotely'));
+  if (file.size > ATT_MAX) return say(T('« ' + file.name + ' » non joint : trop gros (20 Mo au plus)', '"' + file.name + '" not attached: too big (20 MB max)'));
   const img = /^image\//.test(file.type);
   const a = { name: file.name || (img ? 'capture.png' : 'fichier'), img, size: file.size, url: img ? URL.createObjectURL(file) : null, path: null };
   attList(key).push(a); refreshAttach(key);
@@ -2309,10 +2309,10 @@ async function uploadFile(key, file) {
     const r = await fetch('/api/upload', { method:'POST', headers:{ 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(a.name) }, body: file });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.path) throw new Error(j.error || 'code ' + r.status);
-    a.path = j.path; say('« ' + a.name + ' » joint');
+    a.path = j.path; say(T('« ' + a.name + ' » joint', '"' + a.name + '" attached'));
   } catch (e) {
     const l = attList(key), i = l.indexOf(a); if (i >= 0) l.splice(i, 1); if (a.url) URL.revokeObjectURL(a.url);
-    say('« ' + a.name + ' » non joint : ' + (e.message || 'échec de la demande'));
+    say(T('« ' + a.name + ' » non joint : ', '"' + a.name + '" not attached: ') + (e.message || T('échec de la demande', 'request failed')));
   }
   refreshAttach(key);
 }
@@ -2324,19 +2324,19 @@ function refreshAttach(key) { for (const bar of document.querySelectorAll('.atta
 function fillAttach(bar) {
   const key = bar.dataset.key; bar.replaceChildren();
   for (const a of attList(key)) {
-    const chip = el('div', 'achip' + (a.path ? '' : ' up')); chip.title = a.path || 'envoi en cours…';
+    const chip = el('div', 'achip' + (a.path ? '' : ' up')); chip.title = a.path || T('envoi en cours…', 'uploading…');
     if (a.url) { const im = el('img'); im.src = a.url; im.alt = ''; chip.append(im); } else chip.append(el('span', 'aic', '📄'));
-    chip.append(el('span', 'an', a.name), el('span', 'as', a.path ? Math.max(1, Math.round(a.size / 1024)) + ' Ko' : 'envoi…'));
-    const x = el('button', 'ax', '×'); x.title = 'Retirer (le message ne citera pas ce fichier)';
+    chip.append(el('span', 'an', a.name), el('span', 'as', a.path ? Math.max(1, Math.round(a.size / 1024)) + T(' Ko', ' KB') : T('envoi…', 'uploading…')));
+    const x = el('button', 'ax', '×'); x.title = T('Retirer (le message ne citera pas ce fichier)', 'Remove (the message will not mention this file)');
     x.onclick = () => { const l = attList(key), i = l.indexOf(a); if (i >= 0) l.splice(i, 1); if (a.url) URL.revokeObjectURL(a.url); refreshAttach(key); };
     chip.append(x); bar.append(chip);
   }
   const pick = el('input'); pick.type = 'file'; pick.multiple = true; pick.accept = ATT_ACCEPT; pick.hidden = true;
   pick.onchange = () => { for (const f of pick.files) uploadFile(key, f); pick.value = ''; };
-  const b = el('button', 'quick', '📎 Joindre'); b.type = 'button'; b.title = 'Joindre une capture ou un fichier — ou glisse-le sur la page, ou colle une capture (Ctrl+V)';
+  const b = el('button', 'quick', T('📎 Joindre', '📎 Attach')); b.type = 'button'; b.title = T('Joindre une capture ou un fichier — ou glisse-le sur la page, ou colle une capture (Ctrl+V)', 'Attach a screenshot or a file — or drag it onto the page, or paste a screenshot (Ctrl+V)');
   b.onclick = () => pick.click();
   bar.append(b, pick);
-  if (!attList(key).length) bar.append(el('span', 'ahint', 'glisser un fichier ou coller une capture (Ctrl+V)'));
+  if (!attList(key).length) bar.append(el('span', 'ahint', T('glisser un fichier ou coller une capture (Ctrl+V)', 'drag a file or paste a screenshot (Ctrl+V)')));
 }
 const activeAttach = () => { const bar = document.querySelector('#main .attach'); return bar && bar.dataset.key; };
 const dropFiles = dt => dt && [...(dt.items || [])].some(i => i.kind === 'file');
@@ -2350,7 +2350,7 @@ document.addEventListener('dragleave', e => { if (!e.relatedTarget) document.bod
 document.addEventListener('drop', e => {
   if (!dropFiles(e.dataTransfer)) return;
   e.preventDefault(); document.body.classList.remove('dropping');
-  const key = activeAttach(); if (!key) return say('ouvre une session (Répondre), une nouvelle session ou le message groupé pour joindre un fichier');
+  const key = activeAttach(); if (!key) return say(T('ouvre une session (Répondre), une nouvelle session ou le message groupé pour joindre un fichier', 'open a session (Reply), a new session or the group message to attach a file'));
   for (const f of e.dataTransfer.files) uploadFile(key, f);
 });
 document.addEventListener('paste', e => {
@@ -2364,16 +2364,16 @@ let sending = false;
 async function sendReply() {
   const it = selected && byKey(selected), inp = $('sendtext');
   if (!it || it.kind !== 'open' || !inp || sending) return;
-  if (link.down) return say('serveur injoignable — le message reste dans la zone, à renvoyer une fois reconnecté');
+  if (link.down) return say(T('serveur injoignable — le message reste dans la zone, à renvoyer une fois reconnecté', 'server unreachable — the message stays in the box, send it again once reconnected'));
   const akey = 'reply:' + it.key;
-  if (attBusy(akey)) return say('pièce jointe en cours d’envoi — un instant');
+  if (attBusy(akey)) return say(T('pièce jointe en cours d’envoi — un instant', 'attachment still uploading — one moment'));
   const text = withAttachments(akey, inp.value); if (!text) return;
   const queued = it.status === 'busy';
-  sending = true; inp.disabled = $('sendbtn').disabled = true; say((queued ? 'mise en file pour « ' : 'envoi à « ') + label(it) + ' »…');
+  sending = true; inp.disabled = $('sendbtn').disabled = true; say(T((queued ? 'mise en file pour « ' : 'envoi à « ') + label(it) + ' »…', (queued ? 'queueing for "' : 'sending to "') + label(it) + '"…'));
   try {
     const r = await (await fetch('/api/send?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ text }) })).json();
-    if (r.error) say('non envoyé : ' + r.error); else { draftSave(sessionStorage, it.key, ''); inp.value = ''; growArea(inp); clearAttachments(akey); say(queued ? 'mis en file pour « ' + label(it) + ' » — Claude Code le prendra dès qu’il peut' : 'envoyé à « ' + label(it) + ' »'); }
-  } catch { say('échec de la demande'); }
+    if (r.error) say(T('non envoyé : ', 'not sent: ') + r.error); else { draftSave(sessionStorage, it.key, ''); inp.value = ''; growArea(inp); clearAttachments(akey); say(queued ? T('mis en file pour « ' + label(it) + ' » — Claude Code le prendra dès qu’il peut', 'queued for "' + label(it) + '" — Claude Code will take it as soon as it can') : T('envoyé à « ' + label(it) + ' »', 'sent to "' + label(it) + '"')); }
+  } catch { say(T('échec de la demande', 'request failed')); }
   sending = false; tick();
 }
 // PROPOSITION DE PROMPT : le texte grisé que Claude Code affiche dans l'invite vide après un tour (Tab dans le
@@ -2392,12 +2392,12 @@ function renderSuggest(it, s) {
   if (changed) renderDetail();                           // placeholder de la zone de réponse
   if (!s) return;
   const cut = s.endsWith('…');
-  const go = el('button', 'primary', '▶ Lancer');
-  go.title = cut ? 'Accepte la proposition dans le terminal (Tab puis Entrée) : c’est son texte complet qui part, pas la version coupée' : 'Tape cette proposition dans la session et l’envoie (revérifiée à l’écran juste avant)';
+  const go = el('button', 'primary', T('▶ Lancer', '▶ Launch'));
+  go.title = cut ? T('Accepte la proposition dans le terminal (Tab puis Entrée) : c’est son texte complet qui part, pas la version coupée', 'Accepts the suggestion in the terminal (Tab then Enter): its full text is sent, not the cut-off version') : T('Tape cette proposition dans la session et l’envoie (revérifiée à l’écran juste avant)', 'Types this suggestion into the session and sends it (checked again on screen just before)');
   go.onclick = () => launchSuggestion(it, s);
-  const ed = el('button', null, '✎ Modifier'); ed.title = 'Recopie la proposition dans la zone de réponse  ( p )'; ed.onclick = () => fillSuggestion();
-  box.append(el('span', 'slabel', '💡 Proposition de Claude Code'), el('span', 'stext', s), go, ed);
-  if (cut) box.append(el('div', 'hint', 'Coupée à l’écran (…) : « Lancer » envoie son texte complet, que la page ne peut pas lire ; « Modifier » pour la réécrire.'));
+  const ed = el('button', null, T('✎ Modifier', '✎ Edit')); ed.title = T('Recopie la proposition dans la zone de réponse  ( p )', 'Copies the suggestion into the reply box  ( p )'); ed.onclick = () => fillSuggestion();
+  box.append(el('span', 'slabel', T('💡 Proposition de Claude Code', '💡 Claude Code suggestion')), el('span', 'stext', s), go, ed);
+  if (cut) box.append(el('div', 'hint', T('Coupée à l’écran (…) : « Lancer » envoie son texte complet, que la page ne peut pas lire ; « Modifier » pour la réécrire.', 'Cut off on screen (…): "Launch" sends its full text, which the page cannot read; "Edit" to rewrite it.')));
 }
 function fillSuggestion() {
   const inp = $('sendtext'); if (!inp || inp.disabled || !suggestion) return false;
@@ -2405,20 +2405,20 @@ function fillSuggestion() {
 }
 async function launchSuggestion(it, text) {
   if (!text || sending) return;
-  sending = true; say('lancement de la proposition dans « ' + label(it) + ' »…');
+  sending = true; say(T('lancement de la proposition dans « ' + label(it) + ' »…', 'launching the suggestion in "' + label(it) + '"…'));
   try {
     const r = await (await fetch('/api/send?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ text, suggestion: true }) })).json();
-    if (r.error) say('non lancée : ' + r.error); else say('proposition lancée dans « ' + label(it) + ' »');
-  } catch { say('échec de la demande'); }
+    if (r.error) say(T('non lancée : ', 'not launched: ') + r.error); else say(T('proposition lancée dans « ' + label(it) + ' »', 'suggestion launched in "' + label(it) + '"'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   sending = false; tick();
 }
 async function reopen(it) {
-  say('réouverture de « ' + label(it) + ' »…');
-  try { const r = await post('/api/reopen?id=' + it.sessionId); say(r.error ? 'refusé : ' + r.error : 'nouvel onglet ouvert — la session apparaît dans quelques secondes'); }
-  catch { say('échec de la demande'); }
+  say(T('réouverture de « ' + label(it) + ' »…', 'reopening "' + label(it) + '"…'));
+  try { const r = await post('/api/reopen?id=' + it.sessionId); say(r.error ? T('refusé : ', 'refused: ') + r.error : T('nouvel onglet ouvert — la session apparaît dans quelques secondes', 'new tab opened — the session appears in a few seconds')); }
+  catch { say(T('échec de la demande', 'request failed')); }
 }
 const resumeCmd = it => (it.cwd ? 'cd "' + it.cwd + '"; ' : '') + 'claude --dangerously-skip-permissions --resume ' + it.sessionId;
-async function copyCmd(it) { try { await navigator.clipboard.writeText(resumeCmd(it)); say('commande de reprise copiée'); } catch { say('copie refusée par le navigateur'); } }
+async function copyCmd(it) { try { await navigator.clipboard.writeText(resumeCmd(it)); say(T('commande de reprise copiée', 'resume command copied')); } catch { say(T('copie refusée par le navigateur', 'copy refused by the browser')); } }
 const primary = it => { touchRecent(it.key); if (it.kind === 'pass') return undefined; return it.kind === 'run' ? (!it.run.running && it.run.sessionId ? openRunConversation(it.run) : undefined) : it.kind === 'open' ? openTab(it) : reopen(it); };
 
 // ── Recherche dans les conversations ──
@@ -2440,7 +2440,7 @@ async function runFind(q) {
     const r = await (await fetch('/api/find?q=' + encodeURIComponent(q), { cache:'no-store' })).json();
     if (seq !== findSeq) return;                   // une frappe plus récente a relancé la recherche
     findRes = r; findQ = q; if (findMode) renderDetail(true);
-  } catch { if (seq === findSeq) say('recherche impossible'); }
+  } catch { if (seq === findSeq) say(T('recherche impossible', 'search failed')); }
 }
 // Surligne les mots cherchés, sans tenir compte des accents (le texte normalisé garde la longueur du texte).
 function highlight(text, q) {
@@ -2455,33 +2455,33 @@ function highlight(text, q) {
 }
 function snipEl(s, q) {
   const d = el('div', 'snip');
-  d.append(el('span', 'who', (s.role === 'user' ? '🧑 toi' : '🤖 Claude') + (s.at ? ' · ' + new Date(s.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '')), highlight(s.text, q));
+  d.append(el('span', 'who', (s.role === 'user' ? T('🧑 toi', '🧑 you') : '🤖 Claude') + (s.at ? ' · ' + new Date(s.at).toLocaleString(T('fr-FR', 'en-GB'), { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '')), highlight(s.text, q));
   return d;
 }
 function renderFind() {
   detailKey = '__find__'; const main = $('main'); main.replaceChildren();
-  main.append(el('div', 'dtitle', 'Dans les conversations — « ' + findQ + ' »'));
+  main.append(el('div', 'dtitle', T('Dans les conversations — « ' + findQ + ' »', 'In conversations — "' + findQ + '"')));
   const r = findRes;
-  if (!r) { main.append(el('div', 'meta', 'recherche…')); return; }
-  main.append(el('div', 'meta', (r.sessions || 0) + ' session' + (r.sessions > 1 ? 's' : '') + ' · ' + (r.total || 0) + ' message' + (r.total > 1 ? 's' : '') + ' · ' + r.ms + ' ms · ' + r.indexed + ' transcripts indexés' + (r.indexing ? ' — indexation en cours, résultats partiels' : '') + (r.sessions > r.hits.length ? ' · ' + r.hits.length + ' plus récentes affichées' : '')));
-  if (!r.hits.length) { main.append(el('h2', null, 'Aucun message ne contient tous ces mots')); return; }
+  if (!r) { main.append(el('div', 'meta', T('recherche…', 'searching…'))); return; }
+  main.append(el('div', 'meta', T((r.sessions || 0) + ' session' + (r.sessions > 1 ? 's' : '') + ' · ' + (r.total || 0) + ' message' + (r.total > 1 ? 's' : '') + ' · ' + r.ms + ' ms · ' + r.indexed + ' transcripts indexés' + (r.indexing ? ' — indexation en cours, résultats partiels' : '') + (r.sessions > r.hits.length ? ' · ' + r.hits.length + ' plus récentes affichées' : ''), (r.sessions || 0) + ' session' + (r.sessions > 1 ? 's' : '') + ' · ' + (r.total || 0) + ' message' + (r.total > 1 ? 's' : '') + ' · ' + r.ms + ' ms · ' + r.indexed + ' transcripts indexed' + (r.indexing ? ' — indexing in progress, partial results' : '') + (r.sessions > r.hits.length ? ' · ' + r.hits.length + ' most recent shown' : ''))));
+  if (!r.hits.length) { main.append(el('h2', null, T('Aucun message ne contient tous ces mots', 'No message contains all these words'))); return; }
   const box = el('div'); box.style.marginTop = '16px';
   for (const h of r.hits) {
     const it = byKey(h.sessionId); const st = it ? it.state : 'closed';
     const c = el('div', 'fhit ' + st + (it ? ' go' : ''));
     const t = el('div', 'ft'); t.append(el('span', 'dot'), el('span', null, (it ? label(it) : h.title) || h.sessionId.slice(0, 8)),
-      el('span', 'n', h.count + ' message' + (h.count > 1 ? 's' : '') + ' · ' + LABEL[st] + (it ? '' : ', hors liste')));
-    if (!it && !h.title) t.children[1].textContent = 'session sans titre (lancement automatique) · ' + h.sessionId.slice(0, 8);
-    if (it && it.hidden) t.children[1].append(el('span', 'tag hid', 'masquée'));
+      el('span', 'n', h.count + ' message' + (h.count > 1 ? 's' : '') + ' · ' + LABEL[st] + (it ? '' : T(', hors liste', ', not in the list'))));
+    if (!it && !h.title) t.children[1].textContent = T('session sans titre (lancement automatique) · ', 'untitled session (automatic launch) · ') + h.sessionId.slice(0, 8);
+    if (it && it.hidden) t.children[1].append(el('span', 'tag hid', T('masquée', 'hidden')));
     c.append(t);
     if (h.cwd) c.append(el('div', 'meta', short(h.cwd)));
     for (const s of h.snippets) c.append(snipEl(s, findQ));
-    if (it) { c.title = 'Ouvrir le détail de la session'; c.onclick = () => select(it.key, true); }
+    if (it) { c.title = T('Ouvrir le détail de la session', 'Open the session details'); c.onclick = () => select(it.key, true); }
     else {
       const a = el('div', 'actions');
-      const b1 = el('button', null, 'Rouvrir dans un nouvel onglet'); b1.onclick = () => reopen({ sessionId: h.sessionId, title: h.title });
+      const b1 = el('button', null, T('Rouvrir dans un nouvel onglet', 'Reopen in a new tab')); b1.onclick = () => reopen({ sessionId: h.sessionId, title: h.title });
       const fake = { sessionId: h.sessionId, cwd: h.cwd };
-      const b2 = el('button', null, 'Copier la commande de reprise'); b2.title = resumeCmd(fake); b2.onclick = () => copyCmd(fake);
+      const b2 = el('button', null, T('Copier la commande de reprise', 'Copy the resume command')); b2.title = resumeCmd(fake); b2.onclick = () => copyCmd(fake);
       a.append(b1, b2); c.append(a);
     }
     box.append(c);
@@ -2507,48 +2507,48 @@ function openBc() { findMode = false; newMode = false; boardMode = false; launch
 function closeBc() { bcMode = false; setPane(false); renderDetail(true); }
 function renderBc() {
   detailKey = '__bc__'; const main = $('main'); main.replaceChildren();
-  main.append(el('div', 'dtitle', 'Écrire à plusieurs sessions'),
-              el('div', 'meta', 'Le même message est tapé dans chaque session cochée, comme « Répondre » : seulement si elle est inactive et son invite vide (sinon elle est sautée). Chaque envoi est journalisé.'));
+  main.append(el('div', 'dtitle', T('Écrire à plusieurs sessions', 'Write to several sessions')),
+              el('div', 'meta', T('Le même message est tapé dans chaque session cochée, comme « Répondre » : seulement si elle est inactive et son invite vide (sinon elle est sautée). Chaque envoi est journalisé.', 'The same message is typed into each ticked session, like "Reply": only if it is idle and its prompt is empty (otherwise it is skipped). Each send is logged.')));
   const f = el('div'); f.id = 'bcform';
-  const tx = promptArea('bc-text'); tx.maxLength = 4000; tx.autocomplete = 'off'; tx.placeholder = 'ex. « rebase sur origin/master et dis-moi où tu en es »';
+  const tx = promptArea('bc-text'); tx.maxLength = 4000; tx.autocomplete = 'off'; tx.placeholder = T('ex. « rebase sur origin/master et dis-moi où tu en es »', 'e.g. "rebase on origin/master and tell me where you are"');
   const list = el('div', 'bclist'); list.id = 'bc-list';
   const quick = el('div', 'actions');
-  const qa = el('button', null, 'Toutes'); qa.onclick = () => { bcEligible().forEach(it => bcPick.add(it.key)); fillBc(); };
-  const qn = el('button', null, 'Aucune'); qn.onclick = () => { bcPick.clear(); fillBc(); };
-  const qc = el('button', null, 'Celles qui peuvent se fermer'); qc.onclick = () => { bcPick.clear(); bcEligible().filter(closable).forEach(it => bcPick.add(it.key)); fillBc(); };
+  const qa = el('button', null, T('Toutes', 'All')); qa.onclick = () => { bcEligible().forEach(it => bcPick.add(it.key)); fillBc(); };
+  const qn = el('button', null, T('Aucune', 'None')); qn.onclick = () => { bcPick.clear(); fillBc(); };
+  const qc = el('button', null, T('Celles qui peuvent se fermer', 'Those that can be closed')); qc.onclick = () => { bcPick.clear(); bcEligible().filter(closable).forEach(it => bcPick.add(it.key)); fillBc(); };
   quick.append(qa, qn, qc);
-  const go = el('button', 'primary', 'Envoyer'); go.id = 'bc-go'; go.onclick = () => sendBc();
-  const cancel = el('button', null, 'Fermer'); cancel.onclick = () => closeBc();
+  const go = el('button', 'primary', T('Envoyer', 'Send')); go.id = 'bc-go'; go.onclick = () => sendBc();
+  const cancel = el('button', null, T('Fermer', 'Close')); cancel.onclick = () => closeBc();
   const acts = el('div', 'actions'); acts.append(go, cancel);
   const pick = el('div'); pick.append(quick, list);
-  f.append(el('label', null, 'Message'), tx, el('label', null, 'Pièces jointes'), attachBar('bc'), el('label', null, 'Sessions'), pick, acts, el('div', 'hint', 'Ctrl+Entrée envoie · Échap ferme'));
+  f.append(el('label', null, 'Message'), tx, el('label', null, T('Pièces jointes', 'Attachments')), attachBar('bc'), el('label', null, 'Sessions'), pick, acts, el('div', 'hint', T('Ctrl+Entrée envoie · Échap ferme', 'Ctrl+Enter sends · Esc closes')));
   main.append(f); fillBc(); tx.focus();
 }
 function fillBc() {
   const list = $('bc-list'); if (!list) return; list.replaceChildren();
   const el2 = bcEligible().sort((a, b) => b.since - a.since);
   for (const k of [...bcPick]) if (!el2.some(it => it.key === k)) bcPick.delete(k);
-  if (!el2.length) { list.append(el('div', 'empty', 'Aucune session inactive pour l’instant.')); }
+  if (!el2.length) { list.append(el('div', 'empty', T('Aucune session inactive pour l’instant.', 'No idle session for now.'))); }
   for (const it of el2) {
     const lab = el('label'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = bcPick.has(it.key); cb.onchange = () => cb.checked ? bcPick.add(it.key) : bcPick.delete(it.key);
     lab.append(cb, el('span', null, label(it)), el('span', 'rm', LABEL[it.state] + ' · ' + ago(data.now - it.since))); list.append(lab);
   }
-  const go = $('bc-go'); if (go) go.textContent = 'Envoyer à ' + plural(bcPick.size, 'session', 'sessions');
-  list.onchange = () => { if ($('bc-go')) $('bc-go').textContent = 'Envoyer à ' + plural(bcPick.size, 'session', 'sessions'); };
+  const go = $('bc-go'); if (go) go.textContent = T('Envoyer à ' + plural(bcPick.size, 'session', 'sessions'), 'Send to ' + plural(bcPick.size, 'session', 'sessions'));
+  list.onchange = () => { if ($('bc-go')) $('bc-go').textContent = T('Envoyer à ' + plural(bcPick.size, 'session', 'sessions'), 'Send to ' + plural(bcPick.size, 'session', 'sessions')); };
 }
 async function sendBc() {
   const tx = $('bc-text'); if (!tx || bcSending) return;
-  if (attBusy('bc')) return say('pièce jointe en cours d’envoi — un instant');
+  if (attBusy('bc')) return say(T('pièce jointe en cours d’envoi — un instant', 'attachment still uploading — one moment'));
   const text = withAttachments('bc', tx.value); const targets = bcEligible().filter(it => bcPick.has(it.key));
-  if (!text) return say('message vide'); if (!targets.length) return say('aucune session cochée');
-  if (!confirm('Taper « ' + text + ' » dans ' + plural(targets.length, 'session', 'sessions') + ' ?\n\n' + targets.map(it => '• ' + label(it)).join('\n'))) return;
-  bcSending = true; $('bc-go').disabled = true; say('envoi à ' + plural(targets.length, 'session', 'sessions') + '…');
+  if (!text) return say(T('message vide', 'empty message')); if (!targets.length) return say(T('aucune session cochée', 'no session ticked'));
+  if (!confirm(T('Taper « ' + text + ' » dans ' + plural(targets.length, 'session', 'sessions') + ' ?\n\n', 'Type "' + text + '" into ' + plural(targets.length, 'session', 'sessions') + '?\n\n') + targets.map(it => '• ' + label(it)).join('\n'))) return;
+  bcSending = true; $('bc-go').disabled = true; say(T('envoi à ' + plural(targets.length, 'session', 'sessions') + '…', 'sending to ' + plural(targets.length, 'session', 'sessions') + '…'));
   try {
     const r = await (await fetch('/api/send-many', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ pids: targets.map(it => it.pid), text }) })).json();
     const ok = r.results.filter(x => !x.error), ko = r.results.filter(x => x.error);
-    say(plural(ok.length, 'envoi', 'envois') + (ko.length ? ' · ' + ko.length + ' sauté(s) : ' + ko.map(x => (x.title || x.pid) + ' (' + x.error + ')').join(', ') : ''));
+    say(T(plural(ok.length, 'envoi', 'envois'), plural(ok.length, 'send', 'sends')) + (ko.length ? T(' · ' + ko.length + ' sauté(s) : ', ' · ' + ko.length + ' skipped: ') + ko.map(x => (x.title || x.pid) + ' (' + x.error + ')').join(', ') : ''));
     if (!ko.length) { tx.value = ''; growArea(tx); bcPick.clear(); clearAttachments('bc'); }
-  } catch { say('échec de la demande'); }
+  } catch { say(T('échec de la demande', 'request failed')); }
   bcSending = false; if ($('bc-go')) $('bc-go').disabled = false; tick();
 }
 // ── Tags choisis à la création : posés comme une correction à la main (lot 3), avant le démarrage de la session ──
@@ -2565,28 +2565,28 @@ function parseNewTag(text, vocab) {
   for (const a of ['domaine', 'outil']) {
     if (axis && axis !== a) continue;
     const v = lists[a].find(x => tagSlug(x) === tagSlug(raw)); if (v) return { axis: a, v };
-    if (axis) return { error: a + ' hors liste : ' + raw };
+    if (axis) return { error: T(a + ' hors liste : ' + raw, a + ' not in the list: ' + raw) };
   }
   const f = tagSlug(raw);
-  return isFonction(f) ? { axis: 'fonction', v: f } : { error: 'fonction : 1 à 5 mots, 3 à 40 caractères' };
+  return isFonction(f) ? { axis: 'fonction', v: f } : { error: T('fonction : 1 à 5 mots, 3 à 40 caractères', 'fonction: 1 to 5 words, 3 to 40 characters') };
 }
 function addNewTag() {
   const ti = $('nf-tag'); if (!ti) return true;
   const t = parseNewTag(ti.value, tagVocab || {}); if (!t) return true;
   if (t.error) { say(t.error); return false; }
-  if (!newTags.some(x => x.axis === t.axis && x.v === t.v)) { if (newTags.length >= 8) { say('8 tags au plus'); return false; } newTags.push(t); }
+  if (!newTags.some(x => x.axis === t.axis && x.v === t.v)) { if (newTags.length >= 8) { say(T('8 tags au plus', '8 tags at most')); return false; } newTags.push(t); }
   ti.value = ''; drawNewTags(); return true;
 }
 function drawNewTags() {
   const box = $('nf-tags'), ti = $('nf-tag'); if (!box || !ti) return;
   box.replaceChildren();
   for (const t of newTags) {
-    const c = el('span', 'chip ' + t.axis, t.v + ' ×'); c.title = t.axis + ' : ' + t.v + '\nclic : retirer';
+    const c = el('span', 'chip ' + t.axis, t.v + ' ×'); c.title = T(t.axis + ' : ' + t.v + '\nclic : retirer', t.axis + ': ' + t.v + '\nclick: remove');
     c.onclick = () => { newTags = newTags.filter(x => x !== t); drawNewTags(); ti.focus(); };
     box.append(c);
   }
   box.append(ti);
-  ti.placeholder = newTags.length ? '' : 'facultatif — ex. Téléphonie, contact-center, power-dial';
+  ti.placeholder = newTags.length ? '' : T('facultatif — ex. Téléphonie, contact-center, power-dial', 'optional — e.g. Téléphonie, contact-center, power-dial');
 }
 function newTagOptions(dl) {
   const v = tagVocab || {}, used = new Set(newTags.map(t => t.axis + ':' + t.v)), fn = new Map();
@@ -2599,21 +2599,21 @@ function newTagOptions(dl) {
 function renderNew() {
   detailKey = '__new__'; const main = $('main'); main.replaceChildren();
   const fork = newFork;
-  main.append(el('div', 'dtitle', fork ? 'Nouvelle session à partir de « ' + (fork.title || fork.sessionId.slice(0, 8)) + ' »' : newPrefill ? 'Nouvelle session — ' + newPrefill.title : 'Nouvelle session'),
-              el('div', 'meta', 'S’ouvre dans un nouvel onglet de la fenêtre Windows Terminal la plus récente, puis apparaît dans la liste.'));
-  if (fork) main.append(el('div', 'banner', 'La nouvelle session repart de TOUTE la conversation de « ' + (fork.title || fork.sessionId) + ' » (claude --resume ' + fork.sessionId.slice(0, 8) + '… --fork-session) : elle a son propre identifiant, la session d’origine continue de son côté sans rien voir de la suite. Le contexte hérité compte dans la fenêtre de la nouvelle session.'));
+  main.append(el('div', 'dtitle', T(fork ? 'Nouvelle session à partir de « ' + (fork.title || fork.sessionId.slice(0, 8)) + ' »' : newPrefill ? 'Nouvelle session — ' + newPrefill.title : 'Nouvelle session', fork ? 'New session from "' + (fork.title || fork.sessionId.slice(0, 8)) + '"' : newPrefill ? 'New session — ' + newPrefill.title : 'New session')),
+              el('div', 'meta', T('S’ouvre dans un nouvel onglet de la fenêtre Windows Terminal la plus récente, puis apparaît dans la liste.', 'Opens in a new tab of the most recent Windows Terminal window, then appears in the list.')));
+  if (fork) main.append(el('div', 'banner', T('La nouvelle session repart de TOUTE la conversation de « ' + (fork.title || fork.sessionId) + ' » (claude --resume ' + fork.sessionId.slice(0, 8) + '… --fork-session) : elle a son propre identifiant, la session d’origine continue de son côté sans rien voir de la suite. Le contexte hérité compte dans la fenêtre de la nouvelle session.', 'The new session starts from the WHOLE conversation of "' + (fork.title || fork.sessionId) + '" (claude --resume ' + fork.sessionId.slice(0, 8) + '… --fork-session): it has its own id, the original session goes on by itself without seeing what follows. The inherited context counts in the context window of the new session.')));
   const f = el('div'); f.id = 'newform';
-  const cwd = el('select'); cwd.id = 'nf-cwd'; cwd.append(el('option', null, 'chargement des dossiers…')); cwd.disabled = true;
-  if (newPrefill) main.append(el('div', 'banner', 'Premier message prérempli par le lanceur : relis-le, ajuste-le, choisis le dossier du dépôt de la PR, puis « Lancer ». Rien n’est lancé ni mergé d’ici.'));
+  const cwd = el('select'); cwd.id = 'nf-cwd'; cwd.append(el('option', null, T('chargement des dossiers…', 'loading folders…'))); cwd.disabled = true;
+  if (newPrefill) main.append(el('div', 'banner', T('Premier message prérempli par le lanceur : relis-le, ajuste-le, choisis le dossier du dépôt de la PR, puis « Lancer ». Rien n’est lancé ni mergé d’ici.', 'First message prefilled by the launcher: read it, adjust it, choose the folder of the PR repository, then "Launch". Nothing is launched or merged from here.')));
   const pr = el('textarea'); pr.id = 'nf-prompt'; pr.maxLength = 20000; pr.spellcheck = true;
   if (newPrefill) { pr.value = newPrefill.prompt; pr.rows = 8; }
-  pr.placeholder = 'Facultatif — ex. « /cadrage HD-123456 » ou « regarde pourquoi … »';
+  pr.placeholder = T('Facultatif — ex. « /cadrage HD-123456 » ou « regarde pourquoi … »', 'Optional — e.g. "/code-review" or "look at why …"');
   // Modèle : un groupe de boutons (un seul actif) plutôt qu'une liste ; « Autre… » ouvre la saisie libre pour un
   // identifiant complet (ex. claude-opus-5-5[1m]). Le champ #nf-model reste la valeur envoyée par launchNew.
   const mo = el('input'); mo.id = 'nf-model'; mo.autocomplete = 'off'; mo.spellcheck = false;
-  mo.placeholder = 'identifiant complet — ex. claude-opus-5-5[1m]'; mo.value = localStorage.getItem('cc.newmodel') || '';
-  const MODELS = [['', 'Par défaut', 'celui de ta config'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku'], ['fable', 'Fable']];
-  const mg = el('div', 'nf-seg'); mg.setAttribute('role', 'radiogroup'); mg.setAttribute('aria-label', 'Modèle');
+  mo.placeholder = T('identifiant complet — ex. claude-opus-5-5[1m]', 'full id — e.g. claude-opus-5-5[1m]'); mo.value = localStorage.getItem('cc.newmodel') || '';
+  const MODELS = [['', T('Par défaut', 'Default'), T('celui de ta config', 'the one in your config')], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku'], ['fable', 'Fable']];
+  const mg = el('div', 'nf-seg'); mg.setAttribute('role', 'radiogroup'); mg.setAttribute('aria-label', T('Modèle', 'Model'));
   const segs = [];
   const pickModel = (key, focus) => {
     const other = key === '*';
@@ -2621,7 +2621,7 @@ function renderNew() {
     for (const b of segs) { const on = b.dataset.k === key; b.classList.toggle('sel', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); b.tabIndex = on ? 0 : -1; }
     mo.hidden = !other; if (other && focus) mo.focus();
   };
-  for (const [k, lab, tip] of [...MODELS, ['*', 'Autre…', 'saisir un identifiant de modèle complet']]) {
+  for (const [k, lab, tip] of [...MODELS, ['*', T('Autre…', 'Other…'), T('saisir un identifiant de modèle complet', 'type a full model id')]]) {
     const b = el('button', null, lab); b.type = 'button'; b.dataset.k = k; b.setAttribute('role', 'radio'); if (tip) b.title = tip;
     b.onclick = () => pickModel(k, true);
     b.onkeydown = e => {                                    // flèches : comme un groupe de radios
@@ -2633,7 +2633,7 @@ function renderNew() {
   pickModel(MODELS.some(([k]) => k === mo.value) ? mo.value : '*', false);
   const mbox = el('div', 'nf-model'); mbox.append(mg, mo);
   const br = el('input'); br.id = 'nf-branch'; br.autocomplete = 'off'; br.spellcheck = false;
-  br.placeholder = 'facultatif — ex. feat/ma-branche : worktree neuf sur origin/master';
+  br.placeholder = T('facultatif — ex. feat/ma-branche : worktree neuf sur origin/master', 'optional — e.g. feat/my-branch: new worktree on origin/master');
   const tbox = el('div', 'nf-tags'); tbox.id = 'nf-tags';
   const ti = el('input'); ti.id = 'nf-tag'; ti.setAttribute('list', 'nf-tagopts'); ti.autocomplete = 'off'; ti.spellcheck = false;
   const tdl = el('datalist'); tdl.id = 'nf-tagopts';
@@ -2646,43 +2646,43 @@ function renderNew() {
   ti.oninput = e => { if ((!e.inputType || e.inputType === 'insertReplacementText') && ti.value) { if (addNewTag()) newTagOptions(tdl); } };
   tbox.onclick = e => { if (e.target === tbox) ti.focus(); };
   tbox.append(ti);                   // drawNewTags le retrouve par son id et place les puces devant
-  const go = el('button', 'primary', 'Lancer'); go.id = 'nf-go'; go.onclick = () => launchNew();
-  const cancel = el('button', null, 'Annuler'); cancel.onclick = () => closeNew();
+  const go = el('button', 'primary', T('Lancer', 'Launch')); go.id = 'nf-go'; go.onclick = () => launchNew();
+  const cancel = el('button', null, T('Annuler', 'Cancel')); cancel.onclick = () => closeNew();
   const acts = el('div', 'actions'); acts.append(go, cancel);
-  f.append(el('label', null, 'Dossier'), cwd, el('label', null, 'Premier message'), pr,
-           el('div', 'hint', 'Envoyé tel quel à la session dès son démarrage. Vide : la session attend ta première demande.'),
-           el('label', null, 'Pièces jointes'), attachBar('new'),
+  f.append(el('label', null, T('Dossier', 'Folder')), cwd, el('label', null, T('Premier message', 'First message')), pr,
+           el('div', 'hint', T('Envoyé tel quel à la session dès son démarrage. Vide : la session attend ta première demande.', 'Sent as is to the session as soon as it starts. Empty: the session waits for your first request.')),
+           el('label', null, T('Pièces jointes', 'Attachments')), attachBar('new'),
            el('label', null, 'Tags'), tbox, tdl,
-           el('div', 'hint', 'Entrée ajoute · clic sur un tag le retire. Domaine et outil : listes fermées ; sinon le mot devient une fonction (power-dial). Posés comme une correction à la main : l’étiqueteur ne les retire jamais.'),
-           el('label', null, 'Modèle'), mbox,
-           el('label', null, 'Branche neuve'), br,
-           el('div', 'hint', 'Remplie : l’onglet récupère origin/master, crée la branche dans un worktree neuf (.claude\\worktrees\\<dernier segment>) et y lance la session, au même sous-dossier. Vide : session dans le dossier choisi.'),
-           acts, el('div', 'hint', 'Ctrl+Entrée lance · Échap annule'));
+           el('div', 'hint', T('Entrée ajoute · clic sur un tag le retire. Domaine et outil : listes fermées ; sinon le mot devient une fonction (power-dial). Posés comme une correction à la main : l’étiqueteur ne les retire jamais.', 'Enter adds · click a tag to remove it. Domain and tool: fixed lists; otherwise the word becomes a function (power-dial). Set as a manual correction: the tagger never removes them.')),
+           el('label', null, T('Modèle', 'Model')), mbox,
+           el('label', null, T('Branche neuve', 'New branch')), br,
+           el('div', 'hint', T('Remplie : l’onglet récupère origin/master, crée la branche dans un worktree neuf (.claude\\worktrees\\<dernier segment>) et y lance la session, au même sous-dossier. Vide : session dans le dossier choisi.', 'Filled: the tab fetches origin/master, creates the branch in a new worktree (.claude\\worktrees\\<last segment>) and starts the session there, in the same subfolder. Empty: session in the chosen folder.')),
+           acts, el('div', 'hint', T('Ctrl+Entrée lance · Échap annule', 'Ctrl+Enter launches · Esc cancels')));
   main.append(f); drawNewTags(); loadTagVocab(); pr.focus();
   fetch('/api/folders', { cache:'no-store' }).then(r => r.json()).then(r => {
     if (!newMode || !$('nf-cwd')) return;
     cwd.replaceChildren(); const last = localStorage.getItem('cc.newcwd');
-    for (const d of r.folders || []) { const o = el('option', null, (short(d.path) || d.path) + '   —   il y a ' + ago(Date.now() - d.last) + ' · ' + d.count + ' session' + (d.count > 1 ? 's' : '')); o.value = d.path; o.title = d.path; cwd.append(o); }
-    if (!cwd.options.length) { cwd.append(el('option', null, 'aucun dossier récent trouvé')); return; }
+    for (const d of r.folders || []) { const o = el('option', null, (short(d.path) || d.path) + T('   —   il y a ' + ago(Date.now() - d.last), '   —   ' + ago(Date.now() - d.last) + ' ago') + ' · ' + d.count + ' session' + (d.count > 1 ? 's' : '')); o.value = d.path; o.title = d.path; cwd.append(o); }
+    if (!cwd.options.length) { cwd.append(el('option', null, T('aucun dossier récent trouvé', 'no recent folder found'))); return; }
     const want = fork && fork.cwd ? fork.cwd.replace(/\\+$/, '').toLowerCase() : null, same = want && [...cwd.options].find(o => o.value.toLowerCase() === want);
     if (same) cwd.value = same.value;
     else if (last && [...cwd.options].some(o => o.value === last)) cwd.value = last;
     cwd.disabled = false;
-  }).catch(() => { cwd.replaceChildren(el('option', null, 'liste des dossiers indisponible')); });
+  }).catch(() => { cwd.replaceChildren(el('option', null, T('liste des dossiers indisponible', 'folder list unavailable'))); });
 }
 async function launchNew() {
   const cwd = $('nf-cwd'), pr = $('nf-prompt'), mo = $('nf-model'), br = $('nf-branch');
   if (!cwd || cwd.disabled || launching) return;
-  if (attBusy('new')) return say('pièce jointe en cours d’envoi — un instant');
+  if (attBusy('new')) return say(T('pièce jointe en cours d’envoi — un instant', 'attachment still uploading — one moment'));
   // Premier message : passé par fichier au lancement (pas tapé) — les retours à la ligne y sont gardés, pièces en fin.
   const refs = withAttachments('new', ''), prompt = [pr.value.trim(), refs].filter(Boolean).join('\n\n');
   if (!addNewTag()) return;          // un tag tapé mais pas encore validé part avec la session — ou bloque s'il est invalide
-  launching = true; $('nf-go').disabled = true; say('lancement d’une nouvelle session…');
+  launching = true; $('nf-go').disabled = true; say(T('lancement d’une nouvelle session…', 'starting a new session…'));
   try {
     const r = await (await fetch('/api/new', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ cwd: cwd.value, prompt, model: mo.value.trim(), branch: br.value.trim(), forkFrom: newFork ? newFork.sessionId : '', tags: newTags }) })).json();
-    if (r.error) say('non lancée : ' + r.error);
-    else { clearAttachments('new'); localStorage.setItem('cc.newcwd', cwd.value); localStorage.setItem('cc.newmodel', mo.value.trim()); say(br.value.trim() ? 'onglet ouvert : création du worktree puis lancement (suivre dans l’onglet)' : 'nouvel onglet ouvert — la session apparaît dans quelques secondes'); launching = false; closeNew(); return; }
-  } catch { say('échec de la demande'); }
+    if (r.error) say(T('non lancée : ', 'not launched: ') + r.error);
+    else { clearAttachments('new'); localStorage.setItem('cc.newcwd', cwd.value); localStorage.setItem('cc.newmodel', mo.value.trim()); say(br.value.trim() ? T('onglet ouvert : création du worktree puis lancement (suivre dans l’onglet)', 'tab opened: creating the worktree then launching (follow in the tab)') : T('nouvel onglet ouvert — la session apparaît dans quelques secondes', 'new tab opened — the session appears in a few seconds')); launching = false; closeNew(); return; }
+  } catch { say(T('échec de la demande', 'request failed')); }
   launching = false; if ($('nf-go')) $('nf-go').disabled = false;
 }
 
@@ -2690,7 +2690,7 @@ async function launchNew() {
 // largeur par défaut ; retenue d'une visite à l'autre (cc.promptw).
 function promptResizer(split) {
   const w = +localStorage.getItem('cc.promptw'); if (w) split.style.setProperty('--promptw', w + 'px');
-  const rz = el('div', 'vrz'); rz.title = 'Glisser pour élargir ou réduire les derniers prompts — double-clic : largeur par défaut';
+  const rz = el('div', 'vrz'); rz.title = T('Glisser pour élargir ou réduire les derniers prompts — double-clic : largeur par défaut', 'Drag to widen or narrow the recent prompts — double-click: default width');
   const clamp = x => Math.round(Math.max(220, Math.min(x, split.getBoundingClientRect().width - 320)));
   rz.onpointerdown = e => {
     e.preventDefault(); rz.setPointerCapture(e.pointerId); rz.classList.add('drag'); document.body.style.userSelect = 'none';
@@ -2713,8 +2713,8 @@ function renderDetail(force) {
   $('newbtn').classList.toggle('on', newMode); $('bcbtn').classList.toggle('on', bcMode); $('boardbtn').classList.toggle('on', boardMode);
   $('launchbtn').classList.toggle('on', launchMode); $('chatsbtn').classList.toggle('on', chatsMode);
   document.body.classList.toggle('finding', findMode);
-  const mt = launchMode ? 'Lanceur' : chatsMode ? 'Conversations Teams' : boardMode ? 'Tableau par projet' : newMode ? 'Nouvelle session' : bcMode ? 'Message à plusieurs sessions' : findMode ? 'Recherche dans les conversations' : null;
-  if (mt) setMobileTitle(mt); else { const cur = selected && byKey(selected); cur ? setMobileTitle(label(cur), cur.look || cur.state) : setMobileTitle('Vue d’ensemble'); }
+  const mt = launchMode ? T('Lanceur', 'Launcher') : chatsMode ? T('Conversations Teams', 'Teams conversations') : boardMode ? T('Tableau par projet', 'Board by project') : newMode ? T('Nouvelle session', 'New session') : bcMode ? T('Message à plusieurs sessions', 'Message to several sessions') : findMode ? T('Recherche dans les conversations', 'Search in conversations') : null;
+  if (mt) setMobileTitle(mt); else { const cur = selected && byKey(selected); cur ? setMobileTitle(label(cur), cur.look || cur.state) : setMobileTitle(T('Vue d’ensemble', 'Overview')); }
   if (launchMode) { if (detailKey !== '__launch__' || force) renderLauncher(); return; }   // rafraîchie par son propre minuteur (10 s)
   if (chatsMode) { if (detailKey !== '__chats__' || force) renderChats(); return; }   // rafraîchie par son minuteur (30 s) et à chaque nouvelle liste
   if (boardMode) { renderBoard(force); return; }
@@ -2735,57 +2735,57 @@ function renderDetail(force) {
     // Ouverte depuis la recherche dans les conversations : on garde sous les yeux les passages trouvés.
     const fh = findRes && findQ && $('q').value.trim() === findQ && findRes.hits.find(h => h.sessionId === it.sessionId);
     if (fh) {
-      body.append(el('h2', null, 'Passages trouvés — « ' + findQ + ' » · ' + fh.count + ' message' + (fh.count > 1 ? 's' : '')));
+      body.append(el('h2', null, T('Passages trouvés — « ' + findQ + ' » · ' + fh.count + ' message' + (fh.count > 1 ? 's' : ''), 'Matches — "' + findQ + '" · ' + fh.count + ' message' + (fh.count > 1 ? 's' : ''))));
       const box = el('div', 'fhit ' + it.state); for (const s of fh.snippets) box.append(snipEl(s, findQ)); body.append(box);
     }
     const term = it.kind === 'open' && !it.headless;      // automate (claude -p) : pas de terminal
     if (term) { const dg = el('div'); dg.id = 'dialog'; body.append(dg); }
     if (term) {
-      body.append(el('h2', null, 'Répondre'));
+      body.append(el('h2', null, T('Répondre', 'Reply')));
       const sg = el('div', 'suggest'); sg.id = 'suggest'; sg.hidden = true; body.append(sg);
       const box = el('div', 'sendbox'); const inp = promptArea('sendtext'); inp.maxLength = 4000;
       inp.dataset.key = it.key; inp.value = draftLoad(sessionStorage, it.key); inp.addEventListener('input', keepDraft);
-      const btn = el('button', 'primary', 'Envoyer'); btn.id = 'sendbtn'; btn.onclick = () => sendReply();
+      const btn = el('button', 'primary', T('Envoyer', 'Send')); btn.id = 'sendbtn'; btn.onclick = () => sendReply();
       box.append(inp, btn);
-      for (const q of ['go', 'oui', 'non', 'continue']) { const b = el('button', 'quick', q); b.title = 'Pré-remplit la réponse (n\'envoie pas)'; b.onclick = () => { inp.value = q; growArea(inp); inp.focus(); }; box.append(b); }
+      for (const q of ['go', T('oui', 'yes'), T('non', 'no'), 'continue']) { const b = el('button', 'quick', q); b.title = T('Pré-remplit la réponse (n\'envoie pas)', 'Prefills the reply (does not send)'); b.onclick = () => { inp.value = q; growArea(inp); inp.focus(); }; box.append(b); }
       const hint = el('div', 'hint'); hint.id = 'sendhint'; box.append(attachBar('reply:' + it.key), hint); body.append(box);
       if (inp.value) growArea(inp);   // brouillon repris : la zone reprend sa hauteur
     }
     const pr = el('div', 'prompts'); pr.id = 'prompts';
-    if (it.headless && it.reply) { body.append(el('h2', null, 'Dernier message'), el('div', 'reply', it.reply)); }
+    if (it.headless && it.reply) { body.append(el('h2', null, T('Dernier message', 'Last message')), el('div', 'reply', it.reply)); }
     if (term) {
       const split = el('div', 'split'), ct = el('div', 'cterm'), cp = el('div', 'cprompts');
       const pre = el('pre', null, '…'); pre.id = 'screen';
       // Deux vues du même panneau : l'écran (ce que le terminal affiche encore) ou la conversation complète (transcript).
       const vh = el('h2', 'viewtabs');
-      for (const [v, t, h] of [['screen', 'Écran du terminal', 'En direct, lecture seule : seulement ce que le terminal affiche encore'], ['conv', 'Conversation complète', 'Tout l’historique de la session, relu dans son transcript — défile jusqu’au premier message  ( h )']]) {
+      for (const [v, t, h] of [['screen', T('Écran du terminal', 'Terminal screen'), T('En direct, lecture seule : seulement ce que le terminal affiche encore', 'Live, read-only: only what the terminal still shows')], ['conv', T('Conversation complète', 'Full conversation'), T('Tout l’historique de la session, relu dans son transcript — défile jusqu’au premier message  ( h )', 'The whole session history, read from its transcript — scrolls back to the first message  ( h )')]]) {
         const b = el('button', 'vtab', t); b.dataset.view = v; b.title = h; b.onclick = () => setConvView(v); vh.append(b);
       }
-      ct.append(vh, pre, convPane()); cp.append(el('h2', null, 'Derniers prompts'), pr);
+      ct.append(vh, pre, convPane()); cp.append(el('h2', null, T('Derniers prompts', 'Recent prompts')), pr);
       split.append(ct, promptResizer(split), cp); body.append(split);
-    } else body.append(el('h2', null, 'Derniers prompts'), pr);
-    if (!term) body.append(el('h2', null, 'Conversation complète'), convPane());
+    } else body.append(el('h2', null, T('Derniers prompts', 'Recent prompts')), pr);
+    if (!term) body.append(el('h2', null, T('Conversation complète', 'Full conversation')), convPane());
     applyConvView(it);
   }
   const head = $('head'); head.replaceChildren(); head.className = it.state;
   { const dt = el('div', 'dtitle', label(it)), d = driftTag(it); if (d) dt.append(d); head.append(dt); }
-  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), LABEL[it.state] + ' · depuis ' + ago(data.now - it.since) + (it.waitingFor ? ' · ' + it.waitingFor : ''));
-  if (it.status === 'shell' && it.state !== 'shell') { const t = el('span', 'tag cl', 'commande en arrière-plan'); t.title = 'Tour terminé ; une commande lancée en arrière-plan tourne encore dans cette session'; chip.append(t); }
-  if (it.stale) { const t = el('span', 'tag cl', 'statut corrigé d\'après l\'écran'); t.title = 'Claude Code la déclare encore « au travail », mais ' + (it.stale === 'hook' ? 'elle a signalé la fin de son tour (hook Stop)' : 'son écran montre un tour terminé'); chip.append(t); }
+  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), T(LABEL[it.state] + ' · depuis ' + ago(data.now - it.since), LABEL[it.state] + ' · for ' + ago(data.now - it.since)) + (it.waitingFor ? ' · ' + it.waitingFor : ''));
+  if (it.status === 'shell' && it.state !== 'shell') { const t = el('span', 'tag cl', T('commande en arrière-plan', 'background command')); t.title = T('Tour terminé ; une commande lancée en arrière-plan tourne encore dans cette session', 'Turn finished; a command started in the background is still running in this session'); chip.append(t); }
+  if (it.stale) { const t = el('span', 'tag cl', T('statut corrigé d\'après l\'écran', 'status corrected from the screen')); t.title = T('Claude Code la déclare encore « au travail », mais ' + (it.stale === 'hook' ? 'elle a signalé la fin de son tour (hook Stop)' : 'son écran montre un tour terminé'), 'Claude Code still reports it as "working", but ' + (it.stale === 'hook' ? 'it signalled the end of its turn (Stop hook)' : 'its screen shows a finished turn')); chip.append(t); }
   head.append(chip);
-  if (it.model) { const md = el('span', 'tok', '  ·  modèle : ' + modelName(it.model)); md.title = it.model + ' — modèle du dernier message de la session (suit un /model en cours de route)'; head.append(md); }
-  if (it.tokens) { const tk = el('span', 'tok', '  ·  contexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens'); tk.title = 'Taille du dernier appel au modèle : entrée + cache lu + cache écrit'; head.append(tk); }
-  const meta = el('div', 'meta', [it.name, short(it.cwd), it.pid ? 'pid ' + it.pid : null, it.sessionId, it.version ? 'v' + it.version : null, it.startedAt ? 'lancée il y a ' + ago(data.now - it.startedAt) : null].filter(Boolean).join(' · '));
+  if (it.model) { const md = el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)); md.title = it.model + T(' — modèle du dernier message de la session (suit un /model en cours de route)', ' — model of the last message of the session (follows a /model on the way)'); head.append(md); }
+  if (it.tokens) { const tk = el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString('fr-FR') + ' tokens'); tk.title = T('Taille du dernier appel au modèle : entrée + cache lu + cache écrit', 'Size of the last model call: input + cache read + cache written'); head.append(tk); }
+  const meta = el('div', 'meta', [it.name, short(it.cwd), it.pid ? 'pid ' + it.pid : null, it.sessionId, it.version ? 'v' + it.version : null, it.startedAt ? T('lancée il y a ' + ago(data.now - it.startedAt), 'started ' + ago(data.now - it.startedAt) + ' ago') : null].filter(Boolean).join(' · '));
   const a = prLink(it); if (a) { meta.append(' · ', a); prTags(it).forEach(t => meta.append(t)); }
   head.append(meta);
   const dtags = tagChips(it, 'dtags'); if (dtags) head.append(dtags);
   const dinb = teamsInboundOf(it);
   if (dinb) {
     const box = el('div', 'twaits');
-    const l = el('div', 'tw inb', '📥 Demande Teams de ' + (dinb.chatLabel || dinb.from)); l.append(el('span', 'tx', ' — session ouverte automatiquement ; rien n’est envoyé sans ton accord.'));
+    const l = el('div', 'tw inb', T('📥 Demande Teams de ', '📥 Teams request from ') + (dinb.chatLabel || dinb.from)); l.append(el('span', 'tx', T(' — session ouverte automatiquement ; rien n’est envoyé sans ton accord.', ' — session opened automatically; nothing is sent without your approval.')));
     if (it.kind === 'open' && it.status === 'idle') {
-      const bs = el('span', 'twb'); const x = el('button', null, inboundIsArmed(it) ? 'Confirmer l’envoi à ' + (dinb.chatLabel || dinb.from) : 'Envoyer la réponse proposée');
-      x.title = 'Demande à la session de poster sa réponse proposée dans le chat Teams (deux clics). Pour la corriger d’abord, réponds à la session.';
+      const bs = el('span', 'twb'); const x = el('button', null, inboundIsArmed(it) ? T('Confirmer l’envoi à ' + (dinb.chatLabel || dinb.from), 'Confirm sending to ' + (dinb.chatLabel || dinb.from)) : T('Envoyer la réponse proposée', 'Send the proposed reply'));
+      x.title = T('Demande à la session de poster sa réponse proposée dans le chat Teams (deux clics). Pour la corriger d’abord, réponds à la session.', 'Asks the session to post its proposed reply in the Teams chat (two clicks). To correct it first, reply to the session.');
       x.onclick = () => teamsInboundSend(it, dinb); bs.append(x); l.append(bs);
     }
     box.append(l); head.append(box);
@@ -2794,72 +2794,72 @@ function renderDetail(force) {
   if (dtws.length) {
     const box = el('div', 'twaits');
     for (const w of dtws) {
-      const l = el('div', 'tw' + (w.status === 'replied' ? ' rep' : w.alertedAt ? ' alert' : ''), teamsWaitLine(w, data.now, data.teams.reminders)); l.append(el('span', 'tx', ' — « ' + w.excerpt + ' »'));
+      const l = el('div', 'tw' + (w.status === 'replied' ? ' rep' : w.alertedAt ? ' alert' : ''), teamsWaitLine(w, data.now, data.teams.reminders)); l.append(el('span', 'tx', T(' — « ' + w.excerpt + ' »', ' — "' + w.excerpt + '"')));
       const bs = el('span', 'twb');
       const b = (txt, action, tip) => { const x = el('button', null, txt); x.title = tip; x.onclick = () => teamsWaitAction(it, w, action); bs.append(x); };
       if (w.status === 'open') {
-        b('Relancer maintenant', 'remind', 'La session écrit tout de suite une relance courte dans le chat (envoi autonome), même hors calendrier');
-        b('Repousser', 'snooze', 'Pas de relance avant le prochain jour ouvré à 10 h');
+        b(T('Relancer maintenant', 'Remind now'), 'remind', T('La session écrit tout de suite une relance courte dans le chat (envoi autonome), même hors calendrier', 'The session writes a short reminder in the chat right away (sent on its own), even outside the schedule'));
+        b(T('Repousser', 'Snooze'), 'snooze', T('Pas de relance avant le prochain jour ouvré à 10 h', 'No reminder before the next working day at 10 am'));
       }
-      b('Ne plus attendre', 'dismiss', 'Ferme l’attente : plus de relance, et une réponse éventuelle ne sera pas transmise');
+      b(T('Ne plus attendre', 'Stop waiting'), 'dismiss', T('Ferme l’attente : plus de relance, et une réponse éventuelle ne sera pas transmise', 'Closes the wait: no more reminders, and any reply will not be passed on'));
       l.append(bs); box.append(l);
     }
-    if (!data.teams.enabled) box.append(el('div', 'tx', 'Surveillance éteinte : aucune réponse ne sera lue tant que « node teams-watcher.ts login » n’a pas été fait.'));
-    else if (!data.teams.reminders) box.append(el('div', 'tx', 'Relances automatiques éteintes (teams-watcher-config.json) : seul « Relancer maintenant » écrit au collègue.'));
+    if (!data.teams.enabled) box.append(el('div', 'tx', T('Surveillance éteinte : aucune réponse ne sera lue tant que « node teams-watcher.ts login » n’a pas été fait.', 'Watching is off: no reply will be read until "node teams-watcher.ts login" has been run.')));
+    else if (!data.teams.reminders) box.append(el('div', 'tx', T('Relances automatiques éteintes (teams-watcher-config.json) : seul « Relancer maintenant » écrit au collègue.', 'Automatic reminders are off (teams-watcher-config.json): only "Remind now" writes to your colleague.')));
     head.append(box);
   }
   const dvals = validationsOf(it);
   if (dvals && dvals.items.length) {
     const box = el('div', 'twaits vals');
-    box.append(el('div', 'vh', 'Validations métier — ' + (validationBadge(dvals) || 'aucune en cours') + ' · une validation n’est pas un go'));
+    box.append(el('div', 'vh', T('Validations métier — ' + (validationBadge(dvals) || 'aucune en cours') + ' · une validation n’est pas un go', 'Business validations — ' + (validationBadge(dvals) || 'none pending') + ' · a validation is not a go')));
     for (const i of dvals.items) {
       const l = el('div', 'tw val' + (i.withdrawn ? ' wd' : i.decision === 'refuse' || i.state === 'non-qualifiee' ? ' ref' : i.state === 'tranchee' ? '' : ' pre'), validationLine(i, data.now));
       l.append(el('div', 'tx', i.question));
-      if (i.reserve) l.append(el('div', 'tx', 'Réserve : ' + i.reserve));
-      if (i.quote) l.append(el('div', 'tx q', '« ' + i.quote + ' »'));
+      if (i.reserve) l.append(el('div', 'tx', T('Réserve : ', 'Reservation: ') + i.reserve));
+      if (i.quote) l.append(el('div', 'tx q', T('« ' + i.quote + ' »', '"' + i.quote + '"')));
       box.append(l);
     }
     head.append(box);
   }
   if (it.kind === 'open') head.append(gitBlock(it));
   if (it.headless) {
-    head.append(el('div', 'banner', 'Automate sans terminal : ce claude -p a été lancé par un script (' + (it.entrypoint || 'sdk') + '), par exemple le diagnostic automatique. Il n’a ni onglet, ni écran, et ne lit pas de réponse : il se pilote depuis son lanceur. On voit ici son avancement (derniers prompts, dernier message, git).'));
-    const fa = el('div', 'actions'); const bf = el('button', null, it.fav ? '★ Favori' : '☆ Favori'); bf.onclick = () => toggleFav(it); fa.append(bf); head.append(fa);
+    head.append(el('div', 'banner', T('Automate sans terminal : ce claude -p a été lancé par un script (' + (it.entrypoint || 'sdk') + '), par exemple le diagnostic automatique. Il n’a ni onglet, ni écran, et ne lit pas de réponse : il se pilote depuis son lanceur. On voit ici son avancement (derniers prompts, dernier message, git).', 'Automation without a terminal: this claude -p was started by a script (' + (it.entrypoint || 'sdk') + '), for example the automatic diagnosis. It has no tab, no screen, and reads no reply: it is driven from its launcher. Here you see its progress (recent prompts, last message, git).')));
+    const fa = el('div', 'actions'); const bf = el('button', null, it.fav ? T('★ Favori', '★ Favourite') : T('☆ Favori', '☆ Favourite')); bf.onclick = () => toggleFav(it); fa.append(bf); head.append(fa);
     return renderPromptsOnly(it);
   }
   const actions = el('div', 'actions');
-  const b1 = el('button', 'primary' + (it.kind === 'open' ? ' act-focus' : ''), it.kind === 'open' ? 'Afficher l\'onglet' : 'Rouvrir dans un nouvel onglet'); b1.onclick = () => primary(it);
-  const b2 = el('button', null, 'Copier la commande de reprise'); b2.title = resumeCmd(it); b2.onclick = () => copyCmd(it);
-  const bf = el('button', null, it.fav ? '★ Favori' : '☆ Favori'); bf.title = (it.fav ? 'Retirer des favoris' : 'Mettre en favori') + '  ( f )'; if (it.fav) bf.style.color = 'var(--fav)'; bf.onclick = () => toggleFav(it);
+  const b1 = el('button', 'primary' + (it.kind === 'open' ? ' act-focus' : ''), it.kind === 'open' ? T('Afficher l\'onglet', 'Show the tab') : T('Rouvrir dans un nouvel onglet', 'Reopen in a new tab')); b1.onclick = () => primary(it);
+  const b2 = el('button', null, T('Copier la commande de reprise', 'Copy the resume command')); b2.title = resumeCmd(it); b2.onclick = () => copyCmd(it);
+  const bf = el('button', null, it.fav ? T('★ Favori', '★ Favourite') : T('☆ Favori', '☆ Favourite')); bf.title = (it.fav ? T('Retirer des favoris', 'Remove from favourites') : T('Mettre en favori', 'Add to favourites')) + '  ( f )'; if (it.fav) bf.style.color = 'var(--fav)'; bf.onclick = () => toggleFav(it);
   actions.append(b1, b2, bf);
-  const bk = el('button', null, '⑂ Nouvelle session à partir de celle-ci'); bk.title = 'Ouvre une NOUVELLE session qui reprend toute cette conversation (claude --resume … --fork-session) ; celle-ci n’est pas touchée  ( d )';
+  const bk = el('button', null, T('⑂ Nouvelle session à partir de celle-ci', '⑂ New session from this one')); bk.title = T('Ouvre une NOUVELLE session qui reprend toute cette conversation (claude --resume … --fork-session) ; celle-ci n’est pas touchée  ( d )', 'Opens a NEW session that carries over this whole conversation (claude --resume … --fork-session); this one is not touched  ( d )');
   bk.onclick = () => openNew({ sessionId: it.sessionId, title: it.title, cwd: it.cwd, tags: it.tags }); actions.append(bk);
   if (it.kind === 'closed') {
-    const bh = el('button', null, it.hidden ? 'Ré-afficher dans la liste' : 'Masquer');
-    bh.title = it.hidden ? 'La remet dans « Fermées, reprenables »  ( x )' : 'La retire de la liste ; la recherche la retrouve, le transcript est intact  ( x )';
+    const bh = el('button', null, it.hidden ? T('Ré-afficher dans la liste', 'Show in the list again') : T('Masquer', 'Hide'));
+    bh.title = it.hidden ? T('La remet dans « Fermées, reprenables »  ( x )', 'Puts it back in "Closed, reopenable"  ( x )') : T('La retire de la liste ; la recherche la retrouve, le transcript est intact  ( x )', 'Removes it from the list; search still finds it, the transcript is intact  ( x )');
     bh.onclick = () => setHidden([it], !it.hidden); actions.append(bh);
   }
-  if (it.kind === 'open') { const bx = el('button', null, '✕ Fermer la session'); bx.title = 'Quitte la session (/exit) ; la conversation reste reprenable  ( x )'; bx.onclick = () => closeSession(it); actions.append(bx); }
+  if (it.kind === 'open') { const bx = el('button', null, T('✕ Fermer la session', '✕ Close the session')); bx.title = T('Quitte la session (/exit) ; la conversation reste reprenable  ( x )', 'Quits the session (/exit); the conversation can still be reopened  ( x )'); bx.onclick = () => closeSession(it); actions.append(bx); }
   // Toujours proposé (pas seulement quand l'onglet est introuvable) : fermer puis rouvrir en un seul geste.
   if (it.kind === 'open' && !it.headless) {
-    const b3 = el('button', noTab.has(it.key) ? 'primary' : null, '↻ Fermer et rouvrir'); b3.disabled = it.status !== 'idle';
-    b3.title = it.status === 'idle' ? 'Ferme la session (/exit) et la reprend aussitôt dans un nouvel onglet (claude --resume) ; la conversation est conservée' : 'Possible seulement quand la session est inactive';
+    const b3 = el('button', noTab.has(it.key) ? 'primary' : null, T('↻ Fermer et rouvrir', '↻ Close and reopen')); b3.disabled = it.status !== 'idle';
+    b3.title = it.status === 'idle' ? T('Ferme la session (/exit) et la reprend aussitôt dans un nouvel onglet (claude --resume) ; la conversation est conservée', 'Closes the session (/exit) and resumes it right away in a new tab (claude --resume); the conversation is kept') : T('Possible seulement quand la session est inactive', 'Only possible when the session is idle');
     b3.onclick = () => relaunch(it); actions.append(b3);
   }
   head.append(actions);
-  if (it.kind === 'closed') head.append(el('div', 'banner', 'Session fermée : son terminal n’existe plus. Tu peux la rouvrir dans un nouvel onglet (la conversation reprend où elle s’était arrêtée)' + (it.hidden ? ', ou la ré-afficher dans la liste — elle est masquée.' : ', ou la masquer si tu n’en as plus besoin.')));
+  if (it.kind === 'closed') head.append(el('div', 'banner', T('Session fermée : son terminal n’existe plus. Tu peux la rouvrir dans un nouvel onglet (la conversation reprend où elle s’était arrêtée)' + (it.hidden ? ', ou la ré-afficher dans la liste — elle est masquée.' : ', ou la masquer si tu n’en as plus besoin.'), 'Closed session: its terminal no longer exists. You can reopen it in a new tab (the conversation picks up where it left off)' + (it.hidden ? ', or show it in the list again — it is hidden.' : ', or hide it if you no longer need it.'))));
   const inp = $('sendtext');
   if (inp) {
     // Au travail : l'invite de Claude Code reste vide et active — le message y est tapé et Claude Code le met EN FILE,
     // comme s'il avait été tapé dans le terminal pendant le tour.
     const queue = it.status === 'busy', can = it.status === 'idle' || it.status === 'shell' || queue;
     inp.disabled = $('sendbtn').disabled = !can || sending;
-    $('sendbtn').textContent = queue ? 'Mettre en file' : 'Envoyer';
-    inp.placeholder = queue ? 'La session travaille : ton message sera mis en file  ( r )  — Entrée pour l’ajouter · Maj+Entrée : à la ligne'
-      : can ? (suggestKey === it.key && suggestion ? 'Tab : reprendre la proposition ci-dessus · ' : '') + 'Répondre à cette session…  ( r )  — Entrée pour envoyer · Maj+Entrée : à la ligne'
-      : 'Réponse impossible : la session ' + (it.status === 'waiting' ? 'attend la réponse à un dialogue — utilise le panneau « Dialogue en attente » ou son onglet' : 'n’a pas d’invite libre');
-    $('sendhint').textContent = queue ? 'Tapé dans l’invite de la session pendant qu’elle travaille : Claude Code le met en file et le prend dès qu’il peut (comme dans le terminal). Seulement si son invite est vide — les retours à la ligne y deviennent des espaces.'
-      : can ? 'Tapé dans le terminal de la session, seulement si son invite est vide — les retours à la ligne y deviennent des espaces.' : '';
+    $('sendbtn').textContent = queue ? T('Mettre en file', 'Queue') : T('Envoyer', 'Send');
+    inp.placeholder = queue ? T('La session travaille : ton message sera mis en file  ( r )  — Entrée pour l’ajouter · Maj+Entrée : à la ligne', 'The session is working: your message will be queued  ( r )  — Enter to add it · Shift+Enter: new line')
+      : can ? (suggestKey === it.key && suggestion ? T('Tab : reprendre la proposition ci-dessus · ', 'Tab: take the suggestion above · ') : '') + T('Répondre à cette session…  ( r )  — Entrée pour envoyer · Maj+Entrée : à la ligne', 'Reply to this session…  ( r )  — Enter to send · Shift+Enter: new line')
+      : T('Réponse impossible : la session ' + (it.status === 'waiting' ? 'attend la réponse à un dialogue — utilise le panneau « Dialogue en attente » ou son onglet' : 'n’a pas d’invite libre'), 'Cannot reply: the session ' + (it.status === 'waiting' ? 'is waiting for the answer to a dialog — use the "Pending dialog" panel or its tab' : 'has no free prompt'));
+    $('sendhint').textContent = queue ? T('Tapé dans l’invite de la session pendant qu’elle travaille : Claude Code le met en file et le prend dès qu’il peut (comme dans le terminal). Seulement si son invite est vide — les retours à la ligne y deviennent des espaces.', 'Typed into the session prompt while it works: Claude Code queues it and takes it as soon as it can (as in the terminal). Only if its prompt is empty — line breaks become spaces.')
+      : can ? T('Tapé dans le terminal de la session, seulement si son invite est vide — les retours à la ligne y deviennent des espaces.', 'Typed into the session terminal, only if its prompt is empty — line breaks become spaces.') : '';
   }
   renderPromptsOnly(it);
 }
@@ -2870,17 +2870,17 @@ function renderPromptsOnly(it) {
     const ps = (it.prompts || []).slice().reverse();
     // Messages en file (tapés pendant qu'elle travaille) : pas encore dans l'historique, Claude Code les prendra au tour suivant.
     for (const q of (it.queued || []).slice().reverse()) {
-      const d = el('div', 'prompt queued'), w = el('div', 'when'); w.append(el('span', 'tag', 'en file'), ' ' + (q.at ? new Date(q.at).toLocaleString('fr-FR') : ''));
-      d.title = 'Mis en file pendant que la session travaille : Claude Code le prendra dès qu’il peut'; d.append(w, el('div', null, q.text)); pr.append(d);
+      const d = el('div', 'prompt queued'), w = el('div', 'when'); w.append(el('span', 'tag', T('en file', 'queued')), ' ' + (q.at ? new Date(q.at).toLocaleString('fr-FR') : ''));
+      d.title = T('Mis en file pendant que la session travaille : Claude Code le prendra dès qu’il peut', 'Queued while the session works: Claude Code will take it as soon as it can'); d.append(w, el('div', null, q.text)); pr.append(d);
     }
-    if (!ps.length && !(it.queued || []).length) pr.append(el('div', 'empty', it.headless ? 'Un automate reçoit ses consignes par son lanceur : rien dans l’historique des prompts.' : 'Aucun prompt récent dans l\'historique.'));
+    if (!ps.length && !(it.queued || []).length) pr.append(el('div', 'empty', it.headless ? T('Un automate reçoit ses consignes par son lanceur : rien dans l’historique des prompts.', 'An automation gets its instructions from its launcher: nothing in the prompt history.') : T('Aucun prompt récent dans l\'historique.', 'No recent prompt in the history.')));
     for (const p of ps) { const d = el('div', 'prompt'); d.append(el('div', 'when', new Date(p.at).toLocaleString('fr-FR')), el('div', null, p.text)); pr.append(d); }
   }
 }
 
 function renderOverview() {
   const head = $('head'), body = $('body'); const items = allItems().filter(it => !it.hidden);
-  head.className = ''; head.replaceChildren(el('div', 'dtitle', 'Vue d\'ensemble'));
+  head.className = ''; head.replaceChildren(el('div', 'dtitle', T('Vue d\'ensemble', 'Overview')));
   const tiles = el('div', 'tiles');
   for (const st of ['waiting', 'ask', 'done', 'busy', 'shell', 'idle', 'auto', 'closed']) {
     const t = el('div', 'tile ' + st); t.append(el('b', null, items.filter(it => it.state === st).length), el('span', null, LABEL[st])); tiles.append(t);
@@ -2892,47 +2892,47 @@ function renderOverview() {
   if (body.dataset.sig === 'overview' && body.dataset.n === nsig) return;
   body.dataset.sig = 'overview'; body.dataset.n = nsig; body.replaceChildren();
   const rp = rebootPanel(); if (rp) body.append(rp);
-  const qs = quotaSection(); if (qs) body.append(el('h2', null, 'Quota Claude de la semaine'), qs);
+  const qs = quotaSection(); if (qs) body.append(el('h2', null, T('Quota Claude de la semaine', 'Claude quota this week')), qs);
   const sp = restartPanel(); if (sp) body.append(sp);
-  const as = automationSection(); if (as) body.append(el('h2', null, 'Automates du poste'), as);
+  const as = automationSection(); if (as) body.append(el('h2', null, T('Automates du poste', 'Automations on this machine')), as);
   if (cl.length) {
-    body.append(el('h2', null, 'Peuvent se fermer — ' + cl.length));
+    body.append(el('h2', null, T('Peuvent se fermer — ', 'Can be closed — ') + cl.length));
     const act = el('div', 'actions');
-    const bc = el('button', 'primary', 'Fermer la sélection…'); bc.title = 'Ferme les sessions cochées (/exit) ; elles restent reprenables depuis « Fermées »'; bc.onclick = () => closeMany(cl.filter(it => closePick.get(it.key) !== false));
-    const bt = el('button', null, 'Tout cocher / décocher'); bt.onclick = () => { const all = cl.every(it => closePick.get(it.key) !== false); cl.forEach(it => closePick.set(it.key, !all)); renderDetail(true); };
+    const bc = el('button', 'primary', T('Fermer la sélection…', 'Close the selection…')); bc.title = T('Ferme les sessions cochées (/exit) ; elles restent reprenables depuis « Fermées »', 'Closes the checked sessions (/exit); they can still be reopened from "Closed"'); bc.onclick = () => closeMany(cl.filter(it => closePick.get(it.key) !== false));
+    const bt = el('button', null, T('Tout cocher / décocher', 'Check / uncheck all')); bt.onclick = () => { const all = cl.every(it => closePick.get(it.key) !== false); cl.forEach(it => closePick.set(it.key, !all)); renderDetail(true); };
     act.append(bc, bt); body.append(act);
     const box = el('div', 'notifs');
     for (const it of cl) { const d = el('div', 'notif done pick');
       const cb = el('input'); cb.type = 'checkbox'; cb.checked = closePick.get(it.key) !== false; cb.onclick = e => e.stopPropagation(); cb.onchange = () => closePick.set(it.key, cb.checked);
-      d.append(cb, el('span', 'when', it.git.worktree ? it.git.top.split('\\').pop() : 'sans worktree'), el('span', 'nt', label(it)), el('span', 'nx', (prMerged(it) ? 'PR #' + it.pr + ' mergée' : 'branche intégrée à master') + (it.git.worktree ? ', rien à commiter ni à pousser' : ''))); d.title = 'Sélectionner la session'; d.onclick = () => select(it.key, true); box.append(d); }
+      d.append(cb, el('span', 'when', it.git.worktree ? it.git.top.split('\\').pop() : T('sans worktree', 'no worktree')), el('span', 'nt', label(it)), el('span', 'nx', T((prMerged(it) ? 'PR #' + it.pr + ' mergée' : 'branche intégrée à master') + (it.git.worktree ? ', rien à commiter ni à pousser' : ''), (prMerged(it) ? 'PR #' + it.pr + ' merged' : 'branch merged into master') + (it.git.worktree ? ', nothing to commit or push' : '')))); d.title = T('Sélectionner la session', 'Select the session'); d.onclick = () => select(it.key, true); box.append(d); }
     body.append(box);
   }
   const ip = idlePanel(); if (ip) body.append(ip);
-  body.append(el('h2', null, 'Notifications récentes'));
-  if (!data.notifs.length) body.append(el('div', 'empty', 'Aucune notification envoyée pour l\'instant.'));
+  body.append(el('h2', null, T('Notifications récentes', 'Recent notifications')));
+  if (!data.notifs.length) body.append(el('div', 'empty', T('Aucune notification envoyée pour l\'instant.', 'No notification sent yet.')));
   else {
     const box = el('div', 'notifs');
     for (const nf of data.notifs.slice().reverse().slice(0, 30)) {
       const d = el('div', 'notif ' + (nf.kind === 'waiting' || nf.kind === 'automation' ? 'waiting' : nf.kind === 'launcher' ? 'ask' : 'done'));
       d.append(el('span', 'dot'), el('span', 'when', new Date(nf.at).toLocaleString('fr-FR')), el('span', 'nt', (nf.kind === 'launcher' ? '🤖 ' : '') + nf.title), el('span', 'nx', nf.text));
-      d.title = nf.pass ? 'Ouvrir cette passe' : nf.hd ? 'Ouvrir le dernier run de HD-' + nf.hd : nf.kind === 'launcher' ? 'Ouvrir la vue Lanceur' : 'Sélectionner la session';
-      d.onclick = () => { if (nf.pass) openPass(nf.pass); else if (nf.hd) openRun(nf.hd); else if (nf.kind === 'launcher') openLauncher(); else if (byKey(nf.sessionId)) select(nf.sessionId, true); else say('cette session n\'est plus listée'); };
+      d.title = nf.pass ? T('Ouvrir cette passe', 'Open this pass') : nf.hd ? T('Ouvrir le dernier run de HD-', 'Open the last run of HD-') + nf.hd : nf.kind === 'launcher' ? T('Ouvrir la vue Lanceur', 'Open the Launcher view') : T('Sélectionner la session', 'Select the session');
+      d.onclick = () => { if (nf.pass) openPass(nf.pass); else if (nf.hd) openRun(nf.hd); else if (nf.kind === 'launcher') openLauncher(); else if (byKey(nf.sessionId)) select(nf.sessionId, true); else say(T('cette session n\'est plus listée', 'this session is no longer listed')); };
       box.append(d);
     }
     body.append(box);
   }
-  body.append(el('h2', null, 'Raccourcis clavier'));
+  body.append(el('h2', null, T('Raccourcis clavier', 'Keyboard shortcuts')));
   const keys = el('div', 'keys');
-  for (const [k, d] of [['/', 'rechercher (titre, prompt, numéro de PR, dossier, identifiant)'], ['↑ ↓', 'parcourir les sessions'], ['Entrée', 'afficher l\'onglet de la session (ou rouvrir une session fermée)'],
-                        ['n', 'aller à la prochaine session à traiter et afficher son onglet'], ['r', 'répondre à la session sélectionnée (Entrée envoie)'], ['p', 'reprendre la proposition de prompt de Claude Code dans la zone de réponse (Entrée l’envoie) — aussi Tab dans la zone vide'],['f', 'mettre la session en favori, ou la retirer (★ à côté de la recherche : favoris seulement)'], ['c', 'copier la commande de reprise'], ['1 – 9', 'session bloquée sur un dialogue : choisir l’option correspondante (tapée dans son terminal)'], ['+', 'lancer une nouvelle session (dossier, premier message, modèle)'], ['d', 'nouvelle session à partir de la session sélectionnée : elle reprend toute sa conversation (fork), l’originale n’est pas touchée'],['h', 'basculer entre l’écran du terminal et la conversation complète (tout l’historique, relu dans le transcript)'], ['b', 'revenir à la session consultée juste avant (liste « Consultées récemment » en tête)'], ['x', 'fermer la session sélectionnée (avec confirmation ; elle reste reprenable) — sur une session déjà fermée : la masquer / ré-afficher'], ['Échap', 'vider la recherche, puis revenir à cette vue'],
-                        ['sélection', 'tout texte sélectionné à la souris est copié dans le presse-papier au relâchement'], ['Ctrl+K Ctrl+U', 'zone de saisie : couper jusqu’à la fin / au début de la ligne'], ['Ctrl+Y', 'zone de saisie : recoller le dernier texte coupé'], ['Ctrl+E', 'zone de saisie : aller en fin de ligne'], ['Alt+B Alt+F', 'zone de saisie : reculer / avancer d’un mot'], ['Ctrl+_', 'zone de saisie : annuler (comme Ctrl+Z)']]) {
+  for (const [k, d] of [['/', T('rechercher (titre, prompt, numéro de PR, dossier, identifiant)', 'search (title, prompt, PR number, folder, id)')], ['↑ ↓', T('parcourir les sessions', 'move through the sessions')], [T('Entrée', 'Enter'), T('afficher l\'onglet de la session (ou rouvrir une session fermée)', 'show the session tab (or reopen a closed session)')],
+                        ['n', T('aller à la prochaine session à traiter et afficher son onglet', 'go to the next session to handle and show its tab')], ['r', T('répondre à la session sélectionnée (Entrée envoie)', 'reply to the selected session (Enter sends)')], ['p', T('reprendre la proposition de prompt de Claude Code dans la zone de réponse (Entrée l’envoie) — aussi Tab dans la zone vide', 'take the Claude Code prompt suggestion into the reply box (Enter sends it) — also Tab in the empty box')],['f', T('mettre la session en favori, ou la retirer (★ à côté de la recherche : favoris seulement)', 'add the session to favourites, or remove it (★ next to the search: favourites only)')], ['c', T('copier la commande de reprise', 'copy the resume command')], ['1 – 9', T('session bloquée sur un dialogue : choisir l’option correspondante (tapée dans son terminal)', 'session waiting on a dialog: pick the matching option (typed into its terminal)')], ['+', T('lancer une nouvelle session (dossier, premier message, modèle)', 'start a new session (folder, first message, model)')], ['d', T('nouvelle session à partir de la session sélectionnée : elle reprend toute sa conversation (fork), l’originale n’est pas touchée', 'new session from the selected session: it carries over its whole conversation (fork), the original is not touched')],['h', T('basculer entre l’écran du terminal et la conversation complète (tout l’historique, relu dans le transcript)', 'switch between the terminal screen and the full conversation (the whole history, read from the transcript)')], ['b', T('revenir à la session consultée juste avant (liste « Consultées récemment » en tête)', 'go back to the session viewed just before ("Recently viewed" list at the top)')], ['x', T('fermer la session sélectionnée (avec confirmation ; elle reste reprenable) — sur une session déjà fermée : la masquer / ré-afficher', 'close the selected session (with confirmation; it can still be reopened) — on a session already closed: hide / show it again')], [T('Échap', 'Esc'), T('vider la recherche, puis revenir à cette vue', 'clear the search, then come back to this view')],
+                        [T('sélection', 'selection'), T('tout texte sélectionné à la souris est copié dans le presse-papier au relâchement', 'any text selected with the mouse is copied to the clipboard on release')], ['Ctrl+K Ctrl+U', T('zone de saisie : couper jusqu’à la fin / au début de la ligne', 'text box: cut to the end / start of the line')], ['Ctrl+Y', T('zone de saisie : recoller le dernier texte coupé', 'text box: paste back the last cut text')], ['Ctrl+E', T('zone de saisie : aller en fin de ligne', 'text box: go to the end of the line')], ['Alt+B Alt+F', T('zone de saisie : reculer / avancer d’un mot', 'text box: move back / forward one word')], ['Ctrl+_', T('zone de saisie : annuler (comme Ctrl+Z)', 'text box: undo (like Ctrl+Z)')]]) {
     const kk = el('span'); k.split(' ').forEach((x, i) => { if (i) kk.append(' '); kk.append(el('kbd', null, x)); }); keys.append(kk, el('span', null, d));
   }
   body.append(keys);
-  body.append(el('h2', null, 'Dernières relances'));
-  if (!data.restarts.length) body.append(el('div', 'empty', 'Aucune relance enregistrée.'));
+  body.append(el('h2', null, T('Dernières relances', 'Recent restarts')));
+  if (!data.restarts.length) body.append(el('div', 'empty', T('Aucune relance enregistrée.', 'No restart recorded.')));
   else {
-    const w = el('div', 'tablewrap'), t = el('table'), hr = el('tr'); ['Quand', 'Session', 'Résultat'].forEach(h => hr.append(el('th', null, h))); t.append(hr);
+    const w = el('div', 'tablewrap'), t = el('table'), hr = el('tr'); [T('Quand', 'When'), 'Session', T('Résultat', 'Result')].forEach(h => hr.append(el('th', null, h))); t.append(hr);
     for (const r of data.restarts.slice().reverse()) { const tr = el('tr');
       tr.append(el('td', null, new Date(r.at).toLocaleString('fr-FR')), el('td', null, r.name + ' (' + r.sessionId.slice(0, 8) + ')'), el('td', r.code === 0 ? 'ok' : 'ko', r.result)); t.append(tr); }
     w.append(t); body.append(w);
@@ -2977,16 +2977,16 @@ function renderStuckPrompt(it, box, draft) {
   if (sig === lastDialogSig && box.dataset.pid === String(it.pid)) return;
   lastDialogSig = sig; box.dataset.pid = it.pid; box.replaceChildren();
   const expect = draft.split('\n').map(s => s.trim()).find(Boolean) || '';
-  box.append(el('h2', null, 'Invite occupée — un texte y est resté'));
+  box.append(el('h2', null, T('Invite occupée — un texte y est resté', 'Prompt busy — some text was left in it')));
   const c = el('div', 'dlg');
   c.append(el('div', 'q', draft));
   const row = el('div', 'row');
-  const go = el('button', 'primary', 'Envoyer ce texte'); go.title = 'Appuie sur Entrée dans le terminal de la session : le texte resté dans l’invite part tel quel';
-  go.onclick = () => sendKeys(it, [{ k: 'Enter' }], expect, 'texte de l’invite envoyé');
-  const clr = el('button', null, 'Vider l’invite'); clr.title = 'Appuie deux fois sur Échap dans le terminal de la session : le texte est effacé, rien n’est envoyé';
-  clr.onclick = () => sendKeys(it, [{ k: 'Esc' }, { k: 'Esc' }], expect, 'invite vidée');
+  const go = el('button', 'primary', T('Envoyer ce texte', 'Send this text')); go.title = T('Appuie sur Entrée dans le terminal de la session : le texte resté dans l’invite part tel quel', 'Presses Enter in the session terminal: the text left in the prompt is sent as is');
+  go.onclick = () => sendKeys(it, [{ k: 'Enter' }], expect, T('texte de l’invite envoyé', 'prompt text sent'));
+  const clr = el('button', null, T('Vider l’invite', 'Clear the prompt')); clr.title = T('Appuie deux fois sur Échap dans le terminal de la session : le texte est effacé, rien n’est envoyé', 'Presses Esc twice in the session terminal: the text is erased, nothing is sent');
+  clr.onclick = () => sendKeys(it, [{ k: 'Esc' }, { k: 'Esc' }], expect, T('invite vidée', 'prompt cleared'));
   row.append(go, clr); c.append(row);
-  c.append(el('div', 'hint', 'Tant que ce texte est dans l’invite, aucun message ne peut être envoyé à la session. Envoie-le ou vide l’invite ; le texte est revérifié à l’écran juste avant.'));
+  c.append(el('div', 'hint', T('Tant que ce texte est dans l’invite, aucun message ne peut être envoyé à la session. Envoie-le ou vide l’invite ; le texte est revérifié à l’écran juste avant.', 'While this text is in the prompt, no message can be sent to the session. Send it or clear the prompt; the text is checked again on the screen just before.')));
   box.append(c);
 }
 let keying = false, lastDialogSig = null;
@@ -2994,8 +2994,8 @@ async function sendKeys(it, keys, expect, what) {
   if (keying) return; keying = true; document.querySelectorAll('#dialog button').forEach(b => b.disabled = true);
   try {
     const r = await (await fetch('/api/keys?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ keys, expect }) })).json();
-    say(r.error ? 'non envoyé : ' + r.error : (what || 'touche envoyée') + ' — « ' + label(it) + ' »');
-  } catch { say('échec de la demande'); }
+    say(r.error ? T('non envoyé : ', 'not sent: ') + r.error : T((what || 'touche envoyée') + ' — « ' + label(it) + ' »', (what || 'key sent') + ' — "' + label(it) + '"'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   keying = false; lastDialogSig = null; setTimeout(refreshScreen, 350); setTimeout(refreshScreen, 1200);
 }
 // Session INACTIVE : deux blocages se lèvent aussi d'ici. Un DIALOGUE ouvert hors attente (plus d'invite à l'écran,
@@ -3015,7 +3015,7 @@ function renderDialog(it, text, draft) {
   const act = document.activeElement; if (act && (act.tagName === 'INPUT' || act.tagName === 'TEXTAREA') && box.contains(act) && act.value) return;
   lastDialogSig = sig; box.dataset.pid = it.pid; box.replaceChildren();
   if (!d) return;
-  box.append(el('h2', null, 'Dialogue en attente — réponds ici'));
+  box.append(el('h2', null, T('Dialogue en attente — réponds ici', 'Pending dialog — answer here')));
   const c = el('div', 'dlg');
   if (d.tabs) c.append(el('div', 'tabs', d.tabs));
   if (d.q) c.append(el('div', 'q', d.q));
@@ -3023,9 +3023,9 @@ function renderDialog(it, text, draft) {
   for (const o of d.opts) {
     const b = el('button', 'opt' + (o.sel ? ' sel' : '')); b.append(el('span', 'n', o.num + '.'), el('span', null, o.label));
     if (o.desc.length) b.append(el('span', 'd', o.desc.join(' ')));
-    b.title = 'Tape « ' + o.num + ' » dans le terminal  ( touche ' + o.num + ' )';
+    b.title = T('Tape « ' + o.num + ' » dans le terminal  ( touche ' + o.num + ' )', 'Types "' + o.num + '" into the terminal  ( key ' + o.num + ' )');
     if (!d.multi && /^(type something|other|autre)/i.test(o.label)) other = o;
-    b.onclick = () => sendKeys(it, [{ t: String(o.num) }], o.expect, 'option ' + o.num + ' « ' + o.label + ' »');
+    b.onclick = () => sendKeys(it, [{ t: String(o.num) }], o.expect, T('option ' + o.num + ' « ' + o.label + ' »', 'option ' + o.num + ' "' + o.label + '"'));
     os.append(b);
   }
   c.append(os);
@@ -3034,24 +3034,24 @@ function renderDialog(it, text, draft) {
   if (d.multi && d.submit) {
     const cur = Math.max(0, d.opts.findIndex(o => o.sel)), last = d.opts.map(o => /^\[[ ✔xX]\]/.test(o.label)).lastIndexOf(true);
     const keys = d.tabs ? [{ k: 'Right' }] : Array.from({ length: last - cur + 1 }, () => ({ k: 'Down' })).concat([{ k: 'Enter' }]);
-    const row = el('div', 'row'); const b = el('button', 'primary', d.tabs ? 'Valider la sélection → question suivante' : 'Valider la sélection');
-    b.title = 'Le chiffre d’une option la coche ou la décoche ; ce bouton valide les cases cochées';
-    b.onclick = () => sendKeys(it, keys, d.opts[cur].expect, 'sélection validée'); row.append(b); c.append(row);
+    const row = el('div', 'row'); const b = el('button', 'primary', d.tabs ? T('Valider la sélection → question suivante', 'Confirm the selection → next question') : T('Valider la sélection', 'Confirm the selection'));
+    b.title = T('Le chiffre d’une option la coche ou la décoche ; ce bouton valide les cases cochées', 'An option’s number checks or unchecks it; this button confirms the checked boxes');
+    b.onclick = () => sendKeys(it, keys, d.opts[cur].expect, T('sélection validée', 'selection confirmed')); row.append(b); c.append(row);
   }
   if (other) {
-    const row = el('div', 'row'); const inp = promptArea('dlgother'); inp.placeholder = 'Ta réponse libre (option ' + other.num + ')… — Entrée pour envoyer · Maj+Entrée : à la ligne'; inp.maxLength = 4000;
-    const go = el('button', 'primary', 'Envoyer la réponse libre');
-    const fire = () => { const v = inp.value.trim(); if (!v) return; inp.value = ''; growArea(inp); inp.blur(); sendKeys(it, [{ t: String(other.num) }, { t: v }, { k: 'Enter' }], other.expect, 'réponse libre'); };
+    const row = el('div', 'row'); const inp = promptArea('dlgother'); inp.placeholder = T('Ta réponse libre (option ' + other.num + ')… — Entrée pour envoyer · Maj+Entrée : à la ligne', 'Your free answer (option ' + other.num + ')… — Enter to send · Shift+Enter: new line'); inp.maxLength = 4000;
+    const go = el('button', 'primary', T('Envoyer la réponse libre', 'Send the free answer'));
+    const fire = () => { const v = inp.value.trim(); if (!v) return; inp.value = ''; growArea(inp); inp.blur(); sendKeys(it, [{ t: String(other.num) }, { t: v }, { k: 'Enter' }], other.expect, T('réponse libre', 'free answer')); };
     go.onclick = fire; inp.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } else if (e.key === 'Escape') inp.blur(); };
     row.append(inp, go); c.append(row);
   }
   const kr = el('div', 'row keys');
-  for (const [k, t, h] of [['Up', '↑', 'Monter'], ['Down', '↓', 'Descendre'], ['Space', 'Espace', 'Cocher / décocher (choix multiple)'], ['Enter', 'Entrée', 'Valider'], ['Left', '←', 'Question précédente'], ['Right', '→', 'Question suivante / Submit'], ['Tab', 'Tab', 'Champ suivant'], ['Esc', 'Échap', 'Annuler le dialogue']]) {
+  for (const [k, t, h] of [['Up', '↑', T('Monter', 'Up')], ['Down', '↓', T('Descendre', 'Down')], ['Space', T('Espace', 'Space'), T('Cocher / décocher (choix multiple)', 'Check / uncheck (multiple choice)')], ['Enter', T('Entrée', 'Enter'), T('Valider', 'Confirm')], ['Left', '←', T('Question précédente', 'Previous question')], ['Right', '→', T('Question suivante / Submit', 'Next question / Submit')], ['Tab', 'Tab', T('Champ suivant', 'Next field')], ['Esc', T('Échap', 'Esc'), T('Annuler le dialogue', 'Cancel the dialog')]]) {
     // Hors attente, le serveur n'accepte une touche qu'avec un texte à retrouver à l'écran : la première option.
     const b = el('button', null, t); b.title = h; b.onclick = () => sendKeys(it, [{ k }], it.status === 'waiting' ? null : d.opts[0].expect, t); kr.append(b);
   }
   c.append(kr);
-  c.append(el('div', 'hint', (d.foot ? 'Dans le terminal : ' + d.foot + '. ' : '') + 'Chaque clic est tapé dans le terminal de la session ; l’option visée est revérifiée à l’écran juste avant. Touches 1 à 9 : choisir une option.'));
+  c.append(el('div', 'hint', (d.foot ? T('Dans le terminal : ', 'In the terminal: ') + d.foot + '. ' : '') + T('Chaque clic est tapé dans le terminal de la session ; l’option visée est revérifiée à l’écran juste avant. Touches 1 à 9 : choisir une option.', 'Each click is typed into the session terminal; the target option is checked again on the screen just before. Keys 1 to 9: pick an option.')));
   box.append(c);
 }
 
@@ -3069,8 +3069,8 @@ function convPane() {
   const bar = el('div', 'convbar');
   const lb = el('label'), cb = el('input'); cb.type = 'checkbox'; cb.checked = convTools();
   cb.onchange = () => { localStorage.setItem('cc.convtools', cb.checked ? '1' : '0'); drawConv(); };
-  lb.append(cb, ' outils et résultats');
-  const end = el('button', 'quick', '↓ fin'); end.title = 'Aller au dernier message'; end.onclick = () => { const l = $('convlist'); if (l) l.scrollTop = l.scrollHeight; };
+  lb.append(cb, T(' outils et résultats', ' tools and results'));
+  const end = el('button', 'quick', T('↓ fin', '↓ end')); end.title = T('Aller au dernier message', 'Go to the last message'); end.onclick = () => { const l = $('convlist'); if (l) l.scrollTop = l.scrollHeight; };
   const st = el('span', 'meta'); st.id = 'convstat';
   bar.append(lb, end, st);
   const list = el('div', 'convlist', '…'); list.id = 'convlist';
@@ -3100,13 +3100,13 @@ async function loadConv(it, mode) {
     const url = '/api/transcript?id=' + encodeURIComponent(c.id) + (mode === 'older' ? '&before=' + c.start : mode === 'more' ? '&after=' + c.end : '');
     const res = await fetch(url, { cache:'no-store' }); const r = await res.json();
     if (conv !== c) return;
-    if (!res.ok) { c.err = r.error || ('erreur ' + res.status); drawConv(); return; }
+    if (!res.ok) { c.err = r.error || (T('erreur ', 'error ') + res.status); drawConv(); return; }
     c.err = null;
     if (r.reset) { c.items = []; c.start = c.end = null; return; }          // transcript réécrit ou trop de retard : rechargé à la passe suivante
     if (mode === 'older') { c.items = r.items.concat(c.items); c.start = r.start; c.more = r.start > 0; drawConv(false, true); }
     else if (mode === 'more') { c.end = r.end; if (r.items.length) { c.items = c.items.concat(r.items); drawConv(); } }
     else { c.items = r.items; c.start = r.start; c.end = r.end; c.more = r.start > 0; drawConv(true); }
-  } catch { if (conv === c) { c.err = 'transcript illisible (serveur injoignable ?)'; drawConv(); } }
+  } catch { if (conv === c) { c.err = T('transcript illisible (serveur injoignable ?)', 'transcript unreadable (server unreachable?)'); drawConv(); } }
   finally { c.busy = false; }
 }
 const convWhen = at => {
@@ -3231,20 +3231,20 @@ function mdRender(m) {
 // développement, relecture…), une fin de tâche de fond de Claude Code lui-même. Chaque provenance a son libellé et sa
 // couleur. PURE (testée) : m = élément de /api/transcript (m.o = provenance lue par le serveur), phase = étape du run
 // dont on lit la conversation (null pour une session ordinaire).
-const AGENT_FR = { diagnostic:'Agent de diagnostic', suite:'Agent de diagnostic · suite', relance:'Agent de diagnostic · relance', reveil:'Agent de diagnostic · réveil',
-  dev:'Agent de développement', reprise:'Agent de développement · reprise', relecture:'Agent de relecture', recette:'Agent de recette' };
+const AGENT_FR = { diagnostic:T('Agent de diagnostic', 'Diagnosis agent'), suite:T('Agent de diagnostic · suite', 'Diagnosis agent · follow-up'), relance:T('Agent de diagnostic · relance', 'Diagnosis agent · restart'), reveil:T('Agent de diagnostic · réveil', 'Diagnosis agent · wake-up'),
+  dev:T('Agent de développement', 'Development agent'), reprise:T('Agent de développement · reprise', 'Development agent · resume'), relecture:T('Agent de relecture', 'Review agent'), recette:T('Agent de recette', 'Testing agent') };
 const AGENT_KIND = { diagnostic:'diag', suite:'diag', relance:'diag', reveil:'diag', dev:'dev', reprise:'dev', relecture:'review', recette:'recette' };
 function convOrigin(m, phase) {
-  if (m.r === 'assistant') return phase ? { cls: 'agent ag-' + (AGENT_KIND[phase] || 'other'), who: '🤖 ' + (AGENT_FR[phase] || 'Agent du lanceur · ' + phase) } : { cls: '', who: 'Claude' };
+  if (m.r === 'assistant') return phase ? { cls: 'agent ag-' + (AGENT_KIND[phase] || 'other'), who: '🤖 ' + (AGENT_FR[phase] || T('Agent du lanceur · ', 'Launcher agent · ') + phase) } : { cls: '', who: 'Claude' };
   const t = String(m.t == null ? '' : m.t).trim(); let x;
   if (m.o === 'task' || /^<task-notification>[\s\S]*<\/task-notification>$/.test(t)) {
     const unesc = v => v.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
     const st = /<status>([^<]*)<\/status>/.exec(t); x = /<summary>([\s\S]*?)<\/summary>/.exec(t);
-    return { cls: 'task', who: '⚙ Tâche de fond', text: x ? unesc(x[1]).trim() : t, err: !!st && st[1].trim() !== 'completed' };
+    return { cls: 'task', who: T('⚙ Tâche de fond', '⚙ Background task'), text: x ? unesc(x[1]).trim() : t, err: !!st && st[1].trim() !== 'completed' };
   }
-  if (m.o === 'sdk') return { cls: 'auto', who: phase ? '🤖 Lanceur · consigne du run' : '🤖 Automate · consigne de lancement' };
-  if ((x = /^<pasted_content[^>]*>\n?([\s\S]*?)\n?<\/pasted_content>$/.exec(t)) && !x[1].includes('<pasted_content')) return { cls: 'paste', who: '📋 Collé dans la session', text: x[1] };
-  return { cls: '', who: 'Toi' };
+  if (m.o === 'sdk') return { cls: 'auto', who: phase ? T('🤖 Lanceur · consigne du run', '🤖 Launcher · run instructions') : T('🤖 Automate · consigne de lancement', '🤖 Automation · start instructions') };
+  if ((x = /^<pasted_content[^>]*>\n?([\s\S]*?)\n?<\/pasted_content>$/.exec(t)) && !x[1].includes('<pasted_content')) return { cls: 'paste', who: T('📋 Collé dans la session', '📋 Pasted into the session'), text: x[1] };
+  return { cls: '', who: T('Toi', 'You') };
 }
 function convItem(m) {
   if (m.r === 'tool') {
@@ -3254,8 +3254,8 @@ function convItem(m) {
   }
   if (m.r === 'result' || m.r === 'summary') {
     const d = el('details', 'cm ' + (m.r === 'summary' ? 'sum' : 'res') + (m.e ? ' err' : ''));
-    const first = (m.t.split('\n').find(l => l.trim()) || '(vide)').trim();
-    d.append(el('summary', null, (m.r === 'summary' ? '📋 Résumé de compactage — ' : (m.e ? '✗ ' : '↳ ')) + (first.length > 160 ? first.slice(0, 160) + '…' : first)), el('pre', null, m.t));
+    const first = (m.t.split('\n').find(l => l.trim()) || T('(vide)', '(empty)')).trim();
+    d.append(el('summary', null, (m.r === 'summary' ? T('📋 Résumé de compactage — ', '📋 Compaction summary — ') : (m.e ? '✗ ' : '↳ ')) + (first.length > 160 ? first.slice(0, 160) + '…' : first)), el('pre', null, m.t));
     return d;
   }
   const og = convOrigin(m, conv ? conv.phase : null), when = m.at ? ' · ' + convWhen(m.at) : '';
@@ -3274,13 +3274,13 @@ function drawConv(toBottom, keepTop) {
   const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 60, oldH = list.scrollHeight, oldTop = list.scrollTop;
   const tools = convTools(), shown = c.items.filter(m => tools || (m.r !== 'tool' && m.r !== 'result'));
   const frag = document.createDocumentFragment();
-  if (c.more) { const b = el('button', 'quick older', '↑ charger plus ancien'); b.onclick = () => { const it = byKey(c.key); if (it) loadConv(it, 'older'); }; frag.append(b); }
-  else if (c.end != null) frag.append(el('div', 'meta convtop', '— début de la conversation —'));
+  if (c.more) { const b = el('button', 'quick older', T('↑ charger plus ancien', '↑ load older')); b.onclick = () => { const it = byKey(c.key); if (it) loadConv(it, 'older'); }; frag.append(b); }
+  else if (c.end != null) frag.append(el('div', 'meta convtop', T('— début de la conversation —', '— start of the conversation —')));
   if (c.err) frag.append(el('div', 'empty', c.err));
-  else if (c.end != null && !shown.length) frag.append(el('div', 'empty', c.more ? 'Rien à afficher dans ce dernier morceau du transcript : charge plus ancien.' : 'Aucun message.'));
+  else if (c.end != null && !shown.length) frag.append(el('div', 'empty', c.more ? T('Rien à afficher dans ce dernier morceau du transcript : charge plus ancien.', 'Nothing to show in this last part of the transcript: load older.') : T('Aucun message.', 'No message.')));
   for (const m of shown) frag.append(convItem(m));
   list.replaceChildren(frag);
-  const st = $('convstat'); if (st) st.textContent = c.end == null ? '' : plural(shown.length, 'message', 'messages') + (c.more ? ' · transcript lu depuis ' + Math.round((c.end - c.start) / 1024).toLocaleString('fr-FR') + ' Ko de la fin' : ' · conversation entière');
+  const st = $('convstat'); if (st) st.textContent = c.end == null ? '' : plural(shown.length, 'message', 'messages') + (c.more ? T(' · transcript lu depuis ' + Math.round((c.end - c.start) / 1024).toLocaleString('fr-FR') + ' Ko de la fin', ' · transcript read from the last ' + Math.round((c.end - c.start) / 1024).toLocaleString('fr-FR') + ' KB') : T(' · conversation entière', ' · whole conversation'));
   if (toBottom || (atBottom && !keepTop)) list.scrollTop = list.scrollHeight;
   else if (keepTop) list.scrollTop = oldTop + (list.scrollHeight - oldH);
 }
@@ -3295,7 +3295,7 @@ async function refreshScreen() {
   try {
     const r = await (await fetch('/api/screen?pid=' + it.pid, { cache:'no-store' })).json();
     if (selected !== it.key) return;
-    const text = r.text == null ? '(écran illisible : la session n\'est pas dans une console accessible)' : r.text;
+    const text = r.text == null ? T('(écran illisible : la session n\'est pas dans une console accessible)', '(screen unreadable: the session is not in an accessible console)') : r.text;
     if (text !== lastScreen && !String(getSelection())) { lastScreen = text; pre.textContent = screenText(text); pre.scrollTop = pre.scrollHeight; }
     renderDialog(it, r.text || '', r.draft);
     renderSuggest(it, r.suggestion || null);
@@ -3321,14 +3321,14 @@ function drawLink() {
   if (link.down) {
     const s = Math.round((Date.now() - link.down.since) / 1000);
     b.className = 'down'; b.hidden = false;
-    b.replaceChildren(el('b', null, '⟳ Serveur injoignable — reconnexion en cours…'),
-      el('span', null, ' depuis ' + (s < 90 ? s + ' s' : Math.round(s / 60) + ' min') + ' · la page reprend seule dès qu’il répond ; les actions sont suspendues'
-        + (s >= 120 ? ' · toujours rien : le serveur a-t-il été relancé ?' : '') + (link.down.why ? ' (' + link.down.why + ')' : '')));
+    b.replaceChildren(el('b', null, T('⟳ Serveur injoignable — reconnexion en cours…', '⟳ Server unreachable — reconnecting…')),
+      el('span', null, T(' depuis ' + (s < 90 ? s + ' s' : Math.round(s / 60) + ' min') + ' · la page reprend seule dès qu’il répond ; les actions sont suspendues', ' for ' + (s < 90 ? s + ' s' : Math.round(s / 60) + ' min') + ' · the page resumes on its own as soon as it answers; actions are paused')
+        + (s >= 120 ? T(' · toujours rien : le serveur a-t-il été relancé ?', ' · still nothing: has the server been restarted?') : '') + (link.down.why ? ' (' + link.down.why + ')' : '')));
   } else if (link.reload) {
-    const go = el('button', null, 'Recharger');
+    const go = el('button', null, T('Recharger', 'Reload'));
     go.onclick = () => location.reload();
     b.className = 'reload'; b.hidden = false;
-    b.replaceChildren(el('b', null, '↻ Serveur redémarré avec une nouvelle version de la page'), el('span', null, ' — rechargement dès la saisie terminée, ou maintenant : '), go);
+    b.replaceChildren(el('b', null, T('↻ Serveur redémarré avec une nouvelle version de la page', '↻ Server restarted with a new version of the page')), el('span', null, T(' — rechargement dès la saisie terminée, ou maintenant : ', ' — reloading once you finish typing, or now: ')), go);
   } else b.hidden = true;
 }
 /** Une lecture d'état réussie : compare le démarrage et la page à ceux qu'on connaissait. */
@@ -3344,7 +3344,7 @@ function linkUp(srv) {
     link.boot = boot || link.boot;
     tagVocab = null; loadClosed(); loadRuns(); loadAutomations();
     if (REMOTE) whoami();
-    say(restarted ? 'serveur redémarré — page resynchronisée' : 'reconnecté au serveur');
+    say(restarted ? T('serveur redémarré — page resynchronisée', 'server restarted — page resynced') : T('reconnecté au serveur', 'reconnected to the server'));
   }
   drawLink(); return false;
 }
@@ -3363,8 +3363,8 @@ async function tick() {
     if (!r.ok) throw new Error('réponse ' + r.status);
     srv = await r.json();
   } catch (e) {
-    linkDown(e && e.name === 'TimeoutError' ? 'pas de réponse en 25 s' : e && /^réponse /.test(e.message) ? e.message : '');
-    live.className = 'down'; live.textContent = 'reconnexion…';
+    linkDown(e && e.name === 'TimeoutError' ? T('pas de réponse en 25 s', 'no answer within 25 s') : e && /^réponse /.test(e.message) ? e.message : '');
+    live.className = 'down'; live.textContent = T('reconnexion…', 'reconnecting…');
     ticking = false; return;
   }
   try {
@@ -3374,10 +3374,10 @@ async function tick() {
     if (pendingRoute) { const r = pendingRoute; pendingRoute = null; applyRoute(r); }      // ?view= : écran d'arrivée, une fois l'état connu
     if (pendingRun && runData) { const hd = pendingRun; pendingRun = null; openRun(hd); }   // ?run= : runs arrivés avant l'état
     if (!autoAsked && !automationsOff()) loadAutomations();                               // module annoncé par l'état : première lecture
-    live.className = ''; if (!notice) live.textContent = 'à jour · ' + new Date().toLocaleTimeString('fr-FR');
+    live.className = ''; if (!notice) live.textContent = T('à jour · ', 'up to date · ') + new Date().toLocaleTimeString('fr-FR');
   } catch (e) {
     console.error('[sessions] erreur de rendu :', e);
-    live.className = 'down'; live.textContent = 'erreur d’affichage (console) · ' + (e && e.message || e);
+    live.className = 'down'; live.textContent = T('erreur d’affichage (console) · ', 'display error (console) · ') + (e && e.message || e);
   } finally { ticking = false; }
 }
 
@@ -3419,7 +3419,7 @@ document.addEventListener('keydown', e => {
   if (inSearch) return;
   if (e.key === '/') { e.preventDefault(); $('q').focus(); $('q').select(); }
   else if (e.key === 'n') { const todo = allItems().filter(it => TODO.includes(it.state)).sort((a, b) => TODO.indexOf(a.state) - TODO.indexOf(b.state) || a.since - b.since);
-    if (!todo.length) { say('rien à traiter'); return; } const i = todo.findIndex(it => it.key === selected); const it = todo[(i + 1) % todo.length]; select(it.key, true); openTab(it); }
+    if (!todo.length) { say(T('rien à traiter', 'nothing to handle')); return; } const i = todo.findIndex(it => it.key === selected); const it = todo[(i + 1) % todo.length]; select(it.key, true); openTab(it); }
   else if (e.key === 'f') { const it = selected && byKey(selected); if (it && it.kind !== 'run') toggleFav(it); }
   else if (/^[1-9]$/.test(e.key) && $('dialog') && $('dialog').querySelectorAll('button.opt')[+e.key - 1]) { e.preventDefault(); $('dialog').querySelectorAll('button.opt')[+e.key - 1].click(); }
   else if (e.key === 'p' && suggestion && suggestKey === selected) { if (fillSuggestion()) e.preventDefault(); }
@@ -3449,7 +3449,7 @@ document.addEventListener('mouseup', e => {
   setTimeout(() => {                                       // après le double/triple-clic : la sélection est alors complète
     const sel = getSelection(), text = sel && !sel.isCollapsed ? selectionToCopy(sel.toString()) : '';
     if (!text) return;
-    navigator.clipboard.writeText(text).then(() => say('copié : ' + plural(text.split('\n').length, 'ligne', 'lignes') + ' · ' + text.length.toLocaleString('fr-FR') + ' caractères'), () => say('copie refusée par le navigateur'));
+    navigator.clipboard.writeText(text).then(() => say(T('copié : ' + plural(text.split('\n').length, 'ligne', 'lignes') + ' · ' + text.length.toLocaleString('fr-FR') + ' caractères', 'copied: ' + plural(text.split('\n').length, 'line', 'lines') + ' · ' + text.length.toLocaleString('fr-FR') + ' characters')), () => say(T('copie refusée par le navigateur', 'copy refused by the browser')));
   }, 0);
 });
 $('q').addEventListener('input', () => { renderList(); scheduleFind(); });
@@ -3462,7 +3462,7 @@ $('boardbtn').onclick = () => boardMode ? closeBoard() : openBoard();
 $('launchbtn').onclick = () => launchMode ? closeLauncher() : openLauncher();
 $('chatsbtn').onclick = () => chatsMode ? closeChats() : openChats();
 $('favonly').onclick = () => { favOnly = !favOnly; localStorage.setItem('cc.favonly', favOnly ? '1' : '0'); renderList(); };
-$('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 'created'; localStorage.setItem('cc.sort', sortMode); say(sortMode === 'created' ? 'tri par date de création' : 'tri par dernière activité'); renderList(); };
+$('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 'created'; localStorage.setItem('cc.sort', sortMode); say(sortMode === 'created' ? T('tri par date de création', 'sorted by creation date') : T('tri par dernière activité', 'sorted by last activity')); renderList(); };
 // Largeur de la barre latérale : glisser son bord droit, double-clic pour revenir à 360 px ; retenue d'une visite à l'autre.
 (() => {
   const app = $('app'), rz = $('resizer');

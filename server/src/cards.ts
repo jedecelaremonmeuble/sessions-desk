@@ -11,6 +11,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { nowMs } from './util.ts';
+import { T } from './i18n.ts';
 
 type Obj = Record<string, unknown>;
 export interface CardsModule { cardsApi: string; python: string }
@@ -42,8 +43,8 @@ export function answerBody(j: unknown): { hd: string; card: string; answers: Obj
 
 function resolveApi(env: NodeJS.ProcessEnv, mod: CardsModule | null): { api: string } | { error: string } {
   const api = env.SD_LAUNCHER_CARDS_API || mod?.cardsApi || '';
-  if (!api) return { error: 'cartes non configurées (modules.launcher.cardsApi)' };
-  if (!existsSync(api)) return { error: `commande des cartes introuvable (${api})` };
+  if (!api) return { error: T('cartes non configurées (modules.launcher.cardsApi)', 'cards not configured (modules.launcher.cardsApi)') };
+  if (!existsSync(api)) return { error: T(`commande des cartes introuvable (${api})`, `cards command not found (${api})`) };
   return { api };
 }
 
@@ -58,14 +59,14 @@ function run(args: string[], timeout: number, env: NodeJS.ProcessEnv, mod: Cards
         let v: unknown = null; try { v = JSON.parse(last); } catch { v = null; }
         if (v && typeof v === 'object' && !Array.isArray(v)) { done(v as Obj); return; }
         const code = (err as NodeJS.ErrnoException | null)?.code;
-        done({ error: code === 'ENOENT' ? 'cartes illisibles : python introuvable' : err ? 'cartes illisibles : la commande a échoué' : 'cartes illisibles' });
+        done({ error: code === 'ENOENT' ? T('cartes illisibles : python introuvable', 'cards unreadable: python not found') : err ? T('cartes illisibles : la commande a échoué', 'cards unreadable: the command failed') : T('cartes illisibles', 'cards unreadable') });
       });
   });
 }
 
 /** Les cartes ouvertes d'UN ticket, relues à l'instant (pas de cache : c'est ce qu'on affiche avant de répondre). */
 export function lookupCards(hd: string, env: NodeJS.ProcessEnv = process.env, mod: CardsModule | null = null): Promise<Obj> {
-  if (!TICKET_RE.test(hd)) return Promise.resolve({ error: 'demande invalide' });
+  if (!TICKET_RE.test(hd)) return Promise.resolve({ error: T('demande invalide', 'invalid request') });
   return run(['cards', hd], 30000, env, mod);
 }
 
@@ -73,14 +74,14 @@ export function lookupCards(hd: string, env: NodeJS.ProcessEnv = process.env, mo
  *  temporaire (jamais en argument), retiré ensuite. */
 export async function answerCard(j: unknown, env: NodeJS.ProcessEnv = process.env, mod: CardsModule | null = null): Promise<Obj> {
   const b = answerBody(j);
-  if (!b) return { ok: false, error: 'demande invalide' };
+  if (!b) return { ok: false, error: T('demande invalide', 'invalid request') };
   const dir = mkdtempSync(join(tmpdir(), 'sd-answer-'));
   try {
     const file = join(dir, 'answers.json');
     writeFileSync(file, JSON.stringify({ answers: b.answers }), 'utf8');
     const r = await run(['answer', b.hd, b.card, '--answers-file', file], 60000, env, mod);
     if (r.ok === true) return r;
-    return { ok: false, error: typeof r.error === 'string' && r.error ? r.error : 'réponse refusée', ...(r.gone ? { gone: true } : {}) };
+    return { ok: false, error: typeof r.error === 'string' && r.error ? r.error : T('réponse refusée', 'answer refused'), ...(r.gone ? { gone: true } : {}) };
   } finally { try { rmSync(dir, { recursive: true, force: true }); } catch { /* fichier temporaire */ } }
 }
 
@@ -109,7 +110,7 @@ export class CardsFeed {
     const v = await run(['pending'], 120000, this.#env, this.#mod);
     this.#at = nowMs();
     if (Array.isArray(v.cards)) this.#value = v;
-    else this.#value = { ...this.#value, error: typeof v.error === 'string' ? v.error : 'cartes illisibles' };
+    else this.#value = { ...this.#value, error: typeof v.error === 'string' ? v.error : T('cartes illisibles', 'cards unreadable') };
     return this.#value;
   }
   current(): Obj {
