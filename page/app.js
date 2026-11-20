@@ -27,7 +27,7 @@ function setLanguage(lang) { localStorage.setItem(LANG_KEY, lang); location.relo
 /** Bascule de langue, dans l'en-tête de la vue d'ensemble. */
 function langSwitch() {
   const b = document.createElement('button'); b.className = 'langsw';
-  b.textContent = LANG === 'fr' ? 'English' : 'Français';
+  b.textContent = LANG === 'fr' ? '🌐 English' : '🌐 Français';
   b.title = LANG === 'fr' ? 'Afficher la page en anglais' : 'Show the page in French';
   b.onclick = () => setLanguage(LANG === 'fr' ? 'en' : 'fr');
   return b;
@@ -55,6 +55,9 @@ function applyStaticText() {
   set('mback', null, '← Sessions', '← Sessions');
 }
 applyStaticText();
+// Bascule de langue toujours visible, en tête de la colonne des sessions : 🌐 + la langue VERS laquelle on bascule.
+{ const b = document.getElementById('langtop');
+  if (b) { b.textContent = LANG === 'fr' ? '🌐 EN' : '🌐 FR'; b.title = LANG === 'fr' ? 'Afficher la page en anglais (English)' : 'Show the page in French (Français)'; b.onclick = () => setLanguage(LANG === 'fr' ? 'en' : 'fr'); } }
 
 const LABEL = { waiting:T('bloquée sur une question', 'waiting on a question'), ask:T('attend ta décision', 'waiting for your decision'), done:T('terminé, à relire', 'done, to review'), busy:T('travaille', 'working'), shell:T('attend sa commande en arrière-plan', 'waiting on a background command'), idle:T('inactive', 'idle'), auto:T('automate sans terminal (claude -p)', 'automation without a terminal (claude -p)'), teams:T('attend un retour Teams', 'waiting for a Teams reply'), closed:T('fermée', 'closed') };
 const GROUPS = [
