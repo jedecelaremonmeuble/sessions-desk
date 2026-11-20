@@ -11,6 +11,7 @@ import type { Config } from './config.ts';
 import type { DriverClient } from './driver.ts';
 import { modulesView } from './modules.ts';
 import { lastNewsAt } from './quiet.ts';
+import { pendingQueue, type QueuedPrompt } from './queued.ts';
 import { activeAccountUuid, markActiveAccount, readClaudeUsage, promptSuggestionSetting } from './usage.ts';
 import { AskJudge, claudeAskAsync } from './asks-judge.ts';
 import {
@@ -21,6 +22,8 @@ import {
 export interface Meta {
   path: string | null; len: number; title: string | null; pr: number | null; prUrl: string | null; cwd: string | null;
   reply: string | null; tokens: number | null; model: string | null; wt: string | null; recette: boolean;
+  /** Messages tapés pendant que la session travaille, pas encore pris (queued.ts). */
+  queued: QueuedPrompt[];
   /** Derniers tours sans nouveauté (quiet.ts) : fin du dernier tour qui comptait ; null si le dernier tour compte. */
   quiet: { at: number; why: string } | null;
   /** Création de la session (transcriptCreatedAt) : lue une fois, quand le transcript est trouvé. */
@@ -288,7 +291,7 @@ export class Dashboard {
   }
   meta(id: string, knownPath?: string | null): Meta {
     let c = this.metaCache.get(id);
-    if (!c) { c = { path: null, len: -1, title: null, pr: null, prUrl: null, cwd: null, reply: null, tokens: null, model: null, wt: null, recette: false, quiet: null, createdAt: null }; this.metaCache.set(id, c); }
+    if (!c) { c = { path: null, len: -1, title: null, pr: null, prUrl: null, cwd: null, reply: null, tokens: null, model: null, wt: null, recette: false, quiet: null, createdAt: null, queued: [] }; this.metaCache.set(id, c); }
     if (!c.path && knownPath) c.path = knownPath;
     if (!c.path) { c.path = this.findTranscript(id); if (!c.path) return c; }
     if (c.createdAt == null) c.createdAt = transcriptCreatedAt(c.path);
@@ -299,6 +302,7 @@ export class Dashboard {
     const replyLines: string[] = []; let usageLine: string | null = null; const wtLines: string[] = [];
     const tail = readTail(c.path, 512 * 1024);
     try { c.quiet = lastNewsAt(tail); } catch { c.quiet = null; }
+    c.queued = pendingQueue(tail);
     for (const l of tail) {
       if (l.startsWith('{"parentUuid"') && l.includes('"type":"assistant"') && !l.includes('"isSidechain":true')) {
         if (l.includes('"usage"')) usageLine = l;
@@ -497,6 +501,8 @@ export class Dashboard {
         statusSince: since, startedAt: s.startedAt ?? null, createdAt: m.createdAt, cwd: s.cwd ?? null,
         sessionId: s.sessionId as string, version: s.version ?? null,
         lastPrompt: pr.length ? pr[pr.length - 1]!.text : '', prompts: pr, suggestion: sug, topicHd: this.topicHd(sid),
+        // En file : seulement tant qu'elle travaille (au repos, Claude Code a déjà pris la file).
+        queued: ieq(status, 'busy') ? m.queued : [],
         // Verdict du juge (« attend l'utilisateur ? ») sur une session au repos : absent tant qu'il n'est pas rendu.
         ...(this.askJudge && !headless && (ieq(status, 'idle') || ieq(status, 'shell')) ? { askVerdict: this.askJudge.verdict(sid, m.reply) } : {}),
       } as Session);

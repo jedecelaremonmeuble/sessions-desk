@@ -2301,11 +2301,16 @@ function renderDetail(force) {
   renderPromptsOnly(it);
 }
 function renderPromptsOnly(it) {
-  const pr = $('prompts'); if (!pr) return; const sig = JSON.stringify(it.prompts || []);
+  const pr = $('prompts'); if (!pr) return; const sig = JSON.stringify([it.prompts || [], it.queued || []]);
   if (pr.dataset.sig !== sig) {
     pr.dataset.sig = sig; pr.replaceChildren();
     const ps = (it.prompts || []).slice().reverse();
-    if (!ps.length) pr.append(el('div', 'empty', it.headless ? 'Un automate reçoit ses consignes par son lanceur : rien dans l’historique des prompts.' : 'Aucun prompt récent dans l\'historique.'));
+    // Messages en file (tapés pendant qu'elle travaille) : pas encore dans l'historique, Claude Code les prendra au tour suivant.
+    for (const q of (it.queued || []).slice().reverse()) {
+      const d = el('div', 'prompt queued'), w = el('div', 'when'); w.append(el('span', 'tag', 'en file'), ' ' + (q.at ? new Date(q.at).toLocaleString('fr-FR') : ''));
+      d.title = 'Mis en file pendant que la session travaille : Claude Code le prendra dès qu’il peut'; d.append(w, el('div', null, q.text)); pr.append(d);
+    }
+    if (!ps.length && !(it.queued || []).length) pr.append(el('div', 'empty', it.headless ? 'Un automate reçoit ses consignes par son lanceur : rien dans l’historique des prompts.' : 'Aucun prompt récent dans l\'historique.'));
     for (const p of ps) { const d = el('div', 'prompt'); d.append(el('div', 'when', new Date(p.at).toLocaleString('fr-FR')), el('div', null, p.text)); pr.append(d); }
   }
 }
