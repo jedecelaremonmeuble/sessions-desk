@@ -2028,6 +2028,7 @@ function back() {                                  // revenir à la session cons
 // passe au détail plein écran ; « ← Sessions », Échap ou le bouton retour du téléphone reviennent à la liste — le retour
 // passe par l'historique de la page (voir « Navigation » plus bas), commun à tous les écrans.
 // Sur grand écran la classe est posée aussi mais sans effet (la CSS ne s'en sert que sous 820 px).
+const NARROW = matchMedia('(max-width: 820px)');   // lu aussi par la vue conversation, le texte d'écran et le survol
 function setPane(detail) {
   if (detail === document.body.classList.contains('mdetail')) return;
   document.body.classList.toggle('mdetail', detail); if (detail) $('main').scrollTop = 0;
@@ -3302,12 +3303,23 @@ function linkDown(why) {
   if (!link.down) { link.down = { since: Date.now(), tries: 0, why: '' }; console.log('[sessions] serveur injoignable :', why); }
   link.down.tries++; link.down.why = why; drawLink();
 }
+// Seul l'échec de la LECTURE d'état dit « serveur injoignable ». Une exception du rendu qui suit est un bug de la
+// page : elle est journalisée et signalée comme telle — confondue avec une coupure, elle affichait le bandeau rouge
+// à chaque passe alors que le serveur répondait.
 async function tick() {
   const live = $('live'); ticking = true;
+  let srv;
   try {
     const r = await fetch('/api/state', { cache:'no-store', signal: AbortSignal.timeout(25000) });
     if (!r.ok) throw new Error('réponse ' + r.status);
-    data = await r.json(); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
+    srv = await r.json();
+  } catch (e) {
+    linkDown(e && e.name === 'TimeoutError' ? 'pas de réponse en 25 s' : e && /^réponse /.test(e.message) ? e.message : '');
+    live.className = 'down'; live.textContent = 'reconnexion…';
+    ticking = false; return;
+  }
+  try {
+    data = srv; favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff(); chatsBadge();
     if (linkUp(data.server)) return;
     renderList(); renderDetail(); refreshScreen(); refreshConv(); try { renderQuota(); } catch (e) { console.log('[sessions] quota :', e); }
     if (pendingRoute) { const r = pendingRoute; pendingRoute = null; applyRoute(r); }      // ?view= : écran d'arrivée, une fois l'état connu
@@ -3315,8 +3327,8 @@ async function tick() {
     if (!autoAsked && !automationsOff()) loadAutomations();                               // module annoncé par l'état : première lecture
     live.className = ''; if (!notice) live.textContent = 'à jour · ' + new Date().toLocaleTimeString('fr-FR');
   } catch (e) {
-    linkDown(e && e.name === 'TimeoutError' ? 'pas de réponse en 25 s' : e && /^réponse /.test(e.message) ? e.message : '');
-    live.className = 'down'; live.textContent = 'reconnexion…';
+    console.error('[sessions] erreur de rendu :', e);
+    live.className = 'down'; live.textContent = 'erreur d’affichage (console) · ' + (e && e.message || e);
   } finally { ticking = false; }
 }
 
