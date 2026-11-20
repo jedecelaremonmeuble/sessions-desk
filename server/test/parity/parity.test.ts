@@ -27,8 +27,9 @@ function normalize(route: string, j: any): any {
   const c = JSON.parse(JSON.stringify(j));
   if (route === 'state') {
     delete c.now; delete c.modules; delete c.ui; delete c.promptSuggestion;   // modules, ui : réglages du poste, que chaque serveur tient de son côté ; promptSuggestion : Node seul, le .ps1 ne bouge plus
-    for (const s of c.sessions) { if (s.stale) s.statusSince = '<corrigé>'; }
+    for (const s of c.sessions) { if (s.stale) s.statusSince = '<corrigé>'; delete s.createdAt; }   // createdAt : Node seul (tri par création)
   }
+  if (route === 'closed') for (const s of c.closed) delete s.createdAt;
   if (route === 'folders') for (const f of c.folders) if (f.last > fx.t0) f.last = '<maintenant>';
   if (route.startsWith('launcher')) { delete c.now; if (c.runs) c.runs = sortBy(c.runs, (r: any) => r.dir); }
   if (route.startsWith('find')) delete c.ms;
@@ -132,7 +133,7 @@ describe.runIf(KINDS.includes('ps') && KINDS.includes('node'))('PS = Node (même
         const x = await call(s, path, { method, origin: o, headers: headers ?? {}, ...(host ? { host: host.includes(':') ? host : `${host}:${s.port}` } : {}), ...(method === 'POST' ? { body: '' } : {}) });
         // /api/state.modules et .ui : réglages du poste, que chaque serveur tient de son côté — hors comparaison.
         let raw = x.body;
-        if (raw.length > 300 && raw.startsWith('{')) { try { const o = JSON.parse(raw); delete o.modules; delete o.ui; delete o.promptSuggestion; raw = JSON.stringify(o); } catch { /* pas du JSON : comparé tel quel */ } }
+        if (raw.length > 300 && raw.startsWith('{')) { try { const o = JSON.parse(raw); delete o.modules; delete o.ui; delete o.promptSuggestion; for (const s of [...(o.sessions ?? []), ...(o.closed ?? [])]) delete s.createdAt; raw = JSON.stringify(o); } catch { /* pas du JSON : comparé tel quel */ } }
         r[k] = { code: x.code, body: x.code === 400 && x.headers['content-type']?.toString().includes('html') ? '<http.sys>' : raw.length > 300 ? `<${raw.length} o>` : raw };
       }
       if (r.ps!.code !== r.node!.code || r.ps!.body !== r.node!.body) diffs.push(`${method} ${path} ${origin ?? ''} ${JSON.stringify(headers ?? {})} ${host ?? ''} : PS ${r.ps!.code} ${r.ps!.body} | Node ${r.node!.code} ${r.node!.body}`);

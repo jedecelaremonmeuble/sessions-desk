@@ -12,6 +12,10 @@ const GROUPS = [
   { key:'closed', title:'Fermées, reprenables', states:['closed'] } ];
 let data = null, closedData = { days:0, closed:[] }, flat = [], notice = null, lastScreen = null, detailKey = null;
 let favs = new Set(), favOnly = localStorage.getItem('cc.favonly') === '1';
+// Ordre dans chaque groupe : 'activity' (dernier changement d'état, par défaut) ou 'created' (création de la session, la plus
+// récente d'abord). createdAt vient du serveur (1er horodatage du transcript) ; un run du lanceur n'en a pas : son début.
+let sortMode = localStorage.getItem('cc.sort') === 'created' ? 'created' : 'activity';
+const createdOf = it => it.createdAt || it.startedAt || it.at || it.since || 0;
 let selected = new URLSearchParams(location.search).get('sel') || sessionStorage.getItem('cc.sel');   // ?sel=<sessionId> : lien direct
 let collapsed = new Set(JSON.parse(localStorage.getItem('cc.collapsed') || '["closed"]'));
 if (!localStorage.getItem('cc.autoGroup')) { collapsed.add('auto'); localStorage.setItem('cc.autoGroup', '1'); localStorage.setItem('cc.collapsed', JSON.stringify([...collapsed])); }   // replié par défaut
@@ -1231,6 +1235,8 @@ function renderList() {
   // Les fermées masquées ne réapparaissent que dans une recherche (étiquetées « masquée »).
   const items = allItems().filter(it => (!favOnly || it.fav) && (!it.hidden || tokens.length) && tokens.every(t => tagMatch(it, t) ?? it.hay.includes(t)));
   $('favonly').className = favOnly ? 'on' : '';
+  $('sortbtn').className = sortMode === 'created' ? 'on' : '';
+  $('sortbtn').title = sortMode === 'created' ? 'Trié par date de création (la plus récente d’abord) — clic : par dernière activité' : 'Trié par dernière activité — clic : par date de création';
   const expandAll = tokens.length || favOnly;     // recherche ou filtre favoris : on cherche aussi dans les groupes repliés
   const list = $('list'); list.replaceChildren(); flat = [];
   if (data.reboot) {               // après un redémarrage de Windows : rappel en tête, la vue d'ensemble propose la réouverture
@@ -1263,7 +1269,9 @@ function renderList() {
   for (const g of GROUPS) {
     // 🤖 : en cours d'abord (runs et autres claude -p), puis du plus récent au plus ancien.
     const live = it => it.kind === 'run' ? it.run.running : it.kind === 'open';
-    const rows = items.filter(it => g.states.includes(it.state)).sort(g.key === 'auto' ? (a, b) => (live(b) - live(a)) || (b.at || b.since) - (a.at || a.since)
+    const rows = items.filter(it => g.states.includes(it.state)).sort(sortMode === 'created'
+      ? (g.key === 'auto' ? (a, b) => (live(b) - live(a)) || createdOf(b) - createdOf(a) : (a, b) => (b.fav - a.fav) || createdOf(b) - createdOf(a))
+      : g.key === 'auto' ? (a, b) => (live(b) - live(a)) || (b.at || b.since) - (a.at || a.since)
       : (a, b) => (b.fav - a.fav) || (g.asc ? (TODO.indexOf(a.state) - TODO.indexOf(b.state) || a.since - b.since) : b.since - a.since));
     if (!rows.length && (g.key !== 'todo' || expandAll)) continue;   // « À traiter » reste visible même vide
     const isCollapsed = !expandAll && collapsed.has(g.key);
@@ -1298,7 +1306,7 @@ function renderList() {
       const tt = el('span', 't'); if (it.fav) tt.append(el('span', 'star', '★ ')); tt.append(label(it));
       { const d = driftTag(it); if (d) tt.append(d); }
       if (it.hidden) tt.append(el('span', 'tag hid', 'masquée'));
-      r.append(el('span', 'dot'), tt, el('span', 'age', (it.model ? modelName(it.model) + ' · ' : '') + (it.tokens ? ktok(it.tokens) + ' · ' : '') + ago(data.now - it.since)));
+      r.append(el('span', 'dot'), tt, el('span', 'age', (it.model ? modelName(it.model) + ' · ' : '') + (it.tokens ? ktok(it.tokens) + ' · ' : '') + (sortMode === 'created' ? 'créée il y a ' + ago(data.now - createdOf(it)) : ago(data.now - it.since))));
       const merged = (closable(it) ? '✓ peut se fermer · ' : it.prInfo && it.prInfo.state === 'MERGED' ? 'PR mergée · ' : '') + (it.status === 'shell' && it.state !== 'shell' ? 'commande en arrière-plan · ' : '');
       const sub = el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'open' ? merged + (it.state === 'idle' ? (it.lastPrompt || it.name) : LABEL[it.state] + (it.lastPrompt ? ' · ' + it.lastPrompt : '')) : 'fermée · ' + merged + (it.lastPrompt || short(it.cwd)));
       r.append(sub);
@@ -2435,6 +2443,7 @@ $('bcbtn').onclick = () => bcMode ? closeBc() : openBc();
 $('boardbtn').onclick = () => boardMode ? closeBoard() : openBoard();
 $('launchbtn').onclick = () => launchMode ? closeLauncher() : openLauncher();
 $('favonly').onclick = () => { favOnly = !favOnly; localStorage.setItem('cc.favonly', favOnly ? '1' : '0'); renderList(); };
+$('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 'created'; localStorage.setItem('cc.sort', sortMode); say(sortMode === 'created' ? 'tri par date de création' : 'tri par dernière activité'); renderList(); };
 // Largeur de la barre latérale : glisser son bord droit, double-clic pour revenir à 360 px ; retenue d'une visite à l'autre.
 (() => {
   const app = $('app'), rz = $('resizer');

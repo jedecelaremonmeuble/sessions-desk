@@ -21,6 +21,22 @@ export function readTail(path: string, bytes: number): string[] {
   } finally { closeSync(fd); }
 }
 
+/** Date de création d'un transcript : le 1er horodatage de ses 64 premiers Ko (la 1re ligne n'en porte pas toujours),
+ *  à défaut la date de création du fichier ; null s'il est illisible. Ne change plus une fois le transcript écrit. */
+export function transcriptCreatedAt(path: string): number | null {
+  let fd: number;
+  try { fd = openSync(path, 'r'); } catch { return null; }
+  try {
+    const buf = Buffer.alloc(64 * 1024);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    const m = /"timestamp":"([^"]+)"/.exec(buf.subarray(0, n).toString('utf8'));
+    const t = m ? Date.parse(m[1]!) : NaN;
+    if (Number.isFinite(t)) return t;
+    const b = fstatSync(fd).birthtimeMs;
+    return b > 0 ? Math.trunc(b) : null;
+  } catch { return null; } finally { closeSync(fd); }
+}
+
 /** JSON d'un fichier (BOM toléré, comme Get-Content | ConvertFrom-Json) ; undefined s'il est absent ou illisible. */
 export function readJson(path: string): unknown {
   try { return JSON.parse(stripBom(readFileSync(path, 'utf8'))); } catch { return undefined; }

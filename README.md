@@ -109,6 +109,8 @@ to adapt them to yours.
 `server/watchdog/Install-NodeWatchdog.ps1 -Port 8765 -Primary` copies the current commit to a run folder and
 registers a scheduled task that starts the server at logon and restarts it if it stops answering.
 `server/scripts/restart-idle-sessions.ps1` is an optional helper that restarts idle sessions.
+`server/watchdog/Deploy.ps1` does it all from a clean, pushed clone: it reinstalls the server and copies the tagger
+and the Teams watcher to `~/.claude/scripts`, creating their scheduled tasks on first run.
 
 ## Keyboard shortcuts
 
