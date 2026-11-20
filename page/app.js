@@ -260,7 +260,12 @@ const isTagToken = s => /^(domaine|outil|fonction|origine|hd|tag):/i.test(s);
 const tagHay = it => (it.tags || []).map(t => tagToken(t) + ' tag:' + tagSlug(t.v)).join(' ');
 // Un filtre de tag vaut la valeur EXACTE (« fonction:lanceur » ne prend pas « fonction:lanceur-priorite ») ; undefined :
 // ce n'est pas un filtre de tag, la recherche texte s'applique.
-const tagMatch = (it, t) => isTagToken(t) ? (' ' + tagHay(it) + ' ').includes(' ' + norm(t) + ' ') : undefined;
+// Filtre d'état posé par un clic sur une tuile de la vue d'ensemble (« etat:waiting », « state:waiting » en anglais) :
+// il ne filtre que la liste et ne part jamais au serveur (voir scheduleFind).
+const STATE_TOKEN = /^(etat|state):([a-z]+)$/;
+const isStateToken = s => STATE_TOKEN.test(norm(s));
+const stateToken = st => T('etat:', 'state:') + st;
+const tagMatch = (it, t) => isStateToken(t) ? it.state === norm(t).match(STATE_TOKEN)[2] : isTagToken(t) ? (' ' + tagHay(it) + ' ').includes(' ' + norm(t) + ' ') : undefined;
 function tagChips(it, cls) {
   // L'origine « interactive » (la majorité) et les HD (déjà dans le titre) ne prennent pas de place dans la liste.
   const ts = (it.tags || []).filter(t => TAG_AXES.includes(t.axis) && (cls === 'dtags' || (t.axis !== 'hd' && !(t.axis === 'origine' && t.v === 'interactive'))))
@@ -424,6 +429,13 @@ async function teamsInboundSend(it, inb) {
     say(r.error ? r.error : T('la session envoie la réponse à ' + (inb.chatLabel || inb.from), 'the session is sending the reply to ' + (inb.chatLabel || inb.from))); tick();
   } catch { say(T('envoi impossible', 'could not send')); }
 }
+// Clic sur une tuile : la liste ne montre plus que cet état (groupes dépliés) ; 2e clic sur la même tuile : retiré.
+function filterState(st) {
+  const q = $('q'), tok = stateToken(st), cur = q.value.trim().split(/\s+/).filter(Boolean), had = cur.some(x => norm(x) === norm(tok));
+  q.value = cur.filter(x => !isStateToken(x)).concat(had ? [] : [tok]).join(' ');
+  setPane(false); renderList(); scheduleFind(); renderOverview();
+}
+const activeState = () => { const t = $('q').value.trim().split(/\s+/).find(isStateToken); return t ? norm(t).match(STATE_TOKEN)[2] : null; };
 function filterTag(t) {
   const q = $('q'), tok = tagToken(t), cur = q.value.trim().split(/\s+/).filter(Boolean);
   q.value = (cur.includes(tok) ? cur.filter(x => x !== tok) : cur.concat(tok)).join(' ');   // 2e clic : retire le filtre
@@ -1920,8 +1932,15 @@ $('relaybtn').addEventListener('click', restartRelay);
 async function dismissReboot() { try { await post('/api/reboot-dismiss'); say(T('liste d\'avant le redémarrage oubliée', 'pre-restart list dismissed')); } catch { say(T('échec de la demande', 'request failed')); } tick(); }
 function rebootPanel() {
   const rb = data.reboot; if (!rb) return null;
-  const box = el('div', 'reboot');
-  box.append(el('div', 'rt', T('Windows a redémarré — ' + plural(rb.sessions.length, 'session était ouverte', 'sessions étaient ouvertes') + ' le ' + new Date(rb.at).toLocaleString(LOCALE), 'Windows restarted — ' + plural(rb.sessions.length, 'session was open', 'sessions were open') + ' on ' + new Date(rb.at).toLocaleString('en-GB'))));
+  const open = localStorage.getItem('sd.rebootOpen') !== '0';
+  const box = el('div', 'reboot' + (open ? '' : ' folded'));
+  const rt = el('button', 'rt'); rt.type = 'button'; rt.setAttribute('aria-expanded', String(open));
+  rt.title = open ? T('Replier la liste', 'Collapse the list') : T('Déplier la liste', 'Expand the list');
+  rt.onclick = () => { localStorage.setItem('sd.rebootOpen', open ? '0' : '1'); renderDetail(true); };
+  rt.append(el('span', 'car', open ? '▾' : '▸'), ' ', T('Windows a redémarré — ' + plural(rb.sessions.length, 'session était ouverte', 'sessions étaient ouvertes') + ' le ' + new Date(rb.at).toLocaleString(LOCALE), 'Windows restarted — ' + plural(rb.sessions.length, 'session was open', 'sessions were open') + ' on ' + new Date(rb.at).toLocaleString('en-GB')));
+  const npick = rb.sessions.filter(s => rebootPick.get(s.sessionId) !== false).length;
+  if (!open) rt.append(el('span', 'rm', T(' · ' + npick + ' cochée' + (npick > 1 ? 's' : ''), ' · ' + npick + ' selected')));
+  box.append(rt);
   const ul = el('div', 'rl');
   for (const s of rb.sessions) {
     if (!rebootPick.has(s.sessionId)) rebootPick.set(s.sessionId, true);
@@ -1929,13 +1948,13 @@ function rebootPanel() {
     lab.append(cb, el('span', null, s.title), el('span', 'rm', (s.pr ? 'PR #' + s.pr + ' · ' : '') + T('active il y a ' + ago(data.now - s.lastActivity), 'active ' + ago(data.now - s.lastActivity) + ' ago')));
     ul.append(lab);
   }
-  box.append(ul);
+  if (open) box.append(ul);
   const act = el('div', 'actions');
   const b1 = el('button', 'primary', T('Rouvrir la sélection', 'Reopen selected')); b1.onclick = () => reopenMany(rb.sessions.map(s => s.sessionId).filter(id => rebootPick.get(id)));
   const b2 = el('button', null, T('Tout cocher / décocher', 'Tick / untick all')); b2.onclick = () => { const all = rb.sessions.every(s => rebootPick.get(s.sessionId)); rb.sessions.forEach(s => rebootPick.set(s.sessionId, !all)); renderDetail(true); };
   const b3 = el('button', null, T('Ignorer', 'Dismiss')); b3.title = T('Ne plus proposer ces sessions (elles restent dans « Fermées, reprenables »)', 'Stop offering these sessions (they stay in "Closed, reopenable")'); b3.onclick = () => dismissReboot();
-  act.append(b1, b2, b3); box.append(act);
-  box.append(el('div', 'hint', T('Un onglet Windows Terminal par session, chacune reprise où elle s’était arrêtée (claude --resume).', 'One Windows Terminal tab per session, each resumed where it stopped (claude --resume).')));
+  act.append(b1, ...(open ? [b2] : []), b3); box.append(act);
+  if (open) box.append(el('div', 'hint', T('Un onglet Windows Terminal par session, chacune reprise où elle s’était arrêtée (claude --resume).', 'One Windows Terminal tab per session, each resumed where it stopped (claude --resume).')));
   return box;
 }
 
@@ -1947,7 +1966,7 @@ function prLink(it) {
 function renderList() {
   const tokens = norm($('q').value).split(/\s+/).filter(Boolean);
   // Les fermées masquées ne réapparaissent que dans une recherche (étiquetées « masquée »).
-  const items = allItems().filter(it => (!favOnly || it.fav) && (!it.hidden || tokens.length) && tokens.every(t => tagMatch(it, t) ?? it.hay.includes(t)));
+  const items = allItems().filter(it => (!favOnly || it.fav) && (!it.hidden || tokens.some(t => !isStateToken(t))) && tokens.every(t => tagMatch(it, t) ?? it.hay.includes(t)));
   $('favonly').className = favOnly ? 'on' : '';
   $('sortbtn').className = sortMode === 'created' ? 'on' : '';
   $('sortbtn').title = sortMode === 'created' ? T('Trié par date de création (la plus récente d’abord) — clic : par dernière activité', 'Sorted by creation date (newest first) — click: by last activity') : T('Trié par dernière activité — clic : par date de création', 'Sorted by last activity — click: by creation date');
@@ -2481,7 +2500,7 @@ let findMode = false, findQ = '', findRes = null, findTimer = null, findSeq = 0;
 function scheduleFind() {
   // Des filtres de tags seuls (« domaine:telephonie ») ne filtrent que la liste ; avec des mots (« domaine:telephonie sms »),
   // ils partent aussi au serveur, qui ne cherche les mots que dans les conversations portant ces tags.
-  clearTimeout(findTimer); const full = $('q').value.trim(), words = full.split(/\s+/).filter(t => !isTagToken(t)).join(' ');
+  clearTimeout(findTimer); const full = $('q').value.trim().split(/\s+/).filter(t => t && !isStateToken(t)).join(' '), words = full.split(/\s+/).filter(t => !isTagToken(t)).join(' ');
   const q = words.length < 3 ? '' : full;
   if (q.length < 3) { const was = findMode; findMode = false; findRes = null; findQ = ''; if (was) renderDetail(true); return; }
   findTimer = setTimeout(() => runFind(q), 350);
@@ -2936,7 +2955,11 @@ function renderOverview() {
   head.className = ''; head.replaceChildren(el('div', 'dtitle', T('Vue d\'ensemble', 'Overview')), langSwitch());
   const tiles = el('div', 'tiles');
   for (const st of ['waiting', 'ask', 'done', 'busy', 'shell', 'idle', 'auto', 'closed']) {
-    const t = el('div', 'tile ' + st); t.append(el('b', null, items.filter(it => it.state === st).length), el('span', null, LABEL[st])); tiles.append(t);
+    const n = items.filter(it => it.state === st).length, on = activeState() === st;
+    const t = el('button', 'tile ' + st + (on ? ' on' : '') + (n ? '' : ' zero')); t.type = 'button';
+    t.append(el('b', null, n), el('span', null, LABEL[st]));
+    t.title = on ? T('Filtre actif — clic : afficher toutes les sessions', 'Filter on — click: show all sessions') : T('Clic : ne montrer que ces sessions dans la liste', 'Click: show only these sessions in the list');
+    t.onclick = () => filterState(st); tiles.append(t);
   }
   head.append(tiles);
   const cl = allItems().filter(closable);
