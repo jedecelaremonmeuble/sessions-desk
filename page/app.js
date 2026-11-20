@@ -1479,6 +1479,13 @@ function renderCard(box, it, card) {
     + (f.neighbours ? ' ' + plural(f.neighbours, 'autre carte reste ouverte', 'autres cartes restent ouvertes') + ' sous la même note.' : '')));
   box.append(c);
 }
+// Le message après « Envoyer les réponses » — PURE. L'orchestrateur prévenu dit ce qu'il a fait de la réponse
+// (`launcher` : travail mis en file, suite signalée…) ; une commande qui ne le dit pas garde la phrase d'avant.
+function cardAnsweredText(hd, missing, j) {
+  const said = j && typeof j.launcher === 'string' && j.launcher.trim() ? j.launcher.trim() : '';
+  return '✅ Réponse enregistrée dans HD-' + hd + (missing.length ? ' — sans réponse : ' + missing.join(', ') : '') + '. '
+    + (said ? said.charAt(0).toUpperCase() + said.slice(1) + (/[.!?]$/.test(said) ? '' : '.') : 'Le lanceur la lit à sa prochaine passe.');
+}
 async function sendCard(it, card) {
   if (!canWrite || cardUi.busy) return;
   const hd = String(it.run.hd), key = it.key;
@@ -1490,7 +1497,7 @@ async function sendCard(it, card) {
     const r = await fetch('/api/launcher/answer', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ hd, card: String(card.id), answers: body.answers }) });
     const j = await r.json().catch(() => ({}));
     done = !!(r.ok && (j.ok === true || j.gone));
-    res = r.ok && j.ok === true ? { ok: true, text: '✅ Réponse enregistrée dans HD-' + hd + (body.missing.length ? ' — sans réponse : ' + body.missing.join(', ') : '') + '. Le lanceur la lit à sa prochaine passe.' }
+    res = r.ok && j.ok === true ? { ok: true, text: cardAnsweredText(hd, body.missing, j) }
       : { ok: false, text: '⛔ ' + (j.error || 'réponse refusée (' + r.status + ')') };
   } catch { res = { ok: false, text: '⛔ serveur injoignable' }; }
   cardUi.busy = false;

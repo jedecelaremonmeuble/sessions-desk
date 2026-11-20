@@ -14,8 +14,19 @@ function grab(name: string): string {
 const cardFr = js.match(/\nconst CARD_FR = \{.*\};\n/)![0];
 type Fns = { cardRuns: (r: unknown[], c: unknown[], s: number) => { hd: string; at: number }[]; withCards: (i: unknown[], c: unknown[]) => Record<string, unknown>[];
   cardForm: (c: unknown) => { title: string; neighbours: number; questions: { id: string; open: boolean; multi: boolean; required: boolean; options: { id: string; recommended: boolean }[] }[] };
-  cardAnswers: (c: unknown, p: unknown, o: unknown) => { answers?: unknown[]; missing?: string[]; error?: string } };
-const fns = new Function(cardFr + ['cardRuns', 'withCards', 'cardForm', 'cardAnswers'].map(grab).join('\n') + '\nreturn { cardRuns, withCards, cardForm, cardAnswers };')() as Fns;
+  cardAnswers: (c: unknown, p: unknown, o: unknown) => { answers?: unknown[]; missing?: string[]; error?: string };
+  cardAnsweredText: (hd: string, missing: string[], j: unknown) => string };
+const fns = new Function(cardFr + ['cardRuns', 'withCards', 'cardForm', 'cardAnswers', 'cardAnsweredText'].map(grab).join('\n')
+  + '\nreturn { cardRuns, withCards, cardForm, cardAnswers, cardAnsweredText };')() as Fns;
+
+describe('après « Envoyer les réponses »', () => {
+  test('cardAnsweredText : ce que l’orchestrateur a fait de la réponse, sinon la phrase d’avant', () => {
+    expect(fns.cardAnsweredText('42', [], { ok: true, launcher: 'lanceur : correctif en file (carte 7)' }))
+      .toBe('✅ Réponse enregistrée dans HD-42. Lanceur : correctif en file (carte 7).');
+    expect(fns.cardAnsweredText('42', ['Date'], { ok: true })).toBe('✅ Réponse enregistrée dans HD-42 — sans réponse : Date. Le lanceur la lit à sa prochaine passe.');
+    expect(fns.cardAnsweredText('42', [], { ok: true, launcher: '  ' })).toBe('✅ Réponse enregistrée dans HD-42. Le lanceur la lit à sa prochaine passe.');
+  });
+});
 
 const choice = { id: 'q', header: 'Critère', question: 'Lequel ?', options: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B', description: 'le bon', recommended: true }] };
 const open = { id: 'date', header: 'Date', question: 'Quand ?' };
