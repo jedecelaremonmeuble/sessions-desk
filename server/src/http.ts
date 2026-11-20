@@ -23,6 +23,7 @@ import { readTranscript } from './transcript.ts';
 import { upload } from './upload.ts';
 import { addContent, exists, GUID, ieq, nowMs, psArray, psIntZero, psString, psTruthy, sleep, tryParseInt, tryParseUInt } from './util.ts';
 import { Watch } from './watch.ts';
+import { DeliveryKick, linkedPending, type KickSession, type KickSummary } from './teams-kick.ts';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -136,6 +137,7 @@ export class Server {
   #queue: Queued[] = [];
   #wake: (() => void) | null = null;
   #dirty = false;
+  readonly #kick = new DeliveryKick();
   #stopping = false;
   #draining = false;
   #inflight = 0;
@@ -355,6 +357,7 @@ export class Server {
           if (!this.cfg.noBackground && now - lastWatch >= 2000) {
             lastWatch = now;
             try { await this.watch.tick(st as never); } catch { /* idem */ }
+            try { this.#kickTeams(st as { sessions?: KickSession[]; teams?: unknown }, now); } catch { /* idem */ }
             if (this.cfg.primary) this.search.maybeIndex();
           }
         } catch (e) { this.logError(`état : ${(e as Error).message}`); }
@@ -377,6 +380,15 @@ export class Server {
   #watcherScript(): string {
     const installed = join(this.cfg.claude, 'scripts', 'teams-watcher', 'teams-watcher.ts');
     return exists(installed) ? installed : fileURLToPath(new URL('./teams-watcher.ts', import.meta.url));
+  }
+  /** Une session qu'une réponse Teams attend vient de se libérer : passe du veilleur tout de suite, détachée, au lieu
+   *  d'attendre la tâche planifiée (jusqu'à 2 min). Serveur principal seul : un serveur à côté ne remet rien. */
+  #kickTeams(st: { sessions?: KickSession[]; teams?: unknown }, now: number): void {
+    if (!this.cfg.primary || !this.cfg.modules.teams || !Array.isArray(st.sessions)) return;
+    const dir = this.d.sf('teams-waits');
+    const linked = (): Set<string> => { try { return linkedPending(JSON.parse(readFileSync(join(dir, '_links.json'), 'utf8'))); } catch { return new Set(); } };
+    if (!this.#kick.check(st.sessions, (st.teams ?? null) as KickSummary | null, linked, now)) return;
+    spawn(process.execPath, [this.#watcherScript()], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, SD_TEAMS_WAITS_DIR: dir } }).unref();
   }
   /** Envoi d'une réponse Teams par le veilleur. Texte sur stdin. */
   #teamsSend(chatId: string, text: string): Promise<string | null> {
