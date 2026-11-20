@@ -11,6 +11,10 @@ let LANG = (() => {
   return /^fr\b/i.test(navigator.language || '') ? 'fr' : 'en';
 })();
 const T = (fr, en) => LANG === 'fr' ? fr : en;
+/** Format des dates et des nombres affichés. */
+const LOCALE = T('fr-FR', 'en-GB');
+/** État git d'un fichier : le serveur l'écrit en français (calculé hors requête, mis en cache). */
+const GIT_KIND_EN = { nouveau:'new', conflit:'conflict', supprimé:'deleted', renommé:'renamed', ajouté:'added', modifié:'modified' };
 document.documentElement.lang = LANG;
 { const f = window.fetch.bind(window);
   window.fetch = (input, init = {}) => { const headers = new Headers(init.headers || {}); headers.set('X-SD-Lang', LANG); return f(input, { ...init, headers }); }; }
@@ -122,7 +126,7 @@ function quotaView(q, now) {
   return v;
 }
 const PLAN_FR = p => { const m = /max_(\d+)x/i.exec(p || ''); return m ? 'Max ' + m[1] + 'x' : /pro/i.test(p || '') ? 'Pro' : (p || '').replace(/^default_claude_/, ''); };
-const atFr = ms => new Date(ms).toLocaleString(T('fr-FR', 'en-GB'), { weekday:'short', hour:'2-digit', minute:'2-digit' });
+const atFr = ms => new Date(ms).toLocaleString(LOCALE, { weekday:'short', hour:'2-digit', minute:'2-digit' });
 const inFr = ms => { const m = Math.max(0, Math.round(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60); return d ? d + T(' j ', ' d ') + h + ' h' : h ? h + ' h ' + String(m % 60).padStart(2, '0') : m + ' min'; };
 const pts = n => (n > 0 ? '+' : '') + n + ' pt' + (Math.abs(n) > 1 ? 's' : '');
 const quotas = () => ((data && data.quota) || []).map(q => quotaView(q, Date.now()));
@@ -345,7 +349,7 @@ function validationBadge(v) {
 // Âge court (comme teamsWaitLine) : « 40 min », « 3 h », « 2 j ».
 const valAge = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h' : Math.floor(m / 1440) + T(' j', ' d'); };
 function validationLine(i, now) {
-  const at = new Date(i.at).toLocaleString(T('fr-FR', 'en-GB'), { timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const at = new Date(i.at).toLocaleString(LOCALE, { timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   const since = i.expectedAt ? T(' depuis ', ' for ') + valAge((now || Date.now()) - i.expectedAt) : '';
   if (!i.withdrawn && (i.state === 'attendue' || i.state === 'non-qualifiee' || i.state === 'sans-reponse'))
     return i.q + ' · ' + (i.state === 'attendue' ? T('⏳ attendue de ', '⏳ expected from ') + (i.to || '?') + since
@@ -363,9 +367,9 @@ const validationsOf = it => (data && data.teams && data.teams.validations && it.
 // attente. Pure et autonome (testée seule par sessions-dashboard-tests.ps1).
 function teamsWaitLine(w, now, remindersOn) {
   const d = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h' : Math.floor(m / 1440) + T(' j', ' d'); };
-  const day = t => new Date(t).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' });
-  const at = t => (day(t) === day(now) ? '' : new Date(t).toLocaleDateString(T('fr-FR', 'en-GB'), { timeZone: 'Europe/Paris', weekday: 'short' }) + ' ')
-    + new Date(t).toLocaleTimeString(T('fr-FR', 'en-GB'), { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
+  const day = t => new Date(t).toLocaleDateString(LOCALE, { timeZone: 'Europe/Paris' });
+  const at = t => (day(t) === day(now) ? '' : new Date(t).toLocaleDateString(LOCALE, { timeZone: 'Europe/Paris', weekday: 'short' }) + ' ')
+    + new Date(t).toLocaleTimeString(LOCALE, { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
   const who = w.chatLabel || T('le chat Teams', 'the Teams chat');
   if (w.status === 'replied') return T('💬 ' + (w.replyFrom || who) + ' a répondu il y a ' + d(now - (w.repliedAt ?? now)), '💬 ' + (w.replyFrom || who) + ' replied ' + d(now - (w.repliedAt ?? now)) + ' ago') + (w.lastError ? T(' · pas encore transmise (' + w.lastError + ')', ' · not passed on yet (' + w.lastError + ')') : T(' · transmission en cours', ' · passing it on'));
   let s = T('⏳ attend ' + who + ' depuis ' + d(now - (w.firstSentAt ?? w.sentAt)), '⏳ waiting for ' + who + ' for ' + d(now - (w.firstSentAt ?? w.sentAt)));
@@ -459,7 +463,7 @@ function gitBlock(it) {
   if (g.nFiles) {
     const d = el('details'); d.open = gitOpen.has(it.key); d.ontoggle = () => d.open ? gitOpen.add(it.key) : gitOpen.delete(it.key);
     d.append(el('summary', null, g.nFiles > g.files.length ? T(g.files.length + ' premiers fichiers sur ' + g.nFiles, 'first ' + g.files.length + ' files of ' + g.nFiles) : T('fichiers', 'files')));
-    const ul = el('div', 'gfiles'); for (const f of g.files) { const r = el('div'); r.append(el('span', 'gk', f.k), f.p); ul.append(r); } d.append(ul); box.append(d);
+    const ul = el('div', 'gfiles'); for (const f of g.files) { const r = el('div'); r.append(el('span', 'gk', GIT_KIND_EN[f.k] && LANG === 'en' ? GIT_KIND_EN[f.k] : f.k), f.p); ul.append(r); } d.append(ul); box.append(d);
   }
   return box;
 }
@@ -869,7 +873,7 @@ function renderLauncher() {
   main.append(el('div', 'dtitle', T('Lanceur — diagnostic automatique', 'Launcher — automatic diagnosis')));
   if (!L) { main.append(el('div', 'meta', T('chargement…', 'loading…'))); return; }
   if (!L.present) { main.append(el('div', 'empty', T('Lanceur absent de ce poste.', 'No launcher on this machine.'))); return; }
-  main.append(el('div', 'meta', T('Modes : triage ' + L.triage + ' · dev ' + L.devMode + ' · recette ' + L.recetteMode + ' · reprise ' + L.reworkMode + ' · coût des runs affichés : ' + L.cost.toLocaleString('fr-FR') + ' $', 'Modes: triage ' + L.triage + ' · dev ' + L.devMode + ' · testing ' + L.recetteMode + ' · rework ' + L.reworkMode + ' · cost of the runs shown: $' + L.cost.toLocaleString('en-GB'))));
+  main.append(el('div', 'meta', T('Modes : triage ' + L.triage + ' · dev ' + L.devMode + ' · recette ' + L.recetteMode + ' · reprise ' + L.reworkMode + ' · coût des runs affichés : ' + L.cost.toLocaleString(LOCALE) + ' $', 'Modes: triage ' + L.triage + ' · dev ' + L.devMode + ' · testing ' + L.recetteMode + ' · rework ' + L.reworkMode + ' · cost of the runs shown: $' + L.cost.toLocaleString('en-GB'))));
   // Santé
   const hb = L.heartbeat ? L.now - L.heartbeat : null;
   const tiles = el('div', 'tiles');
@@ -877,8 +881,8 @@ function renderLauncher() {
   for (const q of L.quota || []) {
     // Remise à zéro déjà passée : le relevé de ce compte n'a pas été rafraîchi par le lanceur — on le dit.
     const stale = q.weeklyResetsAt && new Date(q.weeklyResetsAt).getTime() < L.now;
-    if (stale) { const t = el('div', 'tile idle'); t.append(el('b', null, (q.weeklyPct ?? '?') + ' % ?'), el('span', null, T('quota ' + (q.alias || '') + ' · relevé périmé (remise du ' + new Date(q.weeklyResetsAt).toLocaleDateString('fr-FR') + ' passée)', 'quota ' + (q.alias || '') + ' · outdated reading (reset of ' + new Date(q.weeklyResetsAt).toLocaleDateString('en-GB') + ' passed)'))); tiles.append(t); continue; }
-    const t = el('div', 'tile ' + (q.weeklyPct >= 90 ? 'waiting' : q.weeklyPct >= 75 ? 'ask' : 'idle')); t.append(el('b', null, (q.weeklyPct ?? '?') + ' %'), el('span', null, T('quota semaine ', 'weekly quota ') + (q.alias || '') + (q.weeklyResetsAt ? T(' · remise ', ' · reset ') + new Date(q.weeklyResetsAt).toLocaleString(T('fr-FR', 'en-GB'), { weekday:'short', hour:'2-digit', minute:'2-digit' }) : ''))); tiles.append(t);
+    if (stale) { const t = el('div', 'tile idle'); t.append(el('b', null, (q.weeklyPct ?? '?') + ' % ?'), el('span', null, T('quota ' + (q.alias || '') + ' · relevé périmé (remise du ' + new Date(q.weeklyResetsAt).toLocaleDateString(LOCALE) + ' passée)', 'quota ' + (q.alias || '') + ' · outdated reading (reset of ' + new Date(q.weeklyResetsAt).toLocaleDateString('en-GB') + ' passed)'))); tiles.append(t); continue; }
+    const t = el('div', 'tile ' + (q.weeklyPct >= 90 ? 'waiting' : q.weeklyPct >= 75 ? 'ask' : 'idle')); t.append(el('b', null, (q.weeklyPct ?? '?') + ' %'), el('span', null, T('quota semaine ', 'weekly quota ') + (q.alias || '') + (q.weeklyResetsAt ? T(' · remise ', ' · reset ') + new Date(q.weeklyResetsAt).toLocaleString(LOCALE, { weekday:'short', hour:'2-digit', minute:'2-digit' }) : ''))); tiles.append(t);
     // Limite propre à un modèle (« Fable ») : sa tuile, mêmes seuils.
     for (const l of (q.limits || []).filter(l => l.model && l.pct != null)) { const tm = el('div', 'tile ' + (l.pct >= 90 ? 'waiting' : l.pct >= 75 ? 'ask' : 'idle')); tm.append(el('b', null, Math.round(l.pct) + ' %'), el('span', null, T('quota semaine ', 'weekly quota ') + l.model + ' ' + (q.alias || ''))); tiles.append(tm); } }
   const running = L.runs.filter(r => r.running);
@@ -931,10 +935,10 @@ function renderLauncher() {
     const ko = /fail|abandon|error|refus|denied/i.test((r.outcome || '') + ' ' + (r.verdict || ''));
     const row = el('div', 'lrun ' + (r.running ? 'busy' : ko ? 'waiting' : ok ? 'done' : 'idle'));
     const h = el('div', 'lh');
-    h.append(el('span', 'dot'), el('span', 'lt', new Date(r.at).toLocaleString(T('fr-FR', 'en-GB'), { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })), el('span', 'lp', PHASE_FR[r.phase] || r.phase),
+    h.append(el('span', 'dot'), el('span', 'lt', new Date(r.at).toLocaleString(LOCALE, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })), el('span', 'lp', PHASE_FR[r.phase] || r.phase),
              el('span', 'lx', 'HD-' + r.hd + ' — ' + (r.title || '')),
              el('span', 'lo', r.running ? T('en cours', 'running') : [r.outcome, r.verdict].filter(Boolean).join(' · ') || '—'),
-             el('span', 'lm', [r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + T(' tours', ' turns') : null, r.costUsd != null ? T((Math.round(r.costUsd * 100) / 100).toLocaleString('fr-FR') + ' $', '$' + (Math.round(r.costUsd * 100) / 100).toLocaleString('en-GB')) : null].filter(Boolean).join(' · ')));
+             el('span', 'lm', [r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + T(' tours', ' turns') : null, r.costUsd != null ? T((Math.round(r.costUsd * 100) / 100).toLocaleString(LOCALE) + ' $', '$' + (Math.round(r.costUsd * 100) / 100).toLocaleString('en-GB')) : null].filter(Boolean).join(' · ')));
     row.append(h);
     if (r.detail) row.append(el('div', 'ld', r.detail));
     const fl = el('div', 'lf');
@@ -1047,7 +1051,7 @@ const runGroup = () => {
   const old = cardRuns(runs, cards, midnight()), g2 = old.length ? launcherGroup(old, waiting, open, 0) : { items: [] };
   return { items: withCards(runsByHd(g.items.concat(g2.items)), cards), absorbed: g.absorbed };
 };
-const money = v => (Math.round(v * 100) / 100).toLocaleString('fr-FR') + ' $';
+const money = v => (Math.round(v * 100) / 100).toLocaleString(LOCALE) + ' $';
 // ── Passes des AUTOMATES du poste (module « automations ») : scripts planifiés déclarés dans la configuration du
 // poste. Un groupe par automate dans la liste (la passe en cours et la DERNIÈRE passe du jour qui a agi ou échoué), une carte
 // par automate dans la vue d'ensemble, le détail d'une passe (résumé, fichiers, conversation). Source :
@@ -1085,7 +1089,7 @@ function automationGroups(autos, open, keep) {
       if (a.running && p.run === a.running.run) continue;
       if (shown++ && !(keep || []).includes('pass:' + a.id + ':' + p.run)) continue;
       items.push({ kind:'pass', key:'pass:' + a.id + ':' + p.run, auto:a, pass:p, running:false, look:look(p), sessionId:p.sessionId || null,
-        title:name + ' · ' + new Date(p.at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }), at:p.at, since:p.at + Math.round((p.minutes || 0) * 60000) });
+        title:name + ' · ' + new Date(p.at).toLocaleTimeString(LOCALE, { hour:'2-digit', minute:'2-digit' }), at:p.at, since:p.at + Math.round((p.minutes || 0) * 60000) });
     }
   }
   return { groups, items, absorbed };
@@ -1116,7 +1120,7 @@ function autoGroupTitle(a) {
 function automationCard(a, now) {
   const fr = { ok:T('a agi', 'acted'), nothing:T('rien à faire', 'nothing to do'), 'dry-run':T('à blanc', 'dry run'), conflict:T('conflit', 'conflict'), rejected:T('refusée', 'rejected'), failed:T('échec', 'failed'), unknown:T('issue inconnue', 'unknown outcome') };
   const since = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') : Math.floor(m / 1440) + T(' j', ' d'); };
-  const usd = v => (Math.round(v * 100) / 100).toLocaleString('fr-FR') + ' $';
+  const usd = v => (Math.round(v * 100) / 100).toLocaleString(LOCALE) + ' $';
   const l = a.last, w = a.week || {};
   const look = a.running ? 'busy' : !a.present || !l ? 'idle' : l.level === 'error' ? 'waiting' : l.level === 'warn' || a.late ? 'ask' : 'done';
   const lines = [];
@@ -1218,8 +1222,8 @@ function renderPassDetail(it, force) {
   if (p && p.dryRun && p.status !== 'dry-run') chip.append(el('span', 'tag cl', T('à blanc', 'dry run')));
   head.append(chip);
   if (it.model) head.append(el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)));
-  if (it.tokens) head.append(el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString('fr-FR') + ' tokens'));
-  head.append(el('div', 'meta', [(a.icon ? a.icon + ' ' : '') + a.label, T('lancée le ', 'started ') + new Date(it.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
+  if (it.tokens) head.append(el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString(LOCALE) + ' tokens'));
+  head.append(el('div', 'meta', [(a.icon ? a.icon + ' ' : '') + a.label, T('lancée le ', 'started ') + new Date(it.at).toLocaleString(LOCALE, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
     p && p.minutes != null ? (p.minutes < 1 ? '< 1 min' : Math.round(p.minutes) + ' min') : null, p && p.costUsd != null ? money(p.costUsd) : null, it.sessionId].filter(Boolean).join(' · ')));
   const actions = el('div', 'actions');
   if (!it.running && it.sessionId && canWrite) {
@@ -1282,7 +1286,7 @@ function runSpan(runs, now) {
   return { from: first.phase, fromAt: first.at, to: last.phase, toAt: last.at, totalMin: total, workMin: work, waitMin: total - work, running: rs.some(r => r.running) };
 }
 const dur = m => m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0');
-const hhmm = t => new Date(t).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+const hhmm = t => new Date(t).toLocaleTimeString(LOCALE, { hour:'2-digit', minute:'2-digit' });
 // report.json / verdict.json d'un run TERMINÉ, lus une fois (ils ne changent plus) ; la page les relit par
 // /api/launcher/file, route existante — rien de neuf côté serveur.
 const runAux = new Map();
@@ -1352,7 +1356,7 @@ function renderRunDetail(it, force) {
       for (const x of it.runs) {
         const xr = x.run, o = xr.running ? T('en cours', 'running') : x.outcome || '—';
         const b = el('button', 'quick ' + x.look + (xr.dir === r.dir ? ' on' : ''),
-          [new Date(xr.at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }), RUN_FR[xr.phase] || xr.phase, o,
+          [new Date(xr.at).toLocaleTimeString(LOCALE, { hour:'2-digit', minute:'2-digit' }), RUN_FR[xr.phase] || xr.phase, o,
            xr.minutes != null ? Math.round(xr.minutes) + ' min' : null, xr.costUsd != null ? money(xr.costUsd) : null].filter(Boolean).join(' · '));
         const headDir = (it.runs.find(i => i.run.running) || it.runs[0]).run.dir;     // le run que reprend la ligne
         b.onclick = () => { if (xr.dir === headDir) runPick.delete(it.key); else runPick.set(it.key, xr.dir); runFile = null; renderDetail(true); };
@@ -1390,9 +1394,9 @@ function renderRunDetail(it, force) {
   if (it.wait && STAGE_FR[it.wait.stage]) chip.append(el('span', 'tag cl', STAGE_FR[it.wait.stage]));
   head.append(chip);
   if (it.model) head.append(el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)));
-  if (it.tokens) head.append(el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString('fr-FR') + ' tokens'));
-  const meta = el('div', 'meta', [T('🤖 lanceur · ', '🤖 launcher · ') + (RUN_FR[r.phase] || r.phase), T('lancé le ', 'started ') + new Date(r.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
-    r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + T(' tours', ' turns') : null, r.costUsd != null ? (Math.round(r.costUsd * 100) / 100).toLocaleString('fr-FR') + ' $' : null,
+  if (it.tokens) head.append(el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString(LOCALE) + ' tokens'));
+  const meta = el('div', 'meta', [T('🤖 lanceur · ', '🤖 launcher · ') + (RUN_FR[r.phase] || r.phase), T('lancé le ', 'started ') + new Date(r.at).toLocaleString(LOCALE, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
+    r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + T(' tours', ' turns') : null, r.costUsd != null ? (Math.round(r.costUsd * 100) / 100).toLocaleString(LOCALE) + ' $' : null,
     it.pid ? 'pid ' + it.pid : null, it.sessionId].filter(Boolean).join(' · '));
   const a = prLink(it); if (a) meta.append(' · ', a);
   head.append(meta);
@@ -1417,7 +1421,7 @@ function hdParts(h) {
     h.kind ? (HD_KIND_FR[h.kind] || h.kind) : null,
     h.status ? (HD_STATUS_FR[h.status] || h.status) : null,
     h.requester ? T('demandée par ', 'requested by ') + h.requester : null,
-    when && !isNaN(when) ? T('le ', 'on ') + when.toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : null,
+    when && !isNaN(when) ? T('le ', 'on ') + when.toLocaleString(LOCALE, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : null,
     h.domain ? T('domaine ', 'domain ') + h.domain : null,
     h.severity ? T('sévérité ', 'severity ') + h.severity : null,
     h.priority ? T('priorité ', 'priority ') + (HD_PRIO_FR[h.priority] || h.priority) : null,
@@ -1807,7 +1811,7 @@ function adoptForm(it, hd, pr) {
   if (!d.error && d.changed) {
     const ul = el('ul', 'commits');
     for (const c of d.commits || []) {
-      const li = el('li'); li.append(el('code', null, String(c.sha || '').slice(0, 10)), ' ' + (c.title || ''), el('span', 'meta', '  ' + [c.author, c.date ? new Date(c.date).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : null].filter(Boolean).join(' · ')));
+      const li = el('li'); li.append(el('code', null, String(c.sha || '').slice(0, 10)), ' ' + (c.title || ''), el('span', 'meta', '  ' + [c.author, c.date ? new Date(c.date).toLocaleString(LOCALE, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : null].filter(Boolean).join(' · ')));
       ul.append(li);
     }
     f.append(ul);
@@ -1868,7 +1872,7 @@ async function dismissReboot() { try { await post('/api/reboot-dismiss'); say(T(
 function rebootPanel() {
   const rb = data.reboot; if (!rb) return null;
   const box = el('div', 'reboot');
-  box.append(el('div', 'rt', T('Windows a redémarré — ' + plural(rb.sessions.length, 'session était ouverte', 'sessions étaient ouvertes') + ' le ' + new Date(rb.at).toLocaleString('fr-FR'), 'Windows restarted — ' + plural(rb.sessions.length, 'session was open', 'sessions were open') + ' on ' + new Date(rb.at).toLocaleString('en-GB'))));
+  box.append(el('div', 'rt', T('Windows a redémarré — ' + plural(rb.sessions.length, 'session était ouverte', 'sessions étaient ouvertes') + ' le ' + new Date(rb.at).toLocaleString(LOCALE), 'Windows restarted — ' + plural(rb.sessions.length, 'session was open', 'sessions were open') + ' on ' + new Date(rb.at).toLocaleString('en-GB'))));
   const ul = el('div', 'rl');
   for (const s of rb.sessions) {
     if (!rebootPick.has(s.sessionId)) rebootPick.set(s.sessionId, true);
@@ -2001,7 +2005,7 @@ function renderList() {
         go.ondblclick = e => e.stopPropagation();
         line.append(go, el('span', 'stx', '💡 ' + sg)); line.title = T('Proposition de Claude Code : ' + sg, 'Claude Code suggestion: ' + sg); r.append(line);
       }
-      r.title = label(it) + (it.model ? T('\nmodèle : ', '\nmodel: ') + it.model : '') + (it.tokens ? T('\ncontexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens', '\ncontext: ' + it.tokens.toLocaleString('en-GB') + ' tokens') : '');
+      r.title = label(it) + (it.model ? T('\nmodèle : ', '\nmodel: ') + it.model : '') + (it.tokens ? T('\ncontexte : ' + it.tokens.toLocaleString(LOCALE) + ' tokens', '\ncontext: ' + it.tokens.toLocaleString('en-GB') + ' tokens') : '');
       r.onclick = () => select(it.key);
       r.ondblclick = () => primary(it);
       list.append(r);
@@ -2455,7 +2459,7 @@ function highlight(text, q) {
 }
 function snipEl(s, q) {
   const d = el('div', 'snip');
-  d.append(el('span', 'who', (s.role === 'user' ? T('🧑 toi', '🧑 you') : '🤖 Claude') + (s.at ? ' · ' + new Date(s.at).toLocaleString(T('fr-FR', 'en-GB'), { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '')), highlight(s.text, q));
+  d.append(el('span', 'who', (s.role === 'user' ? T('🧑 toi', '🧑 you') : '🤖 Claude') + (s.at ? ' · ' + new Date(s.at).toLocaleString(LOCALE, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '')), highlight(s.text, q));
   return d;
 }
 function renderFind() {
@@ -2774,7 +2778,7 @@ function renderDetail(force) {
   if (it.stale) { const t = el('span', 'tag cl', T('statut corrigé d\'après l\'écran', 'status corrected from the screen')); t.title = T('Claude Code la déclare encore « au travail », mais ' + (it.stale === 'hook' ? 'elle a signalé la fin de son tour (hook Stop)' : 'son écran montre un tour terminé'), 'Claude Code still reports it as "working", but ' + (it.stale === 'hook' ? 'it signalled the end of its turn (Stop hook)' : 'its screen shows a finished turn')); chip.append(t); }
   head.append(chip);
   if (it.model) { const md = el('span', 'tok', T('  ·  modèle : ', '  ·  model: ') + modelName(it.model)); md.title = it.model + T(' — modèle du dernier message de la session (suit un /model en cours de route)', ' — model of the last message of the session (follows a /model on the way)'); head.append(md); }
-  if (it.tokens) { const tk = el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString('fr-FR') + ' tokens'); tk.title = T('Taille du dernier appel au modèle : entrée + cache lu + cache écrit', 'Size of the last model call: input + cache read + cache written'); head.append(tk); }
+  if (it.tokens) { const tk = el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString(LOCALE) + ' tokens'); tk.title = T('Taille du dernier appel au modèle : entrée + cache lu + cache écrit', 'Size of the last model call: input + cache read + cache written'); head.append(tk); }
   const meta = el('div', 'meta', [it.name, short(it.cwd), it.pid ? 'pid ' + it.pid : null, it.sessionId, it.version ? 'v' + it.version : null, it.startedAt ? T('lancée il y a ' + ago(data.now - it.startedAt), 'started ' + ago(data.now - it.startedAt) + ' ago') : null].filter(Boolean).join(' · '));
   const a = prLink(it); if (a) { meta.append(' · ', a); prTags(it).forEach(t => meta.append(t)); }
   head.append(meta);
@@ -2870,11 +2874,11 @@ function renderPromptsOnly(it) {
     const ps = (it.prompts || []).slice().reverse();
     // Messages en file (tapés pendant qu'elle travaille) : pas encore dans l'historique, Claude Code les prendra au tour suivant.
     for (const q of (it.queued || []).slice().reverse()) {
-      const d = el('div', 'prompt queued'), w = el('div', 'when'); w.append(el('span', 'tag', T('en file', 'queued')), ' ' + (q.at ? new Date(q.at).toLocaleString('fr-FR') : ''));
+      const d = el('div', 'prompt queued'), w = el('div', 'when'); w.append(el('span', 'tag', T('en file', 'queued')), ' ' + (q.at ? new Date(q.at).toLocaleString(LOCALE) : ''));
       d.title = T('Mis en file pendant que la session travaille : Claude Code le prendra dès qu’il peut', 'Queued while the session works: Claude Code will take it as soon as it can'); d.append(w, el('div', null, q.text)); pr.append(d);
     }
     if (!ps.length && !(it.queued || []).length) pr.append(el('div', 'empty', it.headless ? T('Un automate reçoit ses consignes par son lanceur : rien dans l’historique des prompts.', 'An automation gets its instructions from its launcher: nothing in the prompt history.') : T('Aucun prompt récent dans l\'historique.', 'No recent prompt in the history.')));
-    for (const p of ps) { const d = el('div', 'prompt'); d.append(el('div', 'when', new Date(p.at).toLocaleString('fr-FR')), el('div', null, p.text)); pr.append(d); }
+    for (const p of ps) { const d = el('div', 'prompt'); d.append(el('div', 'when', new Date(p.at).toLocaleString(LOCALE)), el('div', null, p.text)); pr.append(d); }
   }
 }
 
@@ -2914,7 +2918,7 @@ function renderOverview() {
     const box = el('div', 'notifs');
     for (const nf of data.notifs.slice().reverse().slice(0, 30)) {
       const d = el('div', 'notif ' + (nf.kind === 'waiting' || nf.kind === 'automation' ? 'waiting' : nf.kind === 'launcher' ? 'ask' : 'done'));
-      d.append(el('span', 'dot'), el('span', 'when', new Date(nf.at).toLocaleString('fr-FR')), el('span', 'nt', (nf.kind === 'launcher' ? '🤖 ' : '') + nf.title), el('span', 'nx', nf.text));
+      d.append(el('span', 'dot'), el('span', 'when', new Date(nf.at).toLocaleString(LOCALE)), el('span', 'nt', (nf.kind === 'launcher' ? '🤖 ' : '') + nf.title), el('span', 'nx', nf.text));
       d.title = nf.pass ? T('Ouvrir cette passe', 'Open this pass') : nf.hd ? T('Ouvrir le dernier run de HD-', 'Open the last run of HD-') + nf.hd : nf.kind === 'launcher' ? T('Ouvrir la vue Lanceur', 'Open the Launcher view') : T('Sélectionner la session', 'Select the session');
       d.onclick = () => { if (nf.pass) openPass(nf.pass); else if (nf.hd) openRun(nf.hd); else if (nf.kind === 'launcher') openLauncher(); else if (byKey(nf.sessionId)) select(nf.sessionId, true); else say(T('cette session n\'est plus listée', 'this session is no longer listed')); };
       box.append(d);
@@ -2934,7 +2938,7 @@ function renderOverview() {
   else {
     const w = el('div', 'tablewrap'), t = el('table'), hr = el('tr'); [T('Quand', 'When'), 'Session', T('Résultat', 'Result')].forEach(h => hr.append(el('th', null, h))); t.append(hr);
     for (const r of data.restarts.slice().reverse()) { const tr = el('tr');
-      tr.append(el('td', null, new Date(r.at).toLocaleString('fr-FR')), el('td', null, r.name + ' (' + r.sessionId.slice(0, 8) + ')'), el('td', r.code === 0 ? 'ok' : 'ko', r.result)); t.append(tr); }
+      tr.append(el('td', null, new Date(r.at).toLocaleString(LOCALE)), el('td', null, r.name + ' (' + r.sessionId.slice(0, 8) + ')'), el('td', r.code === 0 ? 'ok' : 'ko', r.result)); t.append(tr); }
     w.append(t); body.append(w);
   }
 }
@@ -3111,8 +3115,8 @@ async function loadConv(it, mode) {
 }
 const convWhen = at => {
   const d = new Date(at); if (isNaN(d)) return '';
-  const hm = d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
-  return d.toDateString() === new Date().toDateString() ? hm : d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' }) + ' ' + hm;
+  const hm = d.toLocaleTimeString(LOCALE, { hour:'2-digit', minute:'2-digit' });
+  return d.toDateString() === new Date().toDateString() ? hm : d.toLocaleDateString(LOCALE, { day:'2-digit', month:'2-digit' }) + ' ' + hm;
 };
 // ── Markdown des messages de Claude ──
 // Les réponses de Claude sont écrites en markdown : affichées en texte brut, on lisait des ** et des ` partout.
@@ -3280,7 +3284,7 @@ function drawConv(toBottom, keepTop) {
   else if (c.end != null && !shown.length) frag.append(el('div', 'empty', c.more ? T('Rien à afficher dans ce dernier morceau du transcript : charge plus ancien.', 'Nothing to show in this last part of the transcript: load older.') : T('Aucun message.', 'No message.')));
   for (const m of shown) frag.append(convItem(m));
   list.replaceChildren(frag);
-  const st = $('convstat'); if (st) st.textContent = c.end == null ? '' : plural(shown.length, 'message', 'messages') + (c.more ? T(' · transcript lu depuis ' + Math.round((c.end - c.start) / 1024).toLocaleString('fr-FR') + ' Ko de la fin', ' · transcript read from the last ' + Math.round((c.end - c.start) / 1024).toLocaleString('fr-FR') + ' KB') : T(' · conversation entière', ' · whole conversation'));
+  const st = $('convstat'); if (st) st.textContent = c.end == null ? '' : plural(shown.length, 'message', 'messages') + (c.more ? T(' · transcript lu depuis ' + Math.round((c.end - c.start) / 1024).toLocaleString(LOCALE) + ' Ko de la fin', ' · transcript read from the last ' + Math.round((c.end - c.start) / 1024).toLocaleString(LOCALE) + ' KB') : T(' · conversation entière', ' · whole conversation'));
   if (toBottom || (atBottom && !keepTop)) list.scrollTop = list.scrollHeight;
   else if (keepTop) list.scrollTop = oldTop + (list.scrollHeight - oldH);
 }
@@ -3374,7 +3378,7 @@ async function tick() {
     if (pendingRoute) { const r = pendingRoute; pendingRoute = null; applyRoute(r); }      // ?view= : écran d'arrivée, une fois l'état connu
     if (pendingRun && runData) { const hd = pendingRun; pendingRun = null; openRun(hd); }   // ?run= : runs arrivés avant l'état
     if (!autoAsked && !automationsOff()) loadAutomations();                               // module annoncé par l'état : première lecture
-    live.className = ''; if (!notice) live.textContent = T('à jour · ', 'up to date · ') + new Date().toLocaleTimeString('fr-FR');
+    live.className = ''; if (!notice) live.textContent = T('à jour · ', 'up to date · ') + new Date().toLocaleTimeString(LOCALE);
   } catch (e) {
     console.error('[sessions] erreur de rendu :', e);
     live.className = 'down'; live.textContent = T('erreur d’affichage (console) · ', 'display error (console) · ') + (e && e.message || e);
@@ -3449,7 +3453,7 @@ document.addEventListener('mouseup', e => {
   setTimeout(() => {                                       // après le double/triple-clic : la sélection est alors complète
     const sel = getSelection(), text = sel && !sel.isCollapsed ? selectionToCopy(sel.toString()) : '';
     if (!text) return;
-    navigator.clipboard.writeText(text).then(() => say(T('copié : ' + plural(text.split('\n').length, 'ligne', 'lignes') + ' · ' + text.length.toLocaleString('fr-FR') + ' caractères', 'copied: ' + plural(text.split('\n').length, 'line', 'lines') + ' · ' + text.length.toLocaleString('fr-FR') + ' characters')), () => say(T('copie refusée par le navigateur', 'copy refused by the browser')));
+    navigator.clipboard.writeText(text).then(() => say(T('copié : ' + plural(text.split('\n').length, 'ligne', 'lignes') + ' · ' + text.length.toLocaleString(LOCALE) + ' caractères', 'copied: ' + plural(text.split('\n').length, 'line', 'lines') + ' · ' + text.length.toLocaleString(LOCALE) + ' characters')), () => say(T('copie refusée par le navigateur', 'copy refused by the browser')));
   }, 0);
 });
 $('q').addEventListener('input', () => { renderList(); scheduleFind(); });

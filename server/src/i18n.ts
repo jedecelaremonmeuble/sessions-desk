@@ -18,3 +18,5 @@ export function langOf(header: string | string[] | undefined): Lang {
 export function withLang<R>(lang: Lang, fn: () => R): R { return current.run(lang, fn); }
 /** Le texte dans la langue de la requête en cours. */
 export const T = (fr: string, en: string): string => (current.getStore() === 'en' ? en : fr);
+// teams-watcher.ts reste un fichier autonome (copié seul, sans import local) : il lit cette fonction ici.
+(globalThis as { __sessionsDeskT?: typeof T }).__sessionsDeskT = T;

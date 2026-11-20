@@ -66,6 +66,13 @@ import { randomUUID } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Langue des messages rendus à la page : la traduction du serveur (i18n.ts, qui la publie dans globalThis) quand ce
+// fichier tourne dans le serveur ; seul (copie autonome, sans import local), le français.
+const T = (fr: string, en: string): string => {
+  const t = (globalThis as { __sessionsDeskT?: (fr: string, en: string) => string }).__sessionsDeskT;
+  return t ? t(fr, en) : fr;
+};
+
 export type WaitStatus = 'open' | 'replied' | 'injected' | 'taken-over' | 'superseded' | 'dismissed' | 'expired' | 'noreply';
 export interface Reply { id: string; at: number; from: string; text: string; files: string[] }
 export interface Wait {
@@ -841,7 +848,7 @@ export async function sendChatReply(dir: string, cfg: Pick<WatcherConfig, 'conve
   if (!body) return 'message vide';
   if (body.length > 8000) return 'message trop long (8 000 caractères au plus)';
   const file = join(dir, '_conversations.json');
-  if (!readJson<ConvState>(file)?.chats[chatId]) return 'conversation introuvable';
+  if (!readJson<ConvState>(file)?.chats[chatId]) return T('conversation introuvable', 'conversation not found');
   let sent: { id?: string; createdDateTime?: string };
   try { sent = await post(`/chats/${encodeURIComponent(chatId)}/messages`, { body: { contentType: 'html', content: replyHtml(body) } }); }
   catch (e) { return `envoi refusé : ${String((e as Error).message)}`; }
@@ -865,12 +872,12 @@ const linksFile = (dir: string) => join(dir, '_links.json');
  *  première remise. `fromNow` : la session connaît déjà le fil, seuls les messages à venir lui seront remis. */
 export function linkConversation(dir: string, chatId: string, sessionId: string, now: number, o: { fresh?: boolean; fromNow?: boolean; anchor?: string; note?: string; once?: boolean } = {}): string | null {
   const c = readJson<ConvState>(join(dir, '_conversations.json'))?.chats[chatId];
-  if (!c) return 'conversation introuvable (elle doit figurer dans la vue par conversation)';
-  if (!safeSid(sessionId)) return 'identifiant de session invalide';
+  if (!c) return T('conversation introuvable (elle doit figurer dans la vue par conversation)', 'conversation not found (it must be in the conversations view)');
+  if (!safeSid(sessionId)) return T('identifiant de session invalide', 'invalid session id');
   const st: LinkState = readJson<LinkState>(linksFile(dir)) ?? { v: 1, chats: {} };
   const note = (o.note ?? '').replace(/\s+/g, ' ').trim();
-  if (note.length > 1500) return 'consigne trop longue (1 500 caractères au plus)';
-  if (o.anchor && !/^\d{6,24}$/.test(o.anchor)) return 'message de référence invalide';
+  if (note.length > 1500) return T('consigne trop longue (1 500 caractères au plus)', 'instruction too long (1,500 characters at most)');
+  if (o.anchor && !/^\d{6,24}$/.test(o.anchor)) return T('message de référence invalide', 'invalid reference message');
   st.chats[chatId] = { sessionId, at: now, upTo: o.fromNow ? c.lastAt : 0, n: o.fromNow ? 1 : 0, ...(o.fresh ? { fresh: true } : {}), ...(o.anchor ? { anchor: o.anchor } : {}), ...(note ? { note } : {}), ...(o.once ? { once: true } : {}) };
   writeAtomic(linksFile(dir), JSON.stringify(st));
   writeSummary(dir, now);
@@ -1020,17 +1027,17 @@ export async function runLinks(dir: string, cfg: Pick<WatcherConfig, 'inbound'>,
  *  AFFICHÉ (`at`), pas celle du clic : un message arrivé entre-temps reste à voir. chatId '*' = toutes les conversations. */
 export function markConversationSeen(dir: string, chatId: string, action: string, at: number, now: number): string | null {
   const conv = readJson<ConvState>(join(dir, '_conversations.json'));
-  if (!conv || conv.v !== 1) return 'vue par conversation éteinte';
-  if (action !== 'seen' && action !== 'unseen') return 'action inconnue';
+  if (!conv || conv.v !== 1) return T('vue par conversation éteinte', 'conversations view is off');
+  if (action !== 'seen' && action !== 'unseen') return T('action inconnue', 'unknown action');
   const file = join(dir, '_conv-seen.json');
   const seen: ConvSeen = readJson<ConvSeen>(file) ?? { v: 1, chats: {} };
   const shown = Number.isFinite(at) && at > 0 ? Math.min(at, now) : now;
   if (chatId === '*') {
-    if (action !== 'seen') return 'action inconnue';
+    if (action !== 'seen') return T('action inconnue', 'unknown action');
     for (const [id, c] of Object.entries(conv.chats)) seen.chats[id] = Math.max(seen.chats[id] ?? 0, Math.min(c.lastAt, shown));
   } else {
     const c = conv.chats[chatId];
-    if (!c) return 'conversation introuvable';
+    if (!c) return T('conversation introuvable', 'conversation not found');
     seen.chats[chatId] = action === 'seen' ? Math.max(seen.chats[chatId] ?? 0, Math.min(c.lastAt, shown)) : c.lastAt - 1;
   }
   // Les pointages de chats sortis de la fenêtre ne servent plus.
@@ -1317,15 +1324,15 @@ export function supersedeMail(waits: Wait[], now: number): { keep: Wait[]; super
 export type UserAction = 'dismiss' | 'remind' | 'snooze';
 /** Boutons de la page (D8) et fermeture par la session elle-même : « Ne plus attendre », « Relancer maintenant », « Repousser ». */
 export function applyAction(dir: string, sessionId: string, messageId: string, action: string, now: number, cal: Calendar = defaultCalendar): string | null {
-  if (!/^[\w-]+$/.test(sessionId) || !/^\d+$/.test(messageId)) return 'identifiant invalide';
+  if (!/^[\w-]+$/.test(sessionId) || !/^\d+$/.test(messageId)) return T('identifiant invalide', 'invalid id');
   const w = readJson<Wait>(waitFile(dir, { sessionId, messageId }));
-  if (!w || w.v !== 1) return 'attente introuvable';
-  if (!LIVE.has(w.status)) return `attente déjà close (${w.status})`;
+  if (!w || w.v !== 1) return T('attente introuvable', 'wait not found');
+  if (!LIVE.has(w.status)) return T(`attente déjà close (${w.status})`, `wait already closed (${w.status})`);
   let next: Wait;
   if (action === 'dismiss') next = { ...w, status: 'dismissed', closedAt: now };
-  else if (action === 'remind') { if (w.status !== 'open') return 'une réponse est déjà arrivée'; next = { ...w, forceRemindAt: now, snoozeUntil: undefined }; }
-  else if (action === 'snooze') { if (w.status !== 'open') return 'une réponse est déjà arrivée'; next = { ...w, snoozeUntil: nextBusinessDayAt(now, cal.laterAt), alertedAt: undefined, forceRemindAt: undefined }; }
-  else return 'action inconnue';
+  else if (action === 'remind') { if (w.status !== 'open') return T('une réponse est déjà arrivée', 'a reply has already arrived'); next = { ...w, forceRemindAt: now, snoozeUntil: undefined }; }
+  else if (action === 'snooze') { if (w.status !== 'open') return T('une réponse est déjà arrivée', 'a reply has already arrived'); next = { ...w, snoozeUntil: nextBusinessDayAt(now, cal.laterAt), alertedAt: undefined, forceRemindAt: undefined }; }
+  else return T('action inconnue', 'unknown action');
   saveWait(dir, { ...next, userActionAt: now });
   writeSummary(dir, now);
   return null;
