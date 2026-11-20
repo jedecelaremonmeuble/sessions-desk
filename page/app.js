@@ -46,18 +46,18 @@ function applyStaticText() {
 }
 applyStaticText();
 
-const LABEL = { waiting:'bloquée sur une question', ask:'attend ta décision', done:'terminé, à relire', busy:'travaille', shell:'attend sa commande en arrière-plan', idle:'inactive', auto:'automate sans terminal (claude -p)', teams:'attend un retour Teams', closed:'fermée' };
+const LABEL = { waiting:T('bloquée sur une question', 'waiting on a question'), ask:T('attend ta décision', 'waiting for your decision'), done:T('terminé, à relire', 'done, to review'), busy:T('travaille', 'working'), shell:T('attend sa commande en arrière-plan', 'waiting on a background command'), idle:T('inactive', 'idle'), auto:T('automate sans terminal (claude -p)', 'automation without a terminal (claude -p)'), teams:T('attend un retour Teams', 'waiting for a Teams reply'), closed:T('fermée', 'closed') };
 const GROUPS = [
-  { key:'todo',   title:'À traiter',  states:['waiting','ask','done'], asc:true },
-  { key:'work',   title:'Au travail', states:['busy','shell'] },
+  { key:'todo',   title:T('À traiter', 'To handle'),  states:['waiting','ask','done'], asc:true },
+  { key:'work',   title:T('Au travail', 'Working'), states:['busy','shell'] },
   // Sessions dont le tour est fini (ou fermées) et qui attendent la réponse d'un collègue sur Teams : rien à faire tant
   // qu'il n'a pas répondu (le veilleur injecte la réponse et la session repart seule). Voir teamsHeld.
-  { key:'teams',  title:'⏳ Attente Teams', states:['teams'] },
-  { key:'idle',   title:'Inactives',  states:['idle'] },
+  { key:'teams',  title:T('⏳ Attente Teams', '⏳ Waiting on Teams'), states:['teams'] },
+  { key:'idle',   title:T('Inactives', 'Idle'),  states:['idle'] },
   // Runs du lanceur du jour (+ en cours) et autres claude -p lancés par un script : suivis ici, pas pilotables d'ici.
   // Replié, le groupe garde visibles les runs en cours, en échec et ceux qui attendent l'utilisateur.
-  { key:'auto',   title:'🤖 Lanceur', states:['auto'] },
-  { key:'closed', title:'Fermées, reprenables', states:['closed'] } ];
+  { key:'auto',   title:T('🤖 Lanceur', '🤖 Launcher'), states:['auto'] },
+  { key:'closed', title:T('Fermées, reprenables', 'Closed, reopenable'), states:['closed'] } ];
 let data = null, closedData = { days:0, closed:[] }, flat = [], notice = null, lastScreen = null, detailKey = null;
 let favs = new Set(), favOnly = localStorage.getItem('cc.favonly') === '1';
 // Ordre dans chaque groupe : 'activity' (dernier changement d'état, par défaut) ou 'created' (création de la session, la plus
@@ -69,7 +69,7 @@ let collapsed = new Set(JSON.parse(localStorage.getItem('cc.collapsed') || '["cl
 if (!localStorage.getItem('cc.autoGroup')) { collapsed.add('auto'); localStorage.setItem('cc.autoGroup', '1'); localStorage.setItem('cc.collapsed', JSON.stringify([...collapsed])); }   // replié par défaut
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-const ago = ms => { const s = Math.max(0, Math.round(ms/1000)); if (s < 60) return s + ' s'; const m = Math.floor(s/60); if (m < 60) return m + ' min'; const h = Math.floor(m/60); return h < 48 ? h + ' h ' + String(m%60).padStart(2,'0') : Math.floor(h/24) + ' j'; };
+const ago = ms => { const s = Math.max(0, Math.round(ms/1000)); if (s < 60) return s + ' s'; const m = Math.floor(s/60); if (m < 60) return m + ' min'; const h = Math.floor(m/60); return h < 48 ? h + ' h ' + String(m%60).padStart(2,'0') : Math.floor(h/24) + T(' j', ' d'); };
 const ktok = n => n == null ? '' : n < 1000 ? String(n) : Math.round(n / 1000) + ' k';
 // « claude-opus-5-5 » → « Opus 5.5 », « claude-fable-5-2[1m] » → « Fable 5.2 1M » ; un id inconnu s'affiche tel quel.
 const modelName = m => { if (!m) return ''; const x = /^claude-([a-z]+)-(\d{1,2})-(\d{1,2})(?!\d)/.exec(m); return x ? x[1][0].toUpperCase() + x[1].slice(1) + ' ' + x[2] + '.' + x[3] + (m.includes('[1m]') ? ' 1M' : '') : m.replace(/^claude-/, ''); };
@@ -122,13 +122,13 @@ function quotaView(q, now) {
   return v;
 }
 const PLAN_FR = p => { const m = /max_(\d+)x/i.exec(p || ''); return m ? 'Max ' + m[1] + 'x' : /pro/i.test(p || '') ? 'Pro' : (p || '').replace(/^default_claude_/, ''); };
-const atFr = ms => new Date(ms).toLocaleString('fr-FR', { weekday:'short', hour:'2-digit', minute:'2-digit' });
-const inFr = ms => { const m = Math.max(0, Math.round(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60); return d ? d + ' j ' + h + ' h' : h ? h + ' h ' + String(m % 60).padStart(2, '0') : m + ' min'; };
+const atFr = ms => new Date(ms).toLocaleString(T('fr-FR', 'en-GB'), { weekday:'short', hour:'2-digit', minute:'2-digit' });
+const inFr = ms => { const m = Math.max(0, Math.round(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60); return d ? d + T(' j ', ' d ') + h + ' h' : h ? h + ' h ' + String(m % 60).padStart(2, '0') : m + ' min'; };
 const pts = n => (n > 0 ? '+' : '') + n + ' pt' + (Math.abs(n) > 1 ? 's' : '');
 const quotas = () => ((data && data.quota) || []).map(q => quotaView(q, Date.now()));
 function quotaBar(v) {
   const b = el('div', 'qbar ' + v.level); const f = el('i'); f.style.width = Math.min(100, v.pct || 0) + '%'; b.append(f);
-  if (v.elapsed != null) { const m = el('u'); m.style.left = v.elapsed + '%'; m.title = Math.round(v.elapsed) + ' % de la semaine écoulée'; b.append(m); }
+  if (v.elapsed != null) { const m = el('u'); m.style.left = v.elapsed + '%'; m.title = T(Math.round(v.elapsed) + ' % de la semaine écoulée', Math.round(v.elapsed) + '% of the week elapsed'); b.append(m); }
   return b;
 }
 // MODE DÉGRADÉ des propositions de prompt. Claude Code cesse d'en générer dès que le quota n'est plus « allowed »
@@ -145,13 +145,13 @@ function suggestionMode(quota, setting, now) {
   if (!full.length && !warn.length) return null;
   const back = Math.max(...(full.length ? full : warn).map(l => l.reset || 0)) || null;
   const forced = !!(setting && setting.forced);
-  if (full.length) return { level: 'waiting', text: '💡 mode dégradé : quota épuisé, plus de proposition de prompt', back,
-    tip: 'Une limite est à 100 % : Claude Code ne génère aucune proposition, même forcée.' };
-  if (forced) return { level: 'ask', text: '💡 mode dégradé : propositions forcées', back,
-    tip: 'Quota en alerte : Claude Code couperait les propositions, CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION les force (elles consomment un peu de quota).'
-      + (setting.since ? '\nRéglage posé ' + atFr(setting.since) + ' : une session ouverte avant ne le voit qu’après redémarrage.' : '') };
-  return { level: 'waiting', text: '💡 mode dégradé : Claude Code ne propose plus de prompt', back,
-    tip: 'Quota en alerte : Claude Code ne génère plus de proposition de prompt (ligne 💡 de la liste vide).\nPour les garder : CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=true dans le bloc env de ~/.claude/settings.json (nouvelles sessions).' };
+  if (full.length) return { level: 'waiting', text: T('💡 mode dégradé : quota épuisé, plus de proposition de prompt', '💡 degraded mode: quota used up, no more prompt suggestions'), back,
+    tip: T('Une limite est à 100 % : Claude Code ne génère aucune proposition, même forcée.', 'A limit is at 100%: Claude Code generates no suggestion, even when forced.') };
+  if (forced) return { level: 'ask', text: T('💡 mode dégradé : propositions forcées', '💡 degraded mode: suggestions forced'), back,
+    tip: T('Quota en alerte : Claude Code couperait les propositions, CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION les force (elles consomment un peu de quota).', 'Quota warning: Claude Code would turn suggestions off, CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION forces them (they use a little quota).')
+      + (setting.since ? T('\nRéglage posé ' + atFr(setting.since) + ' : une session ouverte avant ne le voit qu’après redémarrage.', '\nSetting applied ' + atFr(setting.since) + ': a session opened before only sees it after a restart.') : '') };
+  return { level: 'waiting', text: T('💡 mode dégradé : Claude Code ne propose plus de prompt', '💡 degraded mode: Claude Code no longer suggests prompts'), back,
+    tip: T('Quota en alerte : Claude Code ne génère plus de proposition de prompt (ligne 💡 de la liste vide).\nPour les garder : CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=true dans le bloc env de ~/.claude/settings.json (nouvelles sessions).', 'Quota warning: Claude Code no longer generates prompt suggestions (the 💡 line of the list is empty).\nTo keep them: CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=true in the env block of ~/.claude/settings.json (new sessions).') };
 }
 // Bandeau compact de la barre latérale : un compte par ligne (le nom seulement s'il y en a plusieurs).
 function renderQuota() {
@@ -163,14 +163,14 @@ function renderQuota() {
   if (box.dataset.sig === sigA) return; box.dataset.sig = sigA; box.replaceChildren();
   for (const v of vs) {
     const d = el('div', 'qline' + (v.stale ? ' stale' : '') + (v.active && vs.length > 1 ? ' active' : ''));
-    d.title = 'Quota hebdomadaire Claude' + (vs.length > 1 ? ' — ' + v.alias : '') + (v.active ? ' (compte connecté, celui que consomment les sessions)' : '') + ' · cliquer : détail dans la vue d\'ensemble';
+    d.title = T('Quota hebdomadaire Claude', 'Claude weekly quota') + (vs.length > 1 ? ' — ' + v.alias : '') + (v.active ? T(' (compte connecté, celui que consomment les sessions)', ' (signed-in account, the one sessions use)') : '') + T(' · cliquer : détail dans la vue d\'ensemble', ' · click: details in the overview');
     const txt = el('span', 'qt');
-    txt.append(el('b', null, Math.round(v.pct) + ' %'), ' semaine' + (vs.length > 1 ? ' · ' + v.alias.split('@')[0] : ''));
-    const info = v.expired ? 'relevé d\'avant la remise' : v.fullAt ? '100 % ' + atFr(v.fullAt) : v.reset ? 'remise ' + atFr(v.reset) : '';
+    txt.append(el('b', null, Math.round(v.pct) + ' %'), T(' semaine', ' week') + (vs.length > 1 ? ' · ' + v.alias.split('@')[0] : ''));
+    const info = v.expired ? T('relevé d\'avant la remise', 'reading from before the reset') : v.fullAt ? '100 % ' + atFr(v.fullAt) : v.reset ? T('remise ', 'reset ') + atFr(v.reset) : '';
     const main = el('div', 'qcell'); main.append(txt, el('span', 'qx' + (v.fullAt ? ' warn' : ''), info), quotaBar(v)); d.append(main);
     for (const m of v.models) {                                                 // même ligne : une barre par modèle limité à part
       const mc = el('div', 'qcell'), mt = el('span', 'qt'); mt.append(el('b', null, Math.round(m.pct) + ' %'), ' ' + m.name);
-      mc.title = 'Quota hebdomadaire propre au modèle ' + m.name;
+      mc.title = T('Quota hebdomadaire propre au modèle ' + m.name, 'Weekly quota of the ' + m.name + ' model');
       mc.append(mt, el('span', 'qx'), quotaBar(m)); d.append(mc);
     }
     d.onclick = () => { findMode = newMode = bcMode = boardMode = chatsMode = false; if (launchMode) closeLauncher(); selected = null; sessionStorage.removeItem('cc.sel'); renderList(); renderDetail(true); };
@@ -178,7 +178,7 @@ function renderQuota() {
   }
   if (sm) {
     const d = el('div', 'qdeg ' + sm.level); d.title = sm.tip;
-    d.append(el('span', null, sm.text), el('span', 'qx', sm.back ? 'retour ' + atFr(sm.back) : ''));
+    d.append(el('span', null, sm.text), el('span', 'qx', sm.back ? T('retour ', 'back ') + atFr(sm.back) : ''));
     box.append(d);
   }
 }
@@ -188,23 +188,23 @@ function quotaSection() {
   const box = el('div', 'qcards');
   for (const v of vs) {
     const c = el('div', 'qcard ' + v.level + (v.active && vs.length > 1 ? ' active' : ''));
-    const h = el('div', 'qhead'); h.append(el('b', null, v.ok ? Math.round(v.pct) + ' %' : '—'), el('span', null, v.alias + (data.quota.find(q => q.alias === v.alias)?.plan ? ' · ' + PLAN_FR(data.quota.find(q => q.alias === v.alias).plan) : '') + (v.active && vs.length > 1 ? ' · connecté' : '')));
+    const h = el('div', 'qhead'); h.append(el('b', null, v.ok ? Math.round(v.pct) + ' %' : '—'), el('span', null, v.alias + (data.quota.find(q => q.alias === v.alias)?.plan ? ' · ' + PLAN_FR(data.quota.find(q => q.alias === v.alias).plan) : '') + (v.active && vs.length > 1 ? T(' · connecté', ' · signed in') : '')));
     c.append(h);
     if (v.ok) {                                                                 // barres côte à côte : tous modèles, puis chaque modèle limité à part
       const row = el('div', 'qrow');
       const cell = (pct, label, bar) => { const x = el('div', 'qcell'), t = el('div', 'qmodel'); t.append(el('b', null, Math.round(pct) + ' %'), el('span', null, label)); x.append(t, bar); return x; };
-      if (v.models.length) { row.append(cell(v.pct, 'tous modèles', quotaBar(v))); for (const m of v.models) row.append(cell(m.pct, 'modèle ' + m.name, quotaBar(m))); c.append(row); }
+      if (v.models.length) { row.append(cell(v.pct, T('tous modèles', 'all models'), quotaBar(v))); for (const m of v.models) row.append(cell(m.pct, T('modèle ' + m.name, m.name + ' model'), quotaBar(m))); c.append(row); }
       else c.append(quotaBar(v));
     }
     const lines = [];
-    if (!v.ok) lines.push(['pas de mesure', v.status || 'aucun relevé']);
-    if (v.expired) lines.push(['remise', 'passée depuis le relevé — en attente d\'une nouvelle mesure']);
-    else if (v.reset) lines.push(['remise', 'dans ' + inFr(v.reset - Date.now()) + ' (' + atFr(v.reset) + ')']);
-    if (v.pace != null) lines.push(['rythme', Math.round(v.elapsed) + ' % de la semaine écoulée · ' + (v.pace === 0 ? 'pile dans le rythme régulier' : pts(v.pace) + (v.pace > 0 ? ' au-dessus' : ' sous') + ' du rythme régulier')]);
-    if (v.budgetPerDay != null) lines.push(['budget', Math.round(v.budgetPerDay) + ' %/jour jusqu\'à la remise' + (v.recentPerDay != null ? ' · rythme des 30 dernières heures : ' + Math.round(v.recentPerDay) + ' %/jour' : '')]);
-    if (v.projected != null && !v.expired) lines.push(['projection', Math.round(v.projected) + ' % à la remise' + (v.fullAt ? ' — 100 % atteint ' + atFr(v.fullAt) + ' (dans ' + inFr(v.fullAt - Date.now()) + ')' : '')]);
-    if (v.fiveHour) lines.push(['fenêtre 5 h', Math.round(v.fiveHour.pct) + ' %' + (v.fiveHour.reset ? ' · remise ' + atFr(v.fiveHour.reset) : '')]);
-    if (v.age != null) lines.push(['relevé', 'il y a ' + ago(v.age) + (v.status && v.status !== 'ok' ? ' · dernière tentative : ' + v.status : '') + (v.stale && !v.expired && v.status === 'ok' ? ' — le collecteur du lanceur tourne-t-il ?' : '')]);
+    if (!v.ok) lines.push([T('pas de mesure', 'no measurement'), v.status || T('aucun relevé', 'no reading')]);
+    if (v.expired) lines.push([T('remise', 'reset'), T('passée depuis le relevé — en attente d\'une nouvelle mesure', 'passed since the reading — waiting for a new measurement')]);
+    else if (v.reset) lines.push([T('remise', 'reset'), T('dans ' + inFr(v.reset - Date.now()) + ' (' + atFr(v.reset) + ')', 'in ' + inFr(v.reset - Date.now()) + ' (' + atFr(v.reset) + ')')]);
+    if (v.pace != null) lines.push([T('rythme', 'pace'), T(Math.round(v.elapsed) + ' % de la semaine écoulée · ' + (v.pace === 0 ? 'pile dans le rythme régulier' : pts(v.pace) + (v.pace > 0 ? ' au-dessus' : ' sous') + ' du rythme régulier'), Math.round(v.elapsed) + '% of the week elapsed · ' + (v.pace === 0 ? 'exactly on a steady pace' : pts(v.pace) + (v.pace > 0 ? ' above' : ' below') + ' a steady pace'))]);
+    if (v.budgetPerDay != null) lines.push([T('budget', 'budget'), T(Math.round(v.budgetPerDay) + ' %/jour jusqu\'à la remise' + (v.recentPerDay != null ? ' · rythme des 30 dernières heures : ' + Math.round(v.recentPerDay) + ' %/jour' : ''), Math.round(v.budgetPerDay) + '%/day until the reset' + (v.recentPerDay != null ? ' · pace over the last 30 hours: ' + Math.round(v.recentPerDay) + '%/day' : ''))]);
+    if (v.projected != null && !v.expired) lines.push([T('projection', 'projection'), T(Math.round(v.projected) + ' % à la remise' + (v.fullAt ? ' — 100 % atteint ' + atFr(v.fullAt) + ' (dans ' + inFr(v.fullAt - Date.now()) + ')' : ''), Math.round(v.projected) + '% at the reset' + (v.fullAt ? ' — 100% reached ' + atFr(v.fullAt) + ' (in ' + inFr(v.fullAt - Date.now()) + ')' : ''))]);
+    if (v.fiveHour) lines.push([T('fenêtre 5 h', '5 h window'), Math.round(v.fiveHour.pct) + ' %' + (v.fiveHour.reset ? T(' · remise ', ' · reset ') + atFr(v.fiveHour.reset) : '')]);
+    if (v.age != null) lines.push([T('relevé', 'reading'), T('il y a ' + ago(v.age), ago(v.age) + ' ago') + (v.status && v.status !== 'ok' ? T(' · dernière tentative : ', ' · last attempt: ') + v.status : '') + (v.stale && !v.expired && v.status === 'ok' ? T(' — le collecteur du lanceur tourne-t-il ?', ' — is the launcher collector running?') : '')]);
     const dl = el('dl'); for (const [k, x] of lines) dl.append(el('dt', null, k), el('dd', null, x)); c.append(dl);
     box.append(c);
   }
@@ -220,8 +220,8 @@ const stateOf = it => it.kind === 'closed' ? 'closed' : it.kind === 'pass' ? 'au
   : it.status === 'shell' ? (asksOf(it) ? 'ask' : 'shell') : (LABEL[it.status] ? it.status : 'idle');
 function prTags(it) {
   const p = it.prInfo; if (!p || !it.pr) return [];
-  const out = [p.state === 'MERGED' ? el('span', 'tag merged', 'mergée') : p.state === 'CLOSED' ? el('span', 'tag closedpr', 'fermée sans merge') : el('span', 'tag ' + (p.draft ? 'draft' : 'open'), p.draft ? 'brouillon' : 'ouverte')];
-  if (p.state === 'OPEN' && p.checks) out.push(el('span', 'tag ' + p.checks, p.checks === 'ok' ? 'CI verte' : p.checks === 'ko' ? 'CI rouge' : 'CI en cours'));
+  const out = [p.state === 'MERGED' ? el('span', 'tag merged', T('mergée', 'merged')) : p.state === 'CLOSED' ? el('span', 'tag closedpr', T('fermée sans merge', 'closed without merge')) : el('span', 'tag ' + (p.draft ? 'draft' : 'open'), p.draft ? T('brouillon', 'draft') : T('ouverte', 'open'))];
+  if (p.state === 'OPEN' && p.checks) out.push(el('span', 'tag ' + p.checks, p.checks === 'ok' ? T('CI verte', 'CI green') : p.checks === 'ko' ? T('CI rouge', 'CI red') : T('CI en cours', 'CI running')));
   return out;
 }
 
@@ -234,13 +234,13 @@ function allItems() {
   const runIds = new Set(rg.items.flatMap(it => it.runs || [it]).concat(ag.items).map(it => it.sessionId).filter(Boolean));     // un run « ↻ repris » n'est pas aussi une fermée
   const closed = closedData.closed.filter(c => !ids.has(c.sessionId) && !runIds.has(c.sessionId)).map(c => ({ ...c, kind:'closed', key:c.sessionId, since:c.lastActivity }));
   return open.concat(closed, rg.items, ag.items).map(it => ({ ...it, state: teamsHeld(stateOf(it), teamsWaitsOf(it)) ? 'teams' : stateOf(it), fav: favs.has(it.key), hidden: it.kind === 'closed' && hiddenSet.has(it.key),
-    hay: norm([it.title, it.name, it.pr ? '#' + it.pr + ' pr ' + it.pr : '', it.sessionId, it.cwd, it.reply, it.suggestion, it.outcome, it.run ? (it.runs || [it]).map(x => x.run.phase + ' ' + (x.run.detail || '')).join(' ') : '', it.kind === 'pass' ? it.auto.label + ' ' + (it.pass ? it.pass.summary + ' ' + (PASS_FR[it.pass.status] || '') : 'en cours') : '', (it.prompts || []).map(p => p.text).join(' '), tagHay(it)].join(' ')) }));
+    hay: norm([it.title, it.name, it.pr ? '#' + it.pr + ' pr ' + it.pr : '', it.sessionId, it.cwd, it.reply, it.suggestion, it.outcome, it.run ? (it.runs || [it]).map(x => x.run.phase + ' ' + (x.run.detail || '')).join(' ') : '', it.kind === 'pass' ? it.auto.label + ' ' + (it.pass ? it.pass.summary + ' ' + (PASS_FR[it.pass.status] || '') : T('en cours', 'running')) : '', (it.prompts || []).map(p => p.text).join(' '), tagHay(it)].join(' ')) }));
 }
 
 // ── Tags de l'étiqueteur ──
 // Puces par axe sous la ligne ; clic = filtre « axe:valeur » ajouté à la recherche (« tag:valeur » cherche tous les axes).
 const TAG_AXES = ['domaine', 'outil', 'fonction', 'origine', 'hd'];
-const ORIGINE_FR = { 'lanceur-diag':'lanceur · diagnostic', 'lanceur-dev':'lanceur · dev', 'lanceur-relecture':'lanceur · relecture', 'lanceur-recette':'lanceur · recette', 'lanceur-reprise':'lanceur · reprise', automate:'automate', interactive:'interactive' };
+const ORIGINE_FR = { 'lanceur-diag':T('lanceur · diagnostic', 'launcher · diagnosis'), 'lanceur-dev':T('lanceur · dev', 'launcher · dev'), 'lanceur-relecture':T('lanceur · relecture', 'launcher · code review'), 'lanceur-recette':T('lanceur · recette', 'launcher · testing'), 'lanceur-reprise':T('lanceur · reprise', 'launcher · rework'), automate:T('automate', 'automation'), interactive:T('interactive', 'interactive') };
 const tagSlug = v => norm(v).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const tagToken = t => t.axis + ':' + tagSlug(t.v);
 const isTagToken = s => /^(domaine|outil|fonction|origine|hd|tag):/i.test(s);
@@ -258,18 +258,18 @@ function tagChips(it, cls) {
   const box = el('span', cls);
   for (const t of ts) {
     const c = el('span', 'chip ' + t.axis + (t.src === 'manuel' ? ' man' : ''), t.axis === 'origine' ? ORIGINE_FR[t.v] || t.v : t.v);
-    c.title = t.axis + ' : ' + t.v + (t.src ? '  (source : ' + t.src + ')' : '') + '\nclic : filtrer la liste sur « ' + tagToken(t) + ' »';
+    c.title = T(t.axis + ' : ' + t.v + (t.src ? '  (source : ' + t.src + ')' : '') + '\nclic : filtrer la liste sur « ' + tagToken(t) + ' »', t.axis + ': ' + t.v + (t.src ? '  (source: ' + t.src + ')' : '') + '\nclick: filter the list on "' + tagToken(t) + '"');
     c.onclick = e => { e.stopPropagation(); filterTag(t); };
     c.ondblclick = e => e.stopPropagation();
     if (edit && TAG_EDITABLE.includes(t.axis)) {
-      const x = el('span', 'x', '×'); x.title = 'Retirer ce tag (gardé retiré même si l’étiqueteur le repropose)';
+      const x = el('span', 'x', '×'); x.title = T('Retirer ce tag (gardé retiré même si l’étiqueteur le repropose)', 'Remove this tag (stays removed even if the tagger suggests it again)');
       x.onclick = e => { e.stopPropagation(); postTag(it, t.axis, t.v, false); };
       c.append(x);
     }
     box.append(c);
   }
   if (edit) {
-    const add = el('span', 'chip add', '+ tag'); add.title = 'Ajouter un domaine, un outil ou une fonctionnalité';
+    const add = el('span', 'chip add', '+ tag'); add.title = T('Ajouter un domaine, un outil ou une fonctionnalité', 'Add a domain, a tool or a feature');
     add.onclick = e => { e.stopPropagation(); openTagEdit(it, add); };
     box.append(add);
   }
@@ -288,9 +288,9 @@ async function postTag(it, axis, v, on) {
   try {
     const r = await fetch('/api/tags', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ id: it.sessionId, axis, v, on }) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) { say(j.error || 'correction refusée'); return false; }
-    say((on ? 'tag ajouté : ' : 'tag retiré : ') + axis + ' ' + v); tick(); return true;
-  } catch { say('correction impossible'); return false; }
+    if (!r.ok) { say(j.error || T('correction refusée', 'change refused')); return false; }
+    say((on ? T('tag ajouté : ', 'tag added: ') : T('tag retiré : ', 'tag removed: ')) + axis + ' ' + v); tick(); return true;
+  } catch { say(T('correction impossible', 'could not change the tag')); return false; }
 }
 /** Fenêtre flottante attachée au document (l'en-tête du détail est redessiné toutes les 2 s : elle doit lui survivre). */
 async function openTagEdit(it, anchor) {
@@ -308,16 +308,16 @@ async function openTagEdit(it, anchor) {
   const fill = () => {
     dl.replaceChildren(); const list = ax.value === 'domaine' ? vocab.domaines : ax.value === 'outil' ? vocab.outils : fonctions;
     for (const v of list) { const o = el('option'); o.value = v; dl.append(o); }
-    inp.placeholder = ax.value === 'fonction' ? 'ex. power-dial (minuscules, mots reliés par -)' : 'choisir dans la liste';
+    inp.placeholder = ax.value === 'fonction' ? T('ex. power-dial (minuscules, mots reliés par -)', 'e.g. power-dial (lowercase, words joined by -)') : T('choisir dans la liste', 'pick from the list');
   };
   ax.onchange = () => { fill(); inp.value = ''; inp.focus(); };
-  const ok = el('button', 'primary', 'Ajouter'), ko = el('button', null, 'Annuler');
+  const ok = el('button', 'primary', T('Ajouter', 'Add')), ko = el('button', null, T('Annuler', 'Cancel'));
   const close = () => { pop.remove(); document.removeEventListener('mousedown', outside, true); };
   const outside = e => { if (!pop.contains(e.target)) close(); };
   const submit = async () => {
     const v = inp.value.trim(); if (!v) return;
     const closed = ax.value === 'domaine' ? vocab.domaines : ax.value === 'outil' ? vocab.outils : null;
-    if (closed && !closed.includes(v)) { say(ax.value + ' hors liste : ' + v); return; }
+    if (closed && !closed.includes(v)) { say(T(ax.value + ' hors liste : ' + v, ax.value + ' not in the list: ' + v)); return; }
     if (await postTag(it, ax.value, v, true)) close();
   };
   ok.onclick = submit; ko.onclick = close;
@@ -332,47 +332,47 @@ async function openTagEdit(it, anchor) {
 }
 // Validations métier (teams-watcher.ts, lot 5) : ce que le métier a tranché, qualifié par la session, avec sa
 // preuve. Pures et autonomes. Une validation métier n'est jamais un go.
-const VAL_FR = { valide:'validé', 'valide-reserve':'validé sous réserve', refuse:'refusé', 'a-preciser':'à préciser' };
-const VAL_CH = { teams:'Teams', mail:'email', inbound:'demande Teams', relayed:'rapportée, sans écrit' };
+const VAL_FR = { valide:T('validé', 'approved'), 'valide-reserve':T('validé sous réserve', 'approved with reservations'), refuse:T('refusé', 'refused'), 'a-preciser':T('à préciser', 'to clarify') };
+const VAL_CH = { teams:'Teams', mail:'email', inbound:T('demande Teams', 'Teams request'), relayed:T('rapportée, sans écrit', 'reported, not in writing') };
 function validationBadge(v) {
   if (!v || !v.total) return null;
   const ok = v.settled - v.refused, pl = (n, one, many) => n + ' ' + (n > 1 ? many : one);
-  const parts = [ok ? pl(ok, 'validée', 'validées') : null, v.refused ? v.refused + ' refus' : null, v.pending ? v.pending + ' à préciser' : null,
-    v.expected ? '⏳ ' + pl(v.expected, 'attendue', 'attendues') : null, v.unqualified ? '⚠️ ' + pl(v.unqualified, 'réponse non qualifiée', 'réponses non qualifiées') : null,
-    v.unanswered ? pl(v.unanswered, 'sans réponse', 'sans réponse') : null].filter(Boolean);
+  const parts = [ok ? pl(ok, T('validée', 'approved'), T('validées', 'approved')) : null, v.refused ? v.refused + T(' refus', ' refused') : null, v.pending ? v.pending + T(' à préciser', ' to clarify') : null,
+    v.expected ? '⏳ ' + pl(v.expected, T('attendue', 'expected'), T('attendues', 'expected')) : null, v.unqualified ? '⚠️ ' + pl(v.unqualified, T('réponse non qualifiée', 'unqualified reply'), T('réponses non qualifiées', 'unqualified replies')) : null,
+    v.unanswered ? pl(v.unanswered, T('sans réponse', 'unanswered'), T('sans réponse', 'unanswered')) : null].filter(Boolean);
   return (ok || v.refused || v.pending ? '✅ ' : '') + (parts.join(' · ') || pl(v.total, 'question', 'questions'));
 }
 // Âge court (comme teamsWaitLine) : « 40 min », « 3 h », « 2 j ».
-const valAge = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h' : Math.floor(m / 1440) + ' j'; };
+const valAge = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h' : Math.floor(m / 1440) + T(' j', ' d'); };
 function validationLine(i, now) {
-  const at = new Date(i.at).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  const since = i.expectedAt ? ' depuis ' + valAge((now || Date.now()) - i.expectedAt) : '';
+  const at = new Date(i.at).toLocaleString(T('fr-FR', 'en-GB'), { timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const since = i.expectedAt ? T(' depuis ', ' for ') + valAge((now || Date.now()) - i.expectedAt) : '';
   if (!i.withdrawn && (i.state === 'attendue' || i.state === 'non-qualifiee' || i.state === 'sans-reponse'))
-    return i.q + ' · ' + (i.state === 'attendue' ? '⏳ attendue de ' + (i.to || '?') + since
-      : i.state === 'non-qualifiee' ? '⚠️ ' + (i.to || '?') + ' a répondu, la session n’a rien enregistré'
-      : 'sans réponse de ' + (i.to || '?') + ' (attente expirée)');
-  return i.q + ' · ' + (i.withdrawn ? 'retirée' : VAL_FR[i.decision] || i.decision) + ' · ' + (i.validator || '?') + ' · ' + at + ' (' + (VAL_CH[i.channel] || i.channel) + ')'
-    + (i.changes ? ' · modifiée ' + i.changes + ' fois' : '')
+    return i.q + ' · ' + (i.state === 'attendue' ? T('⏳ attendue de ', '⏳ expected from ') + (i.to || '?') + since
+      : i.state === 'non-qualifiee' ? T('⚠️ ' + (i.to || '?') + ' a répondu, la session n’a rien enregistré', '⚠️ ' + (i.to || '?') + ' replied, the session recorded nothing')
+      : T('sans réponse de ' + (i.to || '?') + ' (attente expirée)', 'no reply from ' + (i.to || '?') + ' (wait expired)'));
+  return i.q + ' · ' + (i.withdrawn ? T('retirée', 'withdrawn') : VAL_FR[i.decision] || i.decision) + ' · ' + (i.validator || '?') + ' · ' + at + ' (' + (VAL_CH[i.channel] || i.channel) + ')'
+    + (i.changes ? T(' · modifiée ' + i.changes + ' fois', ' · changed ' + i.changes + (i.changes > 1 ? ' times' : ' time')) : '')
     // Recopie sur le ticket (lot 7) : rien tant que le module est éteint.
-    + (!i.exported || i.withdrawn ? '' : i.exported === 'ok' ? ' · 📌 recopiée sur le ticket' : i.exported === 'echec' ? ' · ⚠️ recopie en échec'
-      : i.exported === 'attente' ? ' · recopie à réessayer' : ' · non recopiée (' + i.exported.slice(5) + ')');
+    + (!i.exported || i.withdrawn ? '' : i.exported === 'ok' ? T(' · 📌 recopiée sur le ticket', ' · 📌 copied to the ticket') : i.exported === 'echec' ? T(' · ⚠️ recopie en échec', ' · ⚠️ copy to the ticket failed')
+      : i.exported === 'attente' ? T(' · recopie à réessayer', ' · copy to retry') : T(' · non recopiée (' + i.exported.slice(5) + ')', ' · not copied (' + i.exported.slice(5) + ')'));
 }
 const validationsOf = it => (data && data.teams && data.teams.validations && it.sessionId && data.teams.validations[it.sessionId]) || null;
 
 // Réponses Teams attendues (teams-watcher.ts, le cadrage) : une ligne par
 // attente. Pure et autonome (testée seule par sessions-dashboard-tests.ps1).
 function teamsWaitLine(w, now, remindersOn) {
-  const d = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h' : Math.floor(m / 1440) + ' j'; };
+  const d = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h' : Math.floor(m / 1440) + T(' j', ' d'); };
   const day = t => new Date(t).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris' });
-  const at = t => (day(t) === day(now) ? '' : new Date(t).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'short' }) + ' ')
-    + new Date(t).toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
-  const who = w.chatLabel || 'le chat Teams';
-  if (w.status === 'replied') return '💬 ' + (w.replyFrom || who) + ' a répondu il y a ' + d(now - (w.repliedAt ?? now)) + (w.lastError ? ' · pas encore transmise (' + w.lastError + ')' : ' · transmission en cours');
-  let s = '⏳ attend ' + who + ' depuis ' + d(now - (w.firstSentAt ?? w.sentAt));
-  if (w.reminders) s += ' · ' + w.reminders + (w.reminders > 1 ? ' relances faites' : ' relance faite');
-  if (w.alertedAt) return '🔔 ' + who + ' n’a pas répondu depuis ' + d(now - (w.firstSentAt ?? w.sentAt)) + (w.reminders ? ' malgré ' + w.reminders + (w.reminders > 1 ? ' relances' : ' relance') : '');
-  if (w.next && w.next.kind === 'remind' && remindersOn) s += ' · relance à ' + at(w.next.at);
-  else if (w.next && w.next.kind === 'alert') s += ' · alerte à ' + at(w.next.at);
+  const at = t => (day(t) === day(now) ? '' : new Date(t).toLocaleDateString(T('fr-FR', 'en-GB'), { timeZone: 'Europe/Paris', weekday: 'short' }) + ' ')
+    + new Date(t).toLocaleTimeString(T('fr-FR', 'en-GB'), { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
+  const who = w.chatLabel || T('le chat Teams', 'the Teams chat');
+  if (w.status === 'replied') return T('💬 ' + (w.replyFrom || who) + ' a répondu il y a ' + d(now - (w.repliedAt ?? now)), '💬 ' + (w.replyFrom || who) + ' replied ' + d(now - (w.repliedAt ?? now)) + ' ago') + (w.lastError ? T(' · pas encore transmise (' + w.lastError + ')', ' · not passed on yet (' + w.lastError + ')') : T(' · transmission en cours', ' · passing it on'));
+  let s = T('⏳ attend ' + who + ' depuis ' + d(now - (w.firstSentAt ?? w.sentAt)), '⏳ waiting for ' + who + ' for ' + d(now - (w.firstSentAt ?? w.sentAt)));
+  if (w.reminders) s += ' · ' + w.reminders + (w.reminders > 1 ? T(' relances faites', ' reminders sent') : T(' relance faite', ' reminder sent'));
+  if (w.alertedAt) return T('🔔 ' + who + ' n’a pas répondu depuis ' + d(now - (w.firstSentAt ?? w.sentAt)) + (w.reminders ? ' malgré ' + w.reminders + (w.reminders > 1 ? ' relances' : ' relance') : ''), '🔔 ' + who + ' has not replied for ' + d(now - (w.firstSentAt ?? w.sentAt)) + (w.reminders ? ' despite ' + w.reminders + (w.reminders > 1 ? ' reminders' : ' reminder') : ''));
+  if (w.next && w.next.kind === 'remind' && remindersOn) s += T(' · relance à ', ' · reminder at ') + at(w.next.at);
+  else if (w.next && w.next.kind === 'alert') s += T(' · alerte à ', ' · alert at ') + at(w.next.at);
   if (w.lastError) s += ' (' + w.lastError + ')';
   return s;
 }
@@ -382,9 +382,9 @@ async function teamsWaitAction(it, w, action) {
   try {
     const r = await fetch('/api/teams-wait', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ sessionId: it.sessionId, messageId: w.messageId, action }) });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok || j.error) { say(j.error || 'action refusée'); return; }
-    say(action === 'dismiss' ? 'attente fermée' : action === 'remind' ? 'relance demandée : la session va écrire dans le chat' : 'relance repoussée au prochain jour ouvré, 10 h'); tick();
-  } catch { say('action impossible'); }
+    if (!r.ok || j.error) { say(j.error || T('action refusée', 'action refused')); return; }
+    say(action === 'dismiss' ? T('attente fermée', 'wait closed') : action === 'remind' ? T('relance demandée : la session va écrire dans le chat', 'reminder requested: the session will write in the chat') : T('relance repoussée au prochain jour ouvré, 10 h', 'reminder postponed to the next working day, 10:00')); tick();
+  } catch { say(T('action impossible', 'action failed')); }
 }
 // Rangée dans « ⏳ Attente Teams » : session terminée-à-relire, inactive ou fermée qui a au moins une attente OUVERTE
 // (pas encore de réponse). Une réponse arrivée (replied), une session au travail, bloquée ou qui attend ta décision
@@ -408,8 +408,8 @@ async function teamsInboundSend(it, inb) {
   inboundArmed = { id: null, at: 0 };
   try {
     const r = await (await fetch('/api/send?pid=' + it.pid, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ text: teamsInboundOrder(inb) }) })).json();
-    say(r.error ? r.error : 'la session envoie la réponse à ' + (inb.chatLabel || inb.from)); tick();
-  } catch { say('envoi impossible'); }
+    say(r.error ? r.error : T('la session envoie la réponse à ' + (inb.chatLabel || inb.from), 'the session is sending the reply to ' + (inb.chatLabel || inb.from))); tick();
+  } catch { say(T('envoi impossible', 'could not send')); }
 }
 function filterTag(t) {
   const q = $('q'), tok = tagToken(t), cur = q.value.trim().split(/\s+/).filter(Boolean);
@@ -435,30 +435,30 @@ const gitOpen = new Set();          // sessions dont la liste des fichiers est d
 function gitBlock(it) {
   const box = el('div', 'gitbox'), g = it.git;
   const line = el('div', 'gl');
-  const refresh = el('a', null, 'actualiser'); refresh.href = '#';
-  refresh.onclick = async e => { e.preventDefault(); try { await post('/api/git-refresh?pid=' + it.pid); say('lecture de l\'état git…'); } catch { say('échec de la demande'); } };
-  if (!g) { line.append(el('span', null, 'Changements : ' + (it.gitDir ? 'pas encore lus (' + short(it.gitDir) + ')' : 'dossier inconnu') + ' · '), refresh); box.append(line); return box; }
+  const refresh = el('a', null, T('actualiser', 'refresh')); refresh.href = '#';
+  refresh.onclick = async e => { e.preventDefault(); try { await post('/api/git-refresh?pid=' + it.pid); say(T('lecture de l\'état git…', 'reading git status…')); } catch { say(T('échec de la demande', 'request failed')); } };
+  if (!g) { line.append(el('span', null, T('Changements : ' + (it.gitDir ? 'pas encore lus (' + short(it.gitDir) + ')' : 'dossier inconnu') + ' · ', 'Changes: ' + (it.gitDir ? 'not read yet (' + short(it.gitDir) + ')' : 'unknown folder') + ' · ')), refresh); box.append(line); return box; }
   if (!g.worktree) {
-    line.append(el('span', 'gw', 'pas de worktree'), ' · aucun worktree existant dans ses dernières commandes (jamais créé, ou déjà purgé) : elle travaille dans la copie principale, partagée — ses changements n\'y sont pas isolables');
-    if (closable(it)) { const t = el('span', 'tag merged', '✓ peut se fermer'); t.title = 'Inactive et PR mergée'; line.append(t); }
+    line.append(el('span', 'gw', T('pas de worktree', 'no worktree')), T(' · aucun worktree existant dans ses dernières commandes (jamais créé, ou déjà purgé) : elle travaille dans la copie principale, partagée — ses changements n\'y sont pas isolables', ' · no existing worktree in its recent commands (never created, or already removed): it works in the main, shared checkout — its changes cannot be isolated there'));
+    if (closable(it)) { const t = el('span', 'tag merged', T('✓ peut se fermer', '✓ can be closed')); t.title = T('Inactive et PR mergée', 'Idle and PR merged'); line.append(t); }
     box.append(line); return box;
   }
-  const w = el('span', 'gw', 'worktree ' + g.top.split('\\').pop()); w.title = g.top + '\nDéduit des dernières commandes de la session'; line.append(w);
-  line.append(' · ' + (g.branch && g.branch !== '(detached)' ? 'branche ' + g.branch : 'HEAD détaché'));
-  if (closable(it)) { const t = el('span', 'tag merged', '✓ peut se fermer'); t.title = 'Inactive, rien à commiter ni à pousser, ' + (prMerged(it) ? 'PR mergée' : 'branche intégrée à ' + g.base); line.append(t); }
-  line.append(el('span', 'tag ' + (g.nFiles ? 'ko' : 'ok'), g.nFiles ? plural(g.nFiles, 'fichier non commité', 'fichiers non commités') : 'rien à commiter'));
-  if (g.upstream) { if (g.ahead) line.append(el('span', 'tag pending', plural(g.ahead, 'commit non poussé', 'commits non poussés'))); else line.append(el('span', 'tag ok', 'tout est poussé')); }
-  else if (g.branch && g.branch !== '(detached)') line.append(el('span', 'tag pending', 'branche jamais poussée'));
-  if (g.behind) line.append(el('span', 'tag pending', plural(g.behind, 'commit distant à récupérer', 'commits distants à récupérer')));
-  if (g.base && g.baseBehind) { const t = el('span', 'tag draft', g.baseBehind + ' de retard sur ' + g.base.replace('origin/', '')); t.title = g.baseAhead + ' commit(s) de la branche absents de ' + g.base; line.append(t); }
+  const w = el('span', 'gw', 'worktree ' + g.top.split('\\').pop()); w.title = g.top + T('\nDéduit des dernières commandes de la session', '\nInferred from the session\'s recent commands'); line.append(w);
+  line.append(' · ' + (g.branch && g.branch !== '(detached)' ? T('branche ', 'branch ') + g.branch : T('HEAD détaché', 'detached HEAD')));
+  if (closable(it)) { const t = el('span', 'tag merged', T('✓ peut se fermer', '✓ can be closed')); t.title = T('Inactive, rien à commiter ni à pousser, ' + (prMerged(it) ? 'PR mergée' : 'branche intégrée à ' + g.base), 'Idle, nothing to commit or push, ' + (prMerged(it) ? 'PR merged' : 'branch merged into ' + g.base)); line.append(t); }
+  line.append(el('span', 'tag ' + (g.nFiles ? 'ko' : 'ok'), g.nFiles ? plural(g.nFiles, T('fichier non commité', 'uncommitted file'), T('fichiers non commités', 'uncommitted files')) : T('rien à commiter', 'nothing to commit')));
+  if (g.upstream) { if (g.ahead) line.append(el('span', 'tag pending', plural(g.ahead, T('commit non poussé', 'unpushed commit'), T('commits non poussés', 'unpushed commits')))); else line.append(el('span', 'tag ok', T('tout est poussé', 'everything pushed'))); }
+  else if (g.branch && g.branch !== '(detached)') line.append(el('span', 'tag pending', T('branche jamais poussée', 'branch never pushed')));
+  if (g.behind) line.append(el('span', 'tag pending', plural(g.behind, T('commit distant à récupérer', 'remote commit to pull'), T('commits distants à récupérer', 'remote commits to pull'))));
+  if (g.base && g.baseBehind) { const t = el('span', 'tag draft', T(g.baseBehind + ' de retard sur ' + g.base.replace('origin/', ''), g.baseBehind + ' behind ' + g.base.replace('origin/', ''))); t.title = T(g.baseAhead + ' commit(s) de la branche absents de ' + g.base, g.baseAhead + ' branch commit(s) not in ' + g.base); line.append(t); }
   box.append(line);
   const l2 = el('div', 'gl');
-  if (g.last) l2.append('dernier commit ' + g.last.h + ' « ' + g.last.s + ' » · il y a ' + ago(data.now - g.last.at) + ' · ');
-  l2.append('lu il y a ' + ago(data.now - g.at) + ' · ', refresh);
+  if (g.last) l2.append(T('dernier commit ' + g.last.h + ' « ' + g.last.s + ' » · il y a ' + ago(data.now - g.last.at) + ' · ', 'last commit ' + g.last.h + ' "' + g.last.s + '" · ' + ago(data.now - g.last.at) + ' ago · '));
+  l2.append(T('lu il y a ' + ago(data.now - g.at) + ' · ', 'read ' + ago(data.now - g.at) + ' ago · '), refresh);
   box.append(l2);
   if (g.nFiles) {
     const d = el('details'); d.open = gitOpen.has(it.key); d.ontoggle = () => d.open ? gitOpen.add(it.key) : gitOpen.delete(it.key);
-    d.append(el('summary', null, g.nFiles > g.files.length ? g.files.length + ' premiers fichiers sur ' + g.nFiles : 'fichiers'));
+    d.append(el('summary', null, g.nFiles > g.files.length ? T(g.files.length + ' premiers fichiers sur ' + g.nFiles, 'first ' + g.files.length + ' files of ' + g.nFiles) : T('fichiers', 'files')));
     const ul = el('div', 'gfiles'); for (const f of g.files) { const r = el('div'); r.append(el('span', 'gk', f.k), f.p); ul.append(r); } d.append(ul); box.append(d);
   }
   return box;
@@ -468,15 +468,15 @@ function gitBlock(it) {
 const closePick = new Map();        // clé -> coché ? (absent = coché)
 let closingMany = false;
 async function closeMany(list, rule) {
-  if (closingMany) return; if (!list.length) return say('aucune session cochée');
-  if (!confirm('Fermer ' + plural(list.length, 'session', 'sessions') + ' ?\n\n' + list.map(it => '• ' + label(it)).join('\n') + '\n\nChacune reçoit /exit (arrêtée si elle ne sort pas en 10 s). Les conversations restent reprenables depuis « Fermées » ; les worktrees ne sont pas touchés.')) return;
-  closingMany = true; say('fermeture de ' + plural(list.length, 'session', 'sessions') + '…');
+  if (closingMany) return; if (!list.length) return say(T('aucune session cochée', 'no session checked'));
+  if (!confirm(T('Fermer ' + plural(list.length, 'session', 'sessions') + ' ?\n\n' + list.map(it => '• ' + label(it)).join('\n') + '\n\nChacune reçoit /exit (arrêtée si elle ne sort pas en 10 s). Les conversations restent reprenables depuis « Fermées » ; les worktrees ne sont pas touchés.', 'Close ' + plural(list.length, 'session', 'sessions') + '?\n\n' + list.map(it => '• ' + label(it)).join('\n') + '\n\nEach one gets /exit (stopped if it does not exit within 10 s). The conversations stay reopenable from "Closed"; worktrees are not touched.'))) return;
+  closingMany = true; say(T('fermeture de ' + plural(list.length, 'session', 'sessions') + '…', 'closing ' + plural(list.length, 'session', 'sessions') + '…'));
   try {
     const r = await (await fetch('/api/close-many', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ pids: list.map(it => it.pid), rule: rule || 'closable' }) })).json();
     const forced = r.closed.filter(c => c.forced).length;
-    say(plural(r.closed.length, 'session fermée', 'sessions fermées') + (forced ? ' (dont ' + forced + ' arrêtée(s) faute de réponse à /exit)' : '') + (r.skipped.length ? ' · ' + r.skipped.length + ' sautée(s)' : ''));
+    say(plural(r.closed.length, T('session fermée', 'session closed'), T('sessions fermées', 'sessions closed')) + (forced ? T(' (dont ' + forced + ' arrêtée(s) faute de réponse à /exit)', ' (' + forced + ' stopped, no answer to /exit)') : '') + (r.skipped.length ? T(' · ' + r.skipped.length + ' sautée(s)', ' · ' + r.skipped.length + ' skipped') : ''));
     if (r.skipped.length) alertSkipped(r.skipped);
-  } catch { say('échec de la demande'); }
+  } catch { say(T('échec de la demande', 'request failed')); }
   closingMany = false; tick(); loadClosed();
 }
 // ── Relance groupée : fermer puis reprendre (--resume) les sessions « À traiter », « ⏳ Attente Teams » et « Inactives ».
@@ -488,47 +488,47 @@ function restartPlan(items) {
   for (const it of items) {
     if (it.kind !== 'open' || it.headless || !['waiting', 'ask', 'done', 'teams', 'idle'].includes(it.state)) continue;
     if (it.status === 'idle') go.push(it);
-    else skip.push({ it, why: it.status === 'waiting' ? 'bloquée sur une question' : it.status === 'shell' ? 'commande en arrière-plan en cours' : 'statut ' + it.status });
+    else skip.push({ it, why: it.status === 'waiting' ? T('bloquée sur une question', 'waiting on a question') : it.status === 'shell' ? T('commande en arrière-plan en cours', 'background command running') : T('statut ', 'status ') + it.status });
   }
   return { go, skip };
 }
-const RESTART_GROUPS = [['À traiter', ['waiting', 'ask', 'done']], ['⏳ Attente Teams', ['teams']], ['Inactives', ['idle']]];
+const RESTART_GROUPS = [[T('À traiter', 'To handle'), ['waiting', 'ask', 'done']], [T('⏳ Attente Teams', '⏳ Waiting on Teams'), ['teams']], [T('Inactives', 'Idle'), ['idle']]];
 const restartCounts = list => RESTART_GROUPS.map(([t, st]) => [t, list.filter(it => st.includes(it.state)).length]).filter(x => x[1]).map(x => x[0] + ' ' + x[1]).join(' · ');
 const restartSig = () => { const p = restartPlan(allItems()); return (canWrite ? 'w' : 'r') + (restartingMany ? '!' : '') + p.go.map(it => it.key + it.state).join(',') + '|' + p.skip.map(s => s.it.key).join(','); };
 let restartingMany = false;
 async function restartMany() {
   if (restartingMany || !canWrite) return;
   const { go, skip } = restartPlan(allItems());
-  if (!go.length) return say('aucune session à relancer');
-  if (!confirm('Relancer ' + plural(go.length, 'session', 'sessions') + ' ?\n\n' + restartCounts(go)
-    + '\n\nChacune reçoit /exit puis reprend sa conversation (--resume), dans son onglet quand c’est possible, sinon dans un nouvel onglet. Le process redémarre : nouveau compte pris en compte, serveurs MCP réinitialisés. Une session dont l’invite porte un brouillon est laissée telle quelle.'
-    + (skip.length ? '\n\nNon relancée' + (skip.length > 1 ? 's' : '') + ' :\n' + skip.map(s => '• ' + label(s.it) + ' — ' + s.why).join('\n') : '')
-    + '\n\nDurée : environ ' + Math.round(20 + go.length * 1.5) + ' s.')) return;
-  restartingMany = true; say('relance de ' + plural(go.length, 'session', 'sessions') + '…'); renderDetail(true);
+  if (!go.length) return say(T('aucune session à relancer', 'no session to restart'));
+  if (!confirm(T('Relancer ' + plural(go.length, 'session', 'sessions') + ' ?\n\n', 'Restart ' + plural(go.length, 'session', 'sessions') + '?\n\n') + restartCounts(go)
+    + T('\n\nChacune reçoit /exit puis reprend sa conversation (--resume), dans son onglet quand c’est possible, sinon dans un nouvel onglet. Le process redémarre : nouveau compte pris en compte, serveurs MCP réinitialisés. Une session dont l’invite porte un brouillon est laissée telle quelle.', '\n\nEach one gets /exit then resumes its conversation (--resume), in its own tab when possible, otherwise in a new tab. The process restarts: new account taken into account, MCP servers reset. A session with a draft in its prompt is left as it is.')
+    + (skip.length ? T('\n\nNon relancée' + (skip.length > 1 ? 's' : '') + ' :\n', '\n\nNot restarted:\n') + skip.map(s => '• ' + label(s.it) + ' — ' + s.why).join('\n') : '')
+    + T('\n\nDurée : environ ' + Math.round(20 + go.length * 1.5) + ' s.', '\n\nDuration: about ' + Math.round(20 + go.length * 1.5) + ' s.'))) return;
+  restartingMany = true; say(T('relance de ' + plural(go.length, 'session', 'sessions') + '…', 'restarting ' + plural(go.length, 'session', 'sessions') + '…')); renderDetail(true);
   try {
     const r = await (await fetch('/api/relaunch-many', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ pids: go.map(it => it.pid) }) })).json();
     const tabs = r.relaunched.filter(x => !x.sameTab).length;
-    say(plural(r.relaunched.length, 'session relancée', 'sessions relancées') + (tabs ? ' (dont ' + tabs + ' dans un nouvel onglet)' : '') + (r.skipped.length ? ' · ' + r.skipped.length + ' sautée(s)' : ''));
+    say(plural(r.relaunched.length, T('session relancée', 'session restarted'), T('sessions relancées', 'sessions restarted')) + (tabs ? T(' (dont ' + tabs + ' dans un nouvel onglet)', ' (' + tabs + ' in a new tab)') : '') + (r.skipped.length ? T(' · ' + r.skipped.length + ' sautée(s)', ' · ' + r.skipped.length + ' skipped') : ''));
     if (r.skipped.length) alertSkipped(r.skipped);
-  } catch { say('échec de la demande'); }
+  } catch { say(T('échec de la demande', 'request failed')); }
   restartingMany = false; tick(); loadClosed();
 }
 function restartPanel() {
   if (!canWrite) return null;
   const { go, skip } = restartPlan(allItems()); if (!go.length && !skip.length) return null;
   const wrap = el('div');
-  wrap.append(el('h2', null, 'Relancer les sessions — ' + go.length));
+  wrap.append(el('h2', null, T('Relancer les sessions — ', 'Restart sessions — ') + go.length));
   const act = el('div', 'actions');
-  const b = el('button', 'primary', restartingMany ? 'Relance en cours…' : 'Relancer les ' + plural(go.length, 'session', 'sessions') + '…'); b.disabled = restartingMany || !go.length;
-  b.title = 'Ferme (/exit) puis reprend (--resume) les sessions « À traiter », « ⏳ Attente Teams » et « Inactives » : à faire après un changement de compte, ou pour réinitialiser les serveurs MCP. Les sessions au travail ne sont pas touchées.';
+  const b = el('button', 'primary', restartingMany ? T('Relance en cours…', 'Restarting…') : T('Relancer les ' + plural(go.length, 'session', 'sessions') + '…', 'Restart ' + plural(go.length, 'session', 'sessions') + '…')); b.disabled = restartingMany || !go.length;
+  b.title = T('Ferme (/exit) puis reprend (--resume) les sessions « À traiter », « ⏳ Attente Teams » et « Inactives » : à faire après un changement de compte, ou pour réinitialiser les serveurs MCP. Les sessions au travail ne sont pas touchées.', 'Closes (/exit) then resumes (--resume) the "To handle", "⏳ Waiting on Teams" and "Idle" sessions: do it after an account change, or to reset the MCP servers. Working sessions are not touched.');
   b.onclick = restartMany; act.append(b); wrap.append(act);
-  wrap.append(el('div', 'empty', (restartCounts(go) || 'aucune session inactive') + (skip.length ? ' — ' + skip.length + ' laissée' + (skip.length > 1 ? 's' : '') + ' (' + skip.map(s => label(s.it) + ' : ' + s.why).join(' ; ').slice(0, 240) + ')' : '')));
+  wrap.append(el('div', 'empty', (restartCounts(go) || T('aucune session inactive', 'no idle session')) + (skip.length ? T(' — ' + skip.length + ' laissée' + (skip.length > 1 ? 's' : ''), ' — ' + skip.length + ' left alone') + ' (' + skip.map(s => label(s.it) + T(' : ', ': ') + s.why).join(' ; ').slice(0, 240) + ')' : '')));
   return wrap;
 }
 // ── Ménage large : fermer d'un coup les sessions INACTIVES, même avec du travail en cours (la conversation reste
 // reprenable, le worktree n'est pas touché). Cochées par défaut : inactives depuis au moins le seuil choisi. Le
 // serveur revérifie seulement « inactive » (et une invite vide) au moment de fermer. ──
-const IDLE_STEPS = [[1, '≥ 1 h'], [4, '≥ 4 h'], [24, '≥ 24 h'], [0, 'toutes']];
+const IDLE_STEPS = [[1, '≥ 1 h'], [4, '≥ 4 h'], [24, '≥ 24 h'], [0, T('toutes', 'all')]];
 let idleMinH = 4; try { const v = +localStorage.getItem('sd.idleMinH'); if (IDLE_STEPS.some(s => s[0] === v)) idleMinH = v; } catch {}
 const idlePick = new Map();         // clé -> coché à la main (absent = selon le seuil)
 const idleList = () => allItems().filter(it => it.kind === 'open' && !it.headless && it.status === 'idle').sort((a, b) => a.since - b.since);
@@ -538,28 +538,28 @@ const idleSig = () => idleMinH + ':' + idleList().map(it => it.key + (idlePick.h
 function idleRisk(it) {
   const g = it.git, r = [];
   if (g && g.worktree) {
-    if (g.nFiles) r.push(plural(g.nFiles, 'fichier non commité', 'fichiers non commités'));
-    if (g.upstream && g.ahead) r.push(plural(g.ahead, 'commit non poussé', 'commits non poussés'));
-    else if (!g.upstream && g.branch && g.branch !== '(detached)') r.push('branche jamais poussée');
+    if (g.nFiles) r.push(plural(g.nFiles, T('fichier non commité', 'uncommitted file'), T('fichiers non commités', 'uncommitted files')));
+    if (g.upstream && g.ahead) r.push(plural(g.ahead, T('commit non poussé', 'unpushed commit'), T('commits non poussés', 'unpushed commits')));
+    else if (!g.upstream && g.branch && g.branch !== '(detached)') r.push(T('branche jamais poussée', 'branch never pushed'));
   }
-  if (it.prInfo && it.prInfo.state === 'OPEN') r.push('PR #' + it.pr + ' ouverte');
+  if (it.prInfo && it.prInfo.state === 'OPEN') r.push(T('PR #' + it.pr + ' ouverte', 'PR #' + it.pr + ' open'));
   return r;
 }
 function idlePanel() {
   const list = idleList(); if (!list.length) return null;
   const wrap = el('div');
   const picked = list.filter(idleChecked);
-  wrap.append(el('h2', null, 'Inactives — ' + list.length + ' · ' + picked.length + ' cochée' + (picked.length > 1 ? 's' : '')));
+  wrap.append(el('h2', null, T('Inactives — ' + list.length + ' · ' + picked.length + ' cochée' + (picked.length > 1 ? 's' : ''), 'Idle — ' + list.length + ' · ' + picked.length + ' checked')));
   const act = el('div', 'actions');
   for (const [h, lbl] of IDLE_STEPS) {
-    const b = el('button', h === idleMinH ? 'primary' : null, lbl); b.title = h ? 'Cocher les sessions inactives depuis au moins ' + h + ' h' : 'Cocher toutes les sessions inactives';
+    const b = el('button', h === idleMinH ? 'primary' : null, lbl); b.title = h ? T('Cocher les sessions inactives depuis au moins ' + h + ' h', 'Check the sessions idle for at least ' + h + ' h') : T('Cocher toutes les sessions inactives', 'Check all idle sessions');
     b.onclick = () => { idleMinH = h; idlePick.clear(); try { localStorage.setItem('sd.idleMinH', String(h)); } catch {} renderDetail(true); };
     act.append(b);
   }
-  const bc = el('button', 'primary', 'Fermer la sélection (' + picked.length + ')…');
-  bc.title = 'Ferme les sessions cochées (/exit, arrêt si elles ne sortent pas en 10 s) ; elles restent reprenables depuis « Fermées » ; les worktrees ne sont pas touchés';
+  const bc = el('button', 'primary', T('Fermer la sélection (' + picked.length + ')…', 'Close selection (' + picked.length + ')…'));
+  bc.title = T('Ferme les sessions cochées (/exit, arrêt si elles ne sortent pas en 10 s) ; elles restent reprenables depuis « Fermées » ; les worktrees ne sont pas touchés', 'Closes the checked sessions (/exit, stopped if they do not exit within 10 s); they stay reopenable from "Closed"; worktrees are not touched');
   bc.onclick = () => closeMany(idleList().filter(idleChecked), 'idle');
-  const bn = el('button', null, 'Décocher tout'); bn.onclick = () => { list.forEach(it => idlePick.set(it.key, false)); renderDetail(true); };
+  const bn = el('button', null, T('Décocher tout', 'Uncheck all')); bn.onclick = () => { list.forEach(it => idlePick.set(it.key, false)); renderDetail(true); };
   act.append(bc, bn); wrap.append(act);
   const box = el('div', 'notifs');
   for (const it of list) {
@@ -567,24 +567,24 @@ function idlePanel() {
     const cb = el('input'); cb.type = 'checkbox'; cb.checked = idleChecked(it); cb.onclick = e => e.stopPropagation();
     cb.onchange = () => { idlePick.set(it.key, cb.checked); renderDetail(true); };
     const risk = idleRisk(it);
-    const nx = el('span', 'nx', (risk.length ? '⚠ ' + risk.join(' · ') : (closable(it) ? '✓ peut se fermer' : 'rien en cours d’isolable')));
-    d.append(cb, el('span', 'when', 'inactive ' + ago(data.now - it.since)), el('span', 'nt', label(it)), nx);
-    d.title = 'Sélectionner la session'; d.onclick = () => select(it.key, true); box.append(d);
+    const nx = el('span', 'nx', (risk.length ? '⚠ ' + risk.join(' · ') : (closable(it) ? T('✓ peut se fermer', '✓ can be closed') : T('rien en cours d’isolable', 'no isolated work in progress'))));
+    d.append(cb, el('span', 'when', T('inactive ', 'idle ') + ago(data.now - it.since)), el('span', 'nt', label(it)), nx);
+    d.title = T('Sélectionner la session', 'Select the session'); d.onclick = () => select(it.key, true); box.append(d);
   }
   wrap.append(box);
   return wrap;
 }
-function alertSkipped(sk) { console.log('[sessions] fermeture sautée :', sk); notice = null; setTimeout(() => say(sk.map(s => s.title + ' : ' + s.why).join(' · ').slice(0, 300)), 5200); }
+function alertSkipped(sk) { console.log('[sessions] fermeture sautée :', sk); notice = null; setTimeout(() => say(sk.map(s => s.title + T(' : ', ': ') + s.why).join(' · ').slice(0, 300)), 5200); }
 
 // ── Tableau par projet (▦) : une carte par PR (ou ticket HD, ou session), rangée dans la colonne la plus avancée
 // de ses sessions. Livré = PR mergée ; à merger = PR ouverte prête ; en recette = un dev-deploy / env de branche
 // lancé par la session ; en cours = brouillon, branche ou worktree ; à cadrer = rien de tout ça. ──
-const STAGES = [['cadrer', 'À cadrer'], ['cours', 'En cours'], ['recette', 'En recette'], ['merger', 'À merger'], ['livre', 'Livré · 7 j']];
+const STAGES = [['cadrer', T('À cadrer', 'To scope')], ['cours', T('En cours', 'In progress')], ['recette', T('En recette', 'In review')], ['merger', T('À merger', 'To merge')], ['livre', T('Livré · 7 j', 'Shipped · 7 d')]];
 // Le titre (ai-title) est figé au PREMIER sujet de la session : une session qui a enchaîné plusieurs tickets garde
 // « Remise parrainage… » alors qu'elle parle de HD-111111. Le serveur donne le dernier HD cité dans ses prompts
 // tapés (topicHd, absent si c'est déjà celui du 1er message) : on l'affiche « → HD-… » à côté du titre quand le titre ne le cite pas déjà.
 const driftHd = it => it.topicHd && !String(it.title || '').toUpperCase().includes(it.topicHd) ? it.topicHd : null;
-const driftTag = it => { const h = driftHd(it); if (!h) return null; const t = el('span', 'tag drift', '→ ' + h); t.title = 'Dernier ticket cité dans cette session : le titre décrit son premier sujet'; return t; };
+const driftTag = it => { const h = driftHd(it); if (!h) return null; const t = el('span', 'tag drift', '→ ' + h); t.title = T('Dernier ticket cité dans cette session : le titre décrit son premier sujet', 'Last ticket mentioned in this session: the title describes its first topic'); return t; };
 const hdOf = it => { const m = [it.title, it.name, ...(it.prompts || []).map(p => p.text)].join(' ').match(/HD-\d{6}/i); return m ? m[0].toUpperCase() : null; };
 function stageOf(it) {
   const p = it.pr && it.prInfo ? it.prInfo : null;
@@ -619,8 +619,8 @@ function renderBoard(force) {
   const sig = cards.map(c => c.key + ':' + c.stage + ':' + c.items.map(i => i.key + i.state).join(',')).join('|');
   if (!force && detailKey === '__board__' && main.dataset.sig === sig) return;
   detailKey = '__board__'; main.dataset.sig = sig; main.replaceChildren();
-  main.append(el('div', 'dtitle', 'Tableau par projet'),
-              el('div', 'meta', 'Une carte par PR (à défaut par ticket HD, sinon par session), dans la colonne la plus avancée de ses sessions. Sessions fermées : seulement celles qui ont une PR ou une recette ; livré : 7 derniers jours. Clic : ouvrir la session.'));
+  main.append(el('div', 'dtitle', T('Tableau par projet', 'Board by project')),
+              el('div', 'meta', T('Une carte par PR (à défaut par ticket HD, sinon par session), dans la colonne la plus avancée de ses sessions. Sessions fermées : seulement celles qui ont une PR ou une recette ; livré : 7 derniers jours. Clic : ouvrir la session.', 'One card per PR (otherwise per ticket, otherwise per session), in the most advanced column of its sessions. Closed sessions: only those with a PR or a review; shipped: last 7 days. Click: open the session.')));
   const board = el('div', 'board');
   for (const [k, title] of STAGES) {
     const col = el('div', 'bcol'); const list = cards.filter(c => c.stage === k).sort((a, b) => b.at - a.at);
@@ -631,10 +631,10 @@ function renderBoard(force) {
       const m = el('div', 'bm');
       if (c.hd) m.append(el('span', 'tag', c.hd));
       if (c.pr) { const a = prLink(it); if (a) m.append(a); prTags(it).forEach(x => m.append(x)); }
-      if (closable(it)) m.append(el('span', 'tag merged', '✓ peut se fermer'));
+      if (closable(it)) m.append(el('span', 'tag merged', T('✓ peut se fermer', '✓ can be closed')));
       card.append(m);
       const open = c.items.filter(i => i.kind === 'open').length;
-      card.append(el('div', 'bs', (open ? plural(open, 'session ouverte', 'sessions ouvertes') : 'fermée') + (c.items.length > open && open ? ' · ' + (c.items.length - open) + ' fermée(s)' : '') + ' · ' + LABEL[it.state] + ' · il y a ' + ago(data.now - c.at)));
+      card.append(el('div', 'bs', (open ? plural(open, T('session ouverte', 'open session'), T('sessions ouvertes', 'open sessions')) : T('fermée', 'closed')) + (c.items.length > open && open ? T(' · ' + (c.items.length - open) + ' fermée(s)', ' · ' + (c.items.length - open) + ' closed') : '') + ' · ' + LABEL[it.state] + ' · ' + T('il y a ' + ago(data.now - c.at), ago(data.now - c.at) + ' ago')));
       card.title = c.items.map(i => '• ' + label(i) + ' — ' + LABEL[i.state]).join('\n');
       card.onclick = () => select(it.key, true);
       col.append(card);
@@ -664,14 +664,14 @@ function closeChats() { chatsMode = false; setPane(false); clearInterval(chatsTi
 async function loadChats(force) {
   if (!chatsMode) { clearInterval(chatsTimer); return; }
   // Pendant qu'on tape une réponse, la liste n'est pas redessinée sous les doigts (elle l'est à l'envoi, ou à la relecture suivante).
-  try { const r = await fetch('/api/teams-conversations', { cache:'no-store' }); chatsData = r.ok ? await r.json() : null; if (chatsMode && (force === true || !chatBusy())) renderChats(); } catch { say('conversations illisibles'); }
+  try { const r = await fetch('/api/teams-conversations', { cache:'no-store' }); chatsData = r.ok ? await r.json() : null; if (chatsMode && (force === true || !chatBusy())) renderChats(); } catch { say(T('conversations illisibles', 'could not read the conversations')); }
 }
 // chatGroups est PURE (testée par server/test/conversations-page.test.ts) : lignes du serveur → les trois groupes de la vue.
 function chatGroups(rows) {
   const g = [
-    { key:'reply', title:'À toi de répondre', hint:'le dernier mot est au collègue et aucune session ne l’a reçu', rows:[] },
-    { key:'unseen', title:'À voir', hint:'du nouveau depuis ton dernier pointage : un collègue a écrit, ou une session a écrit en ton nom', rows:[] },
-    { key:'ok', title:'À jour', hint:'', rows:[] },
+    { key:'reply', title:T('À toi de répondre', 'Your turn to reply'), hint:T('le dernier mot est au collègue et aucune session ne l’a reçu', 'a colleague wrote last and no session received it'), rows:[] },
+    { key:'unseen', title:T('À voir', 'To look at'), hint:T('du nouveau depuis ton dernier pointage : un collègue a écrit, ou une session a écrit en ton nom', 'something new since you last checked: a colleague wrote, or a session wrote on your behalf'), rows:[] },
+    { key:'ok', title:T('À jour', 'Up to date'), hint:'', rows:[] },
   ];
   for (const r of rows || []) (r.ball === 'reply' ? g[0] : r.unseen ? g[1] : g[2]).rows.push(r);
   for (const x of g) x.rows.sort((a, b) => b.lastAt - a.lastAt);
@@ -681,13 +681,13 @@ async function chatSeen(chatId, action, at) {
   if (!canWrite) return;
   try {
     const r = await (await fetch('/api/teams-seen', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ chatId, action, at }) })).json();
-    if (r.error) say('refusé : ' + r.error);
-  } catch { say('échec de la demande'); }
+    if (r.error) say(T('refusé : ', 'refused: ') + r.error);
+  } catch { say(T('échec de la demande', 'request failed')); }
   loadChats(true);
 }
 const CHAT_ICON = { oneOnOne:'👤', group:'👥', meeting:'📅' };
-const CHAT_ROLE = { linked:'suit ce fil', wait:'attend leur réponse', replied:'reçoit leur réponse', inbound:'ouverte pour cette demande', past:'y a écrit' };
-const CHAT_WHY = { mention:'tu es mentionné', quote:'on répond à un de tes messages', named:'on t’y nomme', question:'question qui suit ton message' };
+const CHAT_ROLE = { linked:T('suit ce fil', 'follows this thread'), wait:T('attend leur réponse', 'waiting for their reply'), replied:T('reçoit leur réponse', 'receives their reply'), inbound:T('ouverte pour cette demande', 'opened for this request'), past:T('y a écrit', 'wrote here') };
+const CHAT_WHY = { mention:T('tu es mentionné', 'you are mentioned'), quote:T('on répond à un de tes messages', 'someone replies to one of your messages'), named:T('on t’y nomme', 'you are named'), question:T('question qui suit ton message', 'question after your message') };
 // Lot 10 : messages en entier, fil dépliable (/api/teams-thread), réponse depuis la page (/api/teams-reply — le veilleur
 // poste dans Teams en ton nom, sur ton clic). Brouillons, fils ouverts et boîtes de réponse survivent aux relectures.
 const chatDrafts = new Map(), chatReplying = new Set(), chatThreads = new Map(), chatWide = new Set();
@@ -714,26 +714,26 @@ async function chatLink(chatId, action, sessionId) {
   const extra = action === 'attach' ? { anchor: chatPickAnchor ? chatPickAnchor.id : '', note: chatPickNote, once: !chatPickFollow } : {};
   try {
     const r = await (await fetch('/api/teams-link', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ chatId, action, sessionId, ...extra }) })).json();
-    if (r.error) say('refusé : ' + r.error); else say(action === 'detach' ? 'fil détaché' : sessionId === 'new' ? 'fil confié : une nouvelle session s’ouvre' : 'fil confié : la session le reçoit dans un instant');
-  } catch { say('échec de la demande'); }
+    if (r.error) say(T('refusé : ', 'refused: ') + r.error); else say(action === 'detach' ? T('fil détaché', 'thread detached') : sessionId === 'new' ? T('fil confié : une nouvelle session s’ouvre', 'thread handed over: a new session is opening') : T('fil confié : la session le reçoit dans un instant', 'thread handed over: the session receives it in a moment'));
+  } catch { say(T('échec de la demande', 'request failed')); }
   chatPicking = null; chatPickAnchor = null; chatPickNote = ''; loadChats(true);
 }
 // chatWho est PURE (testée par server/test/conversations-page.test.ts) : l'auteur d'un message tel qu'on l'affiche.
 function chatWho(m) {
-  return m.by === 'me' ? 'toi' : m.by === 'session' ? '🤖 une session, en ton nom' : m.from || 'une application';
+  return m.by === 'me' ? T('toi', 'you') : m.by === 'session' ? T('🤖 une session, en ton nom', '🤖 a session, on your behalf') : m.from || T('une application', 'an app');
 }
 function chatMsg(m, when, chatId, linked) {
   const picked = chatId && chatPicking === chatId && chatPickAnchor && chatPickAnchor.id === m.id;
   const d = el('div', 'cmsg' + (m.by === 'me' || m.by === 'session' ? ' mine' : '') + (picked ? ' anchor' : ''));
-  const h = el('span', 'who' + (m.by === 'session' ? ' ses' : ''), chatWho(m)); if (when) h.append(el('span', 'when', ' · il y a ' + ago(data.now - m.at)));
-  if (chatId && m.id && canWrite && !linked) { const b = el('button', 'tos', '→ session'); b.title = 'Ouvrir ou relancer une session à partir de CE message : il devient la référence, avec ce qui l’entoure'; b.onclick = e => { e.stopPropagation(); chatPick(chatId, { id: m.id, who: chatWho(m), at: m.at }); }; h.append(b); }
+  const h = el('span', 'who' + (m.by === 'session' ? ' ses' : ''), chatWho(m)); if (when) h.append(el('span', 'when', T(' · il y a ' + ago(data.now - m.at), ' · ' + ago(data.now - m.at) + ' ago')));
+  if (chatId && m.id && canWrite && !linked) { const b = el('button', 'tos', '→ session'); b.title = T('Ouvrir ou relancer une session à partir de CE message : il devient la référence, avec ce qui l’entoure', 'Open or restart a session from THIS message: it becomes the reference, with what surrounds it'); b.onclick = e => { e.stopPropagation(); chatPick(chatId, { id: m.id, who: chatWho(m), at: m.at }); }; h.append(b); }
   d.append(h, el('div', 'txt', m.text)); return d;
 }
 async function chatToggleThread(chatId) {
   if (chatThreads.has(chatId)) { chatThreads.delete(chatId); return renderChats(); }
   chatThreads.set(chatId, null); renderChats();
   try { const r = await fetch('/api/teams-thread?chatId=' + encodeURIComponent(chatId), { cache:'no-store' }); if (chatThreads.has(chatId)) chatThreads.set(chatId, r.ok ? await r.json() : { fresh:false, messages:[] }); }
-  catch { chatThreads.delete(chatId); say('fil illisible'); }
+  catch { chatThreads.delete(chatId); say(T('fil illisible', 'could not read the thread')); }
   if (chatsMode) renderChats();
 }
 async function chatSend(chatId) {
@@ -741,8 +741,8 @@ async function chatSend(chatId) {
   chatSending = chatId; renderChats();
   try {
     const r = await (await fetch('/api/teams-reply', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ chatId, text }) })).json();
-    if (r.error) say('non envoyé : ' + r.error); else { chatDrafts.delete(chatId); chatReplying.delete(chatId); chatThreads.delete(chatId); say('envoyé dans Teams'); }
-  } catch { say('échec de la demande — vérifie dans Teams avant de renvoyer'); }
+    if (r.error) say(T('non envoyé : ', 'not sent: ') + r.error); else { chatDrafts.delete(chatId); chatReplying.delete(chatId); chatThreads.delete(chatId); say(T('envoyé dans Teams', 'sent in Teams')); }
+  } catch { say(T('échec de la demande — vérifie dans Teams avant de renvoyer', 'request failed — check in Teams before sending again')); }
   chatSending = null; await loadChats(true);
 }
 function renderChats() {
@@ -750,86 +750,87 @@ function renderChats() {
   const foc = chatTyping() ? document.activeElement : null, focId = foc && foc.closest('.creply').dataset.chat, sel = foc && [foc.selectionStart, foc.selectionEnd];
   detailKey = '__chats__'; main.replaceChildren();
   const D = chatsData, rows = D && D.rows;
-  main.append(el('div', 'dtitle', 'Conversations Teams'));
-  if (!D) { main.append(el('div', 'meta', 'Chargement…')); return; }
-  if (!rows) { main.append(el('div', 'meta', 'Vue éteinte : le veilleur n’a encore rien listé ({ "conversations": { "enabled": true } } dans teams-watcher-config.json).')); return; }
+  main.append(el('div', 'dtitle', T('Conversations Teams', 'Teams conversations')));
+  if (!D) { main.append(el('div', 'meta', T('Chargement…', 'Loading…'))); return; }
+  if (!rows) { main.append(el('div', 'meta', T('Vue éteinte : le veilleur n’a encore rien listé ({ "conversations": { "enabled": true } } dans teams-watcher-config.json).', 'View off: the watcher has not listed anything yet ({ "conversations": { "enabled": true } } in teams-watcher-config.json).'))); return; }
   const groups = chatGroups(rows), todo = groups[0].rows.length + groups[1].rows.length;
   const canSend = canWrite && !!(data.teams && data.teams.conversations && data.teams.conversations.send);
-  const meta = el('div', 'meta', rows.length + ' chats actifs sur 14 jours (1:1, groupes, réunions), qu’une session les suive ou non · liste d’il y a ' + ago(data.now - D.at) + ' · '
-    + (todo ? todo + ' à traiter' : 'tu es à jour partout') + '. « Vu » pointe le dernier message affiché : ce qui arrive ensuite revient « à voir ».');
+  const meta = el('div', 'meta', T(rows.length + ' chats actifs sur 14 jours (1:1, groupes, réunions), qu’une session les suive ou non · liste d’il y a ' + ago(data.now - D.at) + ' · '
+    + (todo ? todo + ' à traiter' : 'tu es à jour partout') + '. « Vu » pointe le dernier message affiché : ce qui arrive ensuite revient « à voir ».', rows.length + ' active chats over 14 days (1:1, groups, meetings), whether a session follows them or not · list from ' + ago(data.now - D.at) + ' ago · '
+    + (todo ? todo + ' to handle' : 'you are up to date everywhere') + '. "Seen" marks the last message shown: anything that arrives after comes back "to look at".'));
   main.append(meta);
   const box = el('div', 'chats');
   for (const g of groups) {
     if (!g.rows.length && g.key !== 'reply') continue;
     const h = el('div', 'chead', g.title + ' · ' + g.rows.length); if (g.hint) h.append(el('span', 'tx', g.hint));
-    if (g.key === 'unseen' && g.rows.length > 1 && canWrite) { const b = el('button', null, 'Tout marquer vu'); b.title = 'Pointe toutes les conversations « à voir » d’un coup (celles où c’est à toi de répondre restent)'; b.onclick = () => chatSeen('*', 'seen', D.at); h.append(b); }
+    if (g.key === 'unseen' && g.rows.length > 1 && canWrite) { const b = el('button', null, T('Tout marquer vu', 'Mark all seen')); b.title = T('Pointe toutes les conversations « à voir » d’un coup (celles où c’est à toi de répondre restent)', 'Marks all "to look at" conversations at once (the ones waiting for your reply stay)'); b.onclick = () => chatSeen('*', 'seen', D.at); h.append(b); }
     box.append(h);
-    if (!g.rows.length) box.append(el('div', 'meta', 'Personne n’attend ta réponse.'));
+    if (!g.rows.length) box.append(el('div', 'meta', T('Personne n’attend ta réponse.', 'Nobody is waiting for your reply.')));
     for (const r of g.rows) {
       const row = el('div', 'crow g-' + g.key);
-      const t = el('div', 'ct', (CHAT_ICON[r.type] || '') + ' ' + (r.label || '(chat sans nom)')); t.append(el('span', 'when', 'il y a ' + ago(data.now - r.lastAt))); row.append(t);
+      const t = el('div', 'ct', (CHAT_ICON[r.type] || '') + ' ' + (r.label || T('(chat sans nom)', '(unnamed chat)'))); t.append(el('span', 'when', T('il y a ' + ago(data.now - r.lastAt), ago(data.now - r.lastAt) + ' ago'))); row.append(t);
       const bs = el('div', 'cb');
-      if (r.webUrl) { const l = el('a', null, 'Teams ↗'); l.href = r.webUrl; l.target = '_blank'; l.rel = 'noopener'; l.title = 'Ouvrir la conversation dans Teams'; bs.append(l); }
-      { const b = el('button', null, chatThreads.has(r.chatId) ? 'Replier' : 'Fil'); b.title = 'Les derniers messages de la conversation, en entier'; b.onclick = () => chatToggleThread(r.chatId); bs.append(b); }
-      if (canSend) { const b = el('button', null, 'Répondre'); b.title = 'Écrire ta réponse ici : elle part dans Teams en ton nom, sans ouvrir Teams'; b.onclick = () => { chatReplying.has(r.chatId) ? chatReplying.delete(r.chatId) : chatReplying.add(r.chatId); renderChats(); const ta = main.querySelector('.creply[data-chat="' + CSS.escape(r.chatId) + '"] textarea'); if (ta) ta.focus(); }; bs.append(b); }
-      if (canWrite && r.link) { const b = el('button', null, 'Détacher'); b.title = 'La session ne recevra plus les messages de ce fil'; b.onclick = () => chatLink(r.chatId, 'detach'); bs.append(b); }
-      else if (canWrite) { const b = el('button', null, 'Confier'); b.title = 'Confier ce fil à une session : elle reçoit les messages à traiter puis toute la suite, jusqu’au détachement. Elle propose, rien ne part sans toi.'; b.onclick = () => chatPick(r.chatId, null); bs.append(b); }
-      if (g.key === 'reply') { const b = el('button', null, 'Rien à répondre'); b.title = 'Tu as lu, il n’y a rien à répondre : la conversation passe « à jour » jusqu’au prochain message'; b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
-      else if (g.key === 'unseen') { const b = el('button', null, 'Vu'); b.title = 'Tu as vu ce qui s’est passé ici : la conversation passe « à jour » jusqu’au prochain message'; b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
-      else if (r.by !== 'me' && r.by !== 'app') { const b = el('button', null, '↺'); b.title = 'Remettre à voir'; b.onclick = () => chatSeen(r.chatId, 'unseen', r.lastAt); bs.append(b); }
+      if (r.webUrl) { const l = el('a', null, 'Teams ↗'); l.href = r.webUrl; l.target = '_blank'; l.rel = 'noopener'; l.title = T('Ouvrir la conversation dans Teams', 'Open the conversation in Teams'); bs.append(l); }
+      { const b = el('button', null, chatThreads.has(r.chatId) ? T('Replier', 'Collapse') : T('Fil', 'Thread')); b.title = T('Les derniers messages de la conversation, en entier', 'The latest messages of the conversation, in full'); b.onclick = () => chatToggleThread(r.chatId); bs.append(b); }
+      if (canSend) { const b = el('button', null, T('Répondre', 'Reply')); b.title = T('Écrire ta réponse ici : elle part dans Teams en ton nom, sans ouvrir Teams', 'Write your reply here: it goes to Teams on your behalf, without opening Teams'); b.onclick = () => { chatReplying.has(r.chatId) ? chatReplying.delete(r.chatId) : chatReplying.add(r.chatId); renderChats(); const ta = main.querySelector('.creply[data-chat="' + CSS.escape(r.chatId) + '"] textarea'); if (ta) ta.focus(); }; bs.append(b); }
+      if (canWrite && r.link) { const b = el('button', null, T('Détacher', 'Detach')); b.title = T('La session ne recevra plus les messages de ce fil', 'The session will no longer receive the messages of this thread'); b.onclick = () => chatLink(r.chatId, 'detach'); bs.append(b); }
+      else if (canWrite) { const b = el('button', null, T('Confier', 'Hand over')); b.title = T('Confier ce fil à une session : elle reçoit les messages à traiter puis toute la suite, jusqu’au détachement. Elle propose, rien ne part sans toi.', 'Hand this thread over to a session: it receives the messages to handle and everything after, until you detach it. It suggests, nothing is sent without you.'); b.onclick = () => chatPick(r.chatId, null); bs.append(b); }
+      if (g.key === 'reply') { const b = el('button', null, T('Rien à répondre', 'Nothing to reply')); b.title = T('Tu as lu, il n’y a rien à répondre : la conversation passe « à jour » jusqu’au prochain message', 'You read it, there is nothing to reply: the conversation is "up to date" until the next message'); b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
+      else if (g.key === 'unseen') { const b = el('button', null, T('Vu', 'Seen')); b.title = T('Tu as vu ce qui s’est passé ici : la conversation passe « à jour » jusqu’au prochain message', 'You saw what happened here: the conversation is "up to date" until the next message'); b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
+      else if (r.by !== 'me' && r.by !== 'app') { const b = el('button', null, '↺'); b.title = T('Remettre à voir', 'Mark as to look at again'); b.onclick = () => chatSeen(r.chatId, 'unseen', r.lastAt); bs.append(b); }
       row.append(bs);
       const th = chatThreads.get(r.chatId);
       if (chatThreads.has(r.chatId)) {
         // Fil déplié : les derniers messages, du plus ancien au plus récent (il remplace les messages à lire, qu'il contient).
         const x = el('div', 'cthread');
-        if (!th) x.append(el('div', 'tx', 'chargement…'));
-        else { if (!th.messages.length || !th.fresh) x.append(el('div', 'tx', th.messages.length ? 'fil pas encore relu depuis le dernier message (prochaine passe du veilleur, 2 min)' : 'fil pas encore lu par le veilleur (prochaine passe, 2 min)')); for (const m of th.messages) x.append(chatMsg(m, true, r.chatId, !!r.link)); }
+        if (!th) x.append(el('div', 'tx', T('chargement…', 'loading…')));
+        else { if (!th.messages.length || !th.fresh) x.append(el('div', 'tx', th.messages.length ? T('fil pas encore relu depuis le dernier message (prochaine passe du veilleur, 2 min)', 'thread not re-read since the last message yet (next watcher pass, 2 min)') : T('fil pas encore lu par le veilleur (prochaine passe, 2 min)', 'thread not read by the watcher yet (next pass, 2 min)'))); for (const m of th.messages) x.append(chatMsg(m, true, r.chatId, !!r.link)); }
         row.append(x); if (th) requestAnimationFrame(() => { x.scrollTop = x.scrollHeight; });
       } else {
         const m = el('div', 'cm'), news = r.news || [];
-        if (news.length > 1) m.append(el('div', 'cnt', news.length + ' messages à lire'));
+        if (news.length > 1) m.append(el('div', 'cnt', T(news.length + ' messages à lire', news.length + ' messages to read')));
         if (news.length) for (const x of news) m.append(chatMsg(x, news.length > 1, r.chatId, !!r.link));
         else {
           const last = chatMsg({ by: r.by, from: r.lastFrom, at: r.lastAt, text: r.excerpt }, false);
           // « À jour » : deux lignes suffisent, un clic donne le message entier.
-          if (g.key === 'ok' && !chatWide.has(r.chatId)) { last.classList.add('clamp'); last.title = 'Clic : afficher le message en entier'; last.onclick = () => { chatWide.add(r.chatId); renderChats(); }; }
+          if (g.key === 'ok' && !chatWide.has(r.chatId)) { last.classList.add('clamp'); last.title = T('Clic : afficher le message en entier', 'Click: show the whole message'); last.onclick = () => { chatWide.add(r.chatId); renderChats(); }; }
           m.append(last);
         }
         row.append(m);
       }
       const s = el('div', 'cs');
-      if (r.ball === 'reply') s.append(el('span', 'tag toreply', 'à toi de répondre' + (r.why ? ' — ' + CHAT_WHY[r.why] : '')));
-      else if (r.ball === 'session') s.append(el('span', 'tag ses', r.link ? (r.link.pending ? 'confié — remise à la session en cours' : 'confié — la session a reçu ce message') : 'une session a reçu ce message'));
-      if (r.link && r.ball !== 'session') s.append(el('span', 'tag link', '🔗 fil confié'));
-      if (r.link && r.link.lastError) s.append(el('span', 'lerr', 'remise en attente : ' + r.link.lastError));
-      else if (r.ball === 'waiting') s.append(el('span', 'tag wait', 'en attente de leur réponse'));
+      if (r.ball === 'reply') s.append(el('span', 'tag toreply', T('à toi de répondre', 'your turn to reply') + (r.why ? ' — ' + CHAT_WHY[r.why] : '')));
+      else if (r.ball === 'session') s.append(el('span', 'tag ses', r.link ? (r.link.pending ? T('confié — remise à la session en cours', 'handed over — delivery to the session in progress') : T('confié — la session a reçu ce message', 'handed over — the session received this message')) : T('une session a reçu ce message', 'a session received this message')));
+      if (r.link && r.ball !== 'session') s.append(el('span', 'tag link', T('🔗 fil confié', '🔗 thread handed over')));
+      if (r.link && r.link.lastError) s.append(el('span', 'lerr', T('remise en attente : ', 'delivery pending: ') + r.link.lastError));
+      else if (r.ball === 'waiting') s.append(el('span', 'tag wait', T('en attente de leur réponse', 'waiting for their reply')));
       for (const x of r.sessions) {
         const it = allItems().find(i => i.sessionId === x.sessionId && i.kind !== 'run' && i.kind !== 'pass');
-        if (it) { const b = el('button', 'chip', label(it) + ' — ' + CHAT_ROLE[x.role]); b.title = 'Ouvrir la session (' + LABEL[it.state] + ')'; b.onclick = () => select(it.key, true); s.append(b); }
-        else { const o = el('span', 'chip gone', 'session fermée — ' + CHAT_ROLE[x.role]); o.title = x.sessionId; s.append(o); }
+        if (it) { const b = el('button', 'chip', label(it) + ' — ' + CHAT_ROLE[x.role]); b.title = T('Ouvrir la session (' + LABEL[it.state] + ')', 'Open the session (' + LABEL[it.state] + ')'); b.onclick = () => select(it.key, true); s.append(b); }
+        else { const o = el('span', 'chip gone', T('session fermée — ', 'closed session — ') + CHAT_ROLE[x.role]); o.title = x.sessionId; s.append(o); }
       }
       if (s.childNodes.length) row.append(s);
       if (canWrite && chatPicking === r.chatId && !r.link) {
         const f = el('div', 'cpick'), sel = el('select');
-        const o0 = el('option', null, '➕ Nouvelle session'); o0.value = 'new'; sel.append(o0);
+        const o0 = el('option', null, T('➕ Nouvelle session', '➕ New session')); o0.value = 'new'; sel.append(o0);
         for (const it of chatTargets(allItems())) { const o = el('option', null, label(it) + ' — ' + LABEL[it.state]); o.value = it.sessionId; sel.append(o); }
         sel.value = [...sel.options].some(o => o.value === chatPickValue) ? chatPickValue : 'new'; sel.onchange = () => { chatPickValue = sel.value; };
-        const note = el('input'); note.type = 'text'; note.maxLength = 1500; note.placeholder = 'Ce que tu en attends (facultatif) — ta consigne à la session'; note.value = chatPickNote; note.oninput = () => { chatPickNote = note.value; };
-        const fl = el('label'), cb = el('input'); cb.type = 'checkbox'; cb.checked = chatPickFollow; cb.onchange = () => { chatPickFollow = cb.checked; }; fl.append(cb, 'lui remettre aussi la suite du fil'); fl.title = 'Coché : la session reçoit tous les prochains messages du fil, jusqu’au « Détacher ». Décoché : une seule remise.';
-        const ok = el('button', null, 'Confier'); ok.title = 'Entrée'; ok.onclick = () => chatLink(r.chatId, 'attach', sel.value);
-        const no = el('button', null, 'Annuler'); no.title = 'Échap'; no.onclick = () => { chatPicking = null; chatPickAnchor = null; renderChats(); };
-        f.append(chatPickAnchor ? el('span', 'from', 'À partir du message de ' + chatPickAnchor.who + ' (il y a ' + ago(data.now - chatPickAnchor.at) + ') → ') : 'Confier ce fil à ', sel, note, fl, ok, no,
-          el('span', 'tx', chatPickAnchor ? 'elle reçoit ce message, ce qui l’entoure et ta consigne' : 'elle reçoit les messages à traiter et ta consigne'));
+        const note = el('input'); note.type = 'text'; note.maxLength = 1500; note.placeholder = T('Ce que tu en attends (facultatif) — ta consigne à la session', 'What you expect (optional) — your instruction to the session'); note.value = chatPickNote; note.oninput = () => { chatPickNote = note.value; };
+        const fl = el('label'), cb = el('input'); cb.type = 'checkbox'; cb.checked = chatPickFollow; cb.onchange = () => { chatPickFollow = cb.checked; }; fl.append(cb, T('lui remettre aussi la suite du fil', 'also hand over the rest of the thread')); fl.title = T('Coché : la session reçoit tous les prochains messages du fil, jusqu’au « Détacher ». Décoché : une seule remise.', 'Checked: the session receives all the next messages of the thread, until "Detach". Unchecked: a single delivery.');
+        const ok = el('button', null, T('Confier', 'Hand over')); ok.title = T('Entrée', 'Enter'); ok.onclick = () => chatLink(r.chatId, 'attach', sel.value);
+        const no = el('button', null, T('Annuler', 'Cancel')); no.title = T('Échap', 'Esc'); no.onclick = () => { chatPicking = null; chatPickAnchor = null; renderChats(); };
+        f.append(chatPickAnchor ? el('span', 'from', T('À partir du message de ' + chatPickAnchor.who + ' (il y a ' + ago(data.now - chatPickAnchor.at) + ') → ', 'From the message by ' + chatPickAnchor.who + ' (' + ago(data.now - chatPickAnchor.at) + ' ago) → ')) : T('Confier ce fil à ', 'Hand this thread over to '), sel, note, fl, ok, no,
+          el('span', 'tx', chatPickAnchor ? T('elle reçoit ce message, ce qui l’entoure et ta consigne', 'it receives this message, what surrounds it and your instruction') : T('elle reçoit les messages à traiter et ta consigne', 'it receives the messages to handle and your instruction')));
         row.append(f);
       }
       if (canSend && chatReplying.has(r.chatId)) {
         const f = el('div', 'creply'); f.dataset.chat = r.chatId;
-        const ta = el('textarea'); ta.placeholder = 'Ta réponse à ' + (r.label || 'ce chat') + '…'; ta.value = chatDrafts.get(r.chatId) || ''; ta.spellcheck = true;
+        const ta = el('textarea'); ta.placeholder = T('Ta réponse à ' + (r.label || 'ce chat') + '…', 'Your reply to ' + (r.label || 'this chat') + '…'); ta.value = chatDrafts.get(r.chatId) || ''; ta.spellcheck = true;
         ta.oninput = () => chatDrafts.set(r.chatId, ta.value);
         const rb = el('div', 'rb'), busy = chatSending === r.chatId;
-        const ok = el('button', null, busy ? 'Envoi…' : 'Envoyer'); ok.disabled = !!chatSending; ok.title = 'Poste ce message dans Teams, en ton nom  ( Ctrl+Entrée )'; ok.onclick = () => chatSend(r.chatId);
-        const no = el('button', null, 'Annuler'); no.title = 'Referme sans envoyer (le brouillon est gardé)  ( Échap )'; no.onclick = () => { chatReplying.delete(r.chatId); renderChats(); };
-        rb.append(ok, no, el('span', 'tx', 'part dans Teams en ton nom, tel quel · Ctrl+Entrée pour envoyer'));
+        const ok = el('button', null, busy ? T('Envoi…', 'Sending…') : T('Envoyer', 'Send')); ok.disabled = !!chatSending; ok.title = T('Poste ce message dans Teams, en ton nom  ( Ctrl+Entrée )', 'Posts this message in Teams, on your behalf  ( Ctrl+Enter )'); ok.onclick = () => chatSend(r.chatId);
+        const no = el('button', null, T('Annuler', 'Cancel')); no.title = T('Referme sans envoyer (le brouillon est gardé)  ( Échap )', 'Closes without sending (the draft is kept)  ( Esc )'); no.onclick = () => { chatReplying.delete(r.chatId); renderChats(); };
+        rb.append(ok, no, el('span', 'tx', T('part dans Teams en ton nom, tel quel · Ctrl+Entrée pour envoyer', 'goes to Teams on your behalf, as is · Ctrl+Enter to send')));
         f.append(ta, rb); row.append(f);
       }
       box.append(row);
@@ -842,86 +843,86 @@ function renderChats() {
 // ── Lanceur (🤖) : supervision des claude -p du diagnostic automatique — santé, runs en cours, tickets qui attendent,
 // runs récents par phase avec leurs fichiers (texte brut / captures) et la conversation à rouvrir. Rafraîchi toutes les 10 s. ──
 let launchMode = false, launchData = null, launchHours = 48, launchTimer = null, launchView = null, launchViewText = null, launchFilter = '';
-const STAGE_FR = { 'pr-awaiting-approval':'PR en attente de validation', 'delivering':'livraison en cours', 'deploying':'en déploiement', 'dev-failed':'dev en échec', 'diagnosis-held':'diagnostic posé',
-  'in-production':'en production', 'diagnosis-skipped':'diagnostic écarté', 'dev-abandoned':'dev abandonné', 'pr-closed':'PR fermée' };
-const PHASE_FR = { diagnostic:'diagnostic', go:'go', dev:'dev', recette:'recette', relecture:'relecture', reprise:'reprise', merge:'merge' };
+const STAGE_FR = { 'pr-awaiting-approval':T('PR en attente de validation', 'PR awaiting approval'), 'delivering':T('livraison en cours', 'delivery in progress'), 'deploying':T('en déploiement', 'deploying'), 'dev-failed':T('dev en échec', 'dev failed'), 'diagnosis-held':T('diagnostic posé', 'diagnosis posted'),
+  'in-production':T('en production', 'in production'), 'diagnosis-skipped':T('diagnostic écarté', 'diagnosis skipped'), 'dev-abandoned':T('dev abandonné', 'dev abandoned'), 'pr-closed':T('PR fermée', 'PR closed') };
+const PHASE_FR = { diagnostic:T('diagnostic', 'diagnosis'), go:'go', dev:'dev', recette:T('recette', 'testing'), relecture:T('relecture', 'code review'), reprise:T('reprise', 'rework'), merge:'merge' };
 function openLauncher() { if (launcherOff()) return; findMode = false; newMode = false; bcMode = false; boardMode = false; chatsMode = false; selected = null; sessionStorage.removeItem('cc.sel'); launchMode = true; setPane(true);
   clearInterval(launchTimer); launchTimer = setInterval(loadLauncher, 10000); renderList(); renderDetail(true); loadLauncher(); }
 function closeLauncher() { launchMode = false; setPane(false); clearInterval(launchTimer); renderDetail(true); }
 async function loadLauncher() {
   if (!launchMode) { clearInterval(launchTimer); return; }
-  try { launchData = await (await fetch('/api/launcher?hours=' + launchHours, { cache:'no-store' })).json(); if (launchMode) renderLauncher(); } catch { say('lanceur illisible'); }
+  try { launchData = await (await fetch('/api/launcher?hours=' + launchHours, { cache:'no-store' })).json(); if (launchMode) renderLauncher(); } catch { say(T('lanceur illisible', 'could not read the launcher')); }
 }
 async function viewLaunchFile(dir, name) {
   const key = dir + '/' + name; if (launchView === key) { launchView = null; launchViewText = null; return renderLauncher(); }
   launchView = key; launchViewText = name.endsWith('.png') ? null : '…'; renderLauncher();
-  if (!name.endsWith('.png')) { try { launchViewText = await (await fetch('/api/launcher/file?path=' + encodeURIComponent(dir + '\\' + name), { cache:'no-store' })).text(); } catch { launchViewText = '(illisible)'; } renderLauncher(); }
+  if (!name.endsWith('.png')) { try { launchViewText = await (await fetch('/api/launcher/file?path=' + encodeURIComponent(dir + '\\' + name), { cache:'no-store' })).text(); } catch { launchViewText = T('(illisible)', '(unreadable)'); } renderLauncher(); }
 }
 async function openRunConversation(r) {
-  if (!r.sessionId) return say('identifiant de session inconnu pour ce run');
-  if (!confirm('Rouvrir la conversation du run ' + (PHASE_FR[r.phase] || r.phase) + ' de HD-' + r.hd + ' dans un nouvel onglet (claude --resume) ?\n\nPour l’inspecter ou la questionner. Le lanceur ne la reprend pas : ce que tu y fais ne change pas son run.')) return;
-  try { const x = await post('/api/reopen?id=' + r.sessionId); say(x.error ? 'refusé : ' + x.error : 'onglet ouvert — la session apparaît dans quelques secondes'); } catch { say('échec de la demande'); }
+  if (!r.sessionId) return say(T('identifiant de session inconnu pour ce run', 'unknown session id for this run'));
+  if (!confirm(T('Rouvrir la conversation du run ' + (PHASE_FR[r.phase] || r.phase) + ' de HD-' + r.hd + ' dans un nouvel onglet (claude --resume) ?\n\nPour l’inspecter ou la questionner. Le lanceur ne la reprend pas : ce que tu y fais ne change pas son run.', 'Reopen the conversation of the ' + (PHASE_FR[r.phase] || r.phase) + ' run of HD-' + r.hd + ' in a new tab (claude --resume)?\n\nTo inspect or question it. The launcher does not resume it: what you do there does not change its run.'))) return;
+  try { const x = await post('/api/reopen?id=' + r.sessionId); say(x.error ? T('refusé : ', 'refused: ') + x.error : T('onglet ouvert — la session apparaît dans quelques secondes', 'tab opened — the session appears in a few seconds')); } catch { say(T('échec de la demande', 'request failed')); }
 }
 function renderLauncher() {
   const main = $('main'); const L = launchData; detailKey = '__launch__';
   const keepScroll = main.scrollTop; main.replaceChildren();
-  main.append(el('div', 'dtitle', 'Lanceur — diagnostic automatique'));
-  if (!L) { main.append(el('div', 'meta', 'chargement…')); return; }
-  if (!L.present) { main.append(el('div', 'empty', 'Lanceur absent de ce poste.')); return; }
-  main.append(el('div', 'meta', 'Modes : triage ' + L.triage + ' · dev ' + L.devMode + ' · recette ' + L.recetteMode + ' · reprise ' + L.reworkMode + ' · coût des runs affichés : ' + L.cost.toLocaleString('fr-FR') + ' $'));
+  main.append(el('div', 'dtitle', T('Lanceur — diagnostic automatique', 'Launcher — automatic diagnosis')));
+  if (!L) { main.append(el('div', 'meta', T('chargement…', 'loading…'))); return; }
+  if (!L.present) { main.append(el('div', 'empty', T('Lanceur absent de ce poste.', 'No launcher on this machine.'))); return; }
+  main.append(el('div', 'meta', T('Modes : triage ' + L.triage + ' · dev ' + L.devMode + ' · recette ' + L.recetteMode + ' · reprise ' + L.reworkMode + ' · coût des runs affichés : ' + L.cost.toLocaleString('fr-FR') + ' $', 'Modes: triage ' + L.triage + ' · dev ' + L.devMode + ' · testing ' + L.recetteMode + ' · rework ' + L.reworkMode + ' · cost of the runs shown: $' + L.cost.toLocaleString('en-GB'))));
   // Santé
   const hb = L.heartbeat ? L.now - L.heartbeat : null;
   const tiles = el('div', 'tiles');
-  const th = el('div', 'tile ' + (hb != null && hb < 5 * 60000 ? 'busy' : 'waiting')); th.append(el('b', null, hb == null ? '?' : ago(hb)), el('span', null, 'depuis son dernier battement' + (hb != null && hb >= 5 * 60000 ? ' — arrêté ?' : ''))); tiles.append(th);
+  const th = el('div', 'tile ' + (hb != null && hb < 5 * 60000 ? 'busy' : 'waiting')); th.append(el('b', null, hb == null ? '?' : ago(hb)), el('span', null, T('depuis son dernier battement' + (hb != null && hb >= 5 * 60000 ? ' — arrêté ?' : ''), 'since its last heartbeat' + (hb != null && hb >= 5 * 60000 ? ' — stopped?' : '')))); tiles.append(th);
   for (const q of L.quota || []) {
     // Remise à zéro déjà passée : le relevé de ce compte n'a pas été rafraîchi par le lanceur — on le dit.
     const stale = q.weeklyResetsAt && new Date(q.weeklyResetsAt).getTime() < L.now;
-    if (stale) { const t = el('div', 'tile idle'); t.append(el('b', null, (q.weeklyPct ?? '?') + ' % ?'), el('span', null, 'quota ' + (q.alias || '') + ' · relevé périmé (remise du ' + new Date(q.weeklyResetsAt).toLocaleDateString('fr-FR') + ' passée)')); tiles.append(t); continue; }
-    const t = el('div', 'tile ' + (q.weeklyPct >= 90 ? 'waiting' : q.weeklyPct >= 75 ? 'ask' : 'idle')); t.append(el('b', null, (q.weeklyPct ?? '?') + ' %'), el('span', null, 'quota semaine ' + (q.alias || '') + (q.weeklyResetsAt ? ' · remise ' + new Date(q.weeklyResetsAt).toLocaleString('fr-FR', { weekday:'short', hour:'2-digit', minute:'2-digit' }) : ''))); tiles.append(t);
+    if (stale) { const t = el('div', 'tile idle'); t.append(el('b', null, (q.weeklyPct ?? '?') + ' % ?'), el('span', null, T('quota ' + (q.alias || '') + ' · relevé périmé (remise du ' + new Date(q.weeklyResetsAt).toLocaleDateString('fr-FR') + ' passée)', 'quota ' + (q.alias || '') + ' · outdated reading (reset of ' + new Date(q.weeklyResetsAt).toLocaleDateString('en-GB') + ' passed)'))); tiles.append(t); continue; }
+    const t = el('div', 'tile ' + (q.weeklyPct >= 90 ? 'waiting' : q.weeklyPct >= 75 ? 'ask' : 'idle')); t.append(el('b', null, (q.weeklyPct ?? '?') + ' %'), el('span', null, T('quota semaine ', 'weekly quota ') + (q.alias || '') + (q.weeklyResetsAt ? T(' · remise ', ' · reset ') + new Date(q.weeklyResetsAt).toLocaleString(T('fr-FR', 'en-GB'), { weekday:'short', hour:'2-digit', minute:'2-digit' }) : ''))); tiles.append(t);
     // Limite propre à un modèle (« Fable ») : sa tuile, mêmes seuils.
-    for (const l of (q.limits || []).filter(l => l.model && l.pct != null)) { const tm = el('div', 'tile ' + (l.pct >= 90 ? 'waiting' : l.pct >= 75 ? 'ask' : 'idle')); tm.append(el('b', null, Math.round(l.pct) + ' %'), el('span', null, 'quota semaine ' + l.model + ' ' + (q.alias || ''))); tiles.append(tm); } }
+    for (const l of (q.limits || []).filter(l => l.model && l.pct != null)) { const tm = el('div', 'tile ' + (l.pct >= 90 ? 'waiting' : l.pct >= 75 ? 'ask' : 'idle')); tm.append(el('b', null, Math.round(l.pct) + ' %'), el('span', null, T('quota semaine ', 'weekly quota ') + l.model + ' ' + (q.alias || ''))); tiles.append(tm); } }
   const running = L.runs.filter(r => r.running);
-  const tr = el('div', 'tile busy'); tr.append(el('b', null, running.length), el('span', null, 'run(s) en cours')); tiles.append(tr);
-  const tw = el('div', 'tile ask'); tw.append(el('b', null, L.waiting.length), el('span', null, 'ticket(s) qui attendent')); tiles.append(tw);
+  const tr = el('div', 'tile busy'); tr.append(el('b', null, running.length), el('span', null, T('run(s) en cours', 'run(s) in progress'))); tiles.append(tr);
+  const tw = el('div', 'tile ask'); tw.append(el('b', null, L.waiting.length), el('span', null, T('ticket(s) qui attendent', 'waiting ticket(s)'))); tiles.append(tw);
   main.append(tiles);
   const errs = (L.errors || []).filter(e => L.now - e.at < 7 * 86400000);
   if (errs.length) {
-    main.append(el('h2', null, 'Dernières erreurs du lanceur'));
+    main.append(el('h2', null, T('Dernières erreurs du lanceur', 'Latest launcher errors')));
     const box = el('div', 'notifs');
-    for (const e of errs) { const d = el('div', 'notif ' + (L.now - e.at < 86400000 ? 'waiting' : 'idle')); d.style.cursor = 'default'; d.append(el('span', 'dot'), el('span', 'when', 'il y a ' + ago(L.now - e.at)), el('span', 'nt', e.kind), el('span', 'nx', e.message)); box.append(d); }
+    for (const e of errs) { const d = el('div', 'notif ' + (L.now - e.at < 86400000 ? 'waiting' : 'idle')); d.style.cursor = 'default'; d.append(el('span', 'dot'), el('span', 'when', T('il y a ' + ago(L.now - e.at), ago(L.now - e.at) + ' ago')), el('span', 'nt', e.kind), el('span', 'nx', e.message)); box.append(d); }
     main.append(box);
   }
   // En cours
-  main.append(el('h2', null, 'En cours — ' + running.length));
-  if (!running.length) main.append(el('div', 'empty', 'Aucun claude -p du lanceur ne tourne.'));
+  main.append(el('h2', null, T('En cours — ', 'In progress — ') + running.length));
+  if (!running.length) main.append(el('div', 'empty', T('Aucun claude -p du lanceur ne tourne.', 'No launcher claude -p is running.')));
   for (const r of running) {
-    const c = el('div', 'fhit busy'); const t = el('div', 'ft'); t.append(el('span', 'dot'), el('span', null, 'HD-' + r.hd + ' · ' + (PHASE_FR[r.phase] || r.phase) + ' — ' + (r.title || '')), el('span', 'n', 'depuis ' + ago(L.now - r.at) + (r.tokens ? ' · ' + ktok(r.tokens) : '') + ' · pid ' + r.pid)); c.append(t);
+    const c = el('div', 'fhit busy'); const t = el('div', 'ft'); t.append(el('span', 'dot'), el('span', null, 'HD-' + r.hd + ' · ' + (PHASE_FR[r.phase] || r.phase) + ' — ' + (r.title || '')), el('span', 'n', T('depuis ', 'for ') + ago(L.now - r.at) + (r.tokens ? ' · ' + ktok(r.tokens) : '') + ' · pid ' + r.pid)); c.append(t);
     if (r.reply) c.append(el('div', 'snip', tailOf(r.reply).slice(-400)));
-    if (r.liveSessionId) { const a = el('div', 'actions'); const b = el('button', null, 'Voir la session'); b.onclick = () => select(r.liveSessionId, true); a.append(b); c.append(a); }
+    if (r.liveSessionId) { const a = el('div', 'actions'); const b = el('button', null, T('Voir la session', 'View the session')); b.onclick = () => select(r.liveSessionId, true); a.append(b); c.append(a); }
     main.append(c);
   }
   // Tickets qui attendent
-  main.append(el('h2', null, 'Tickets qui attendent — ' + L.waiting.length));
+  main.append(el('h2', null, T('Tickets qui attendent — ', 'Waiting tickets — ') + L.waiting.length));
   if (L.waiting.length) {
-    const w = el('div', 'tablewrap'), tb = el('table'), hr = el('tr'); ['Depuis', 'Ticket', 'Étape', 'Attend', 'PR', 'Détail'].forEach(h => hr.append(el('th', null, h))); tb.append(hr);
-    for (const x of L.waiting) { const r = el('tr'); r.append(el('td', null, x.since ? 'il y a ' + ago(L.now - x.since) : ''), el('td', null, 'HD-' + x.hd + ' ' + (x.title || '')), el('td', null, STAGE_FR[x.stage] || x.stage), el('td', null, x.waitingOn || ''));
+    const w = el('div', 'tablewrap'), tb = el('table'), hr = el('tr'); [T('Depuis', 'Since'), 'Ticket', T('Étape', 'Stage'), T('Attend', 'Waiting on'), 'PR', T('Détail', 'Detail')].forEach(h => hr.append(el('th', null, h))); tb.append(hr);
+    for (const x of L.waiting) { const r = el('tr'); r.append(el('td', null, x.since ? T('il y a ' + ago(L.now - x.since), ago(L.now - x.since) + ' ago') : ''), el('td', null, 'HD-' + x.hd + ' ' + (x.title || '')), el('td', null, STAGE_FR[x.stage] || x.stage), el('td', null, x.waitingOn || ''));
       const pc = el('td'); if (x.prUrl && /^https:\/\/github\.com\//.test(x.prUrl)) { const a = el('a', null, '#' + x.prNumber); a.href = x.prUrl; a.target = '_blank'; a.rel = 'noopener'; pc.append(a); } r.append(pc, el('td', null, x.detail || '')); tb.append(r); }
     w.append(tb); main.append(w);
-  } else main.append(el('div', 'empty', 'Aucun.'));
+  } else main.append(el('div', 'empty', T('Aucun.', 'None.')));
   // Décisions de la Tech en attente (carte ✅ sous la dernière note) : ouvrir le run pour trancher
   const decs = L.decisions || [];
-  main.append(el('h2', null, 'Décisions de la Tech en attente — ' + decs.length));
+  main.append(el('h2', null, T('Décisions de la Tech en attente — ', 'Pending tech decisions — ') + decs.length));
   if (decs.length) {
-    const w = el('div', 'tablewrap'), tb = el('table'), hr = el('tr'); ['Depuis', 'Ticket', 'Carte', 'Question', ''].forEach(h => hr.append(el('th', null, h))); tb.append(hr);
+    const w = el('div', 'tablewrap'), tb = el('table'), hr = el('tr'); [T('Depuis', 'Since'), 'Ticket', T('Carte', 'Card'), 'Question', ''].forEach(h => hr.append(el('th', null, h))); tb.append(hr);
     for (const x of decs) { const f = decisionForm(x); const r = el('tr');
-      r.append(el('td', null, x.since ? 'il y a ' + ago(L.now - x.since) : ''), el('td', null, 'HD-' + x.hd + ' ' + (x.title || '')), el('td', null, f.title), el('td', null, f.question));
-      const c = el('td'); const b = el('button', null, 'Trancher'); b.onclick = () => openRun(String(x.hd)); c.append(b); r.append(c); tb.append(r); }
+      r.append(el('td', null, x.since ? T('il y a ' + ago(L.now - x.since), ago(L.now - x.since) + ' ago') : ''), el('td', null, 'HD-' + x.hd + ' ' + (x.title || '')), el('td', null, f.title), el('td', null, f.question));
+      const c = el('td'); const b = el('button', null, T('Trancher', 'Decide')); b.onclick = () => openRun(String(x.hd)); c.append(b); r.append(c); tb.append(r); }
     w.append(tb); main.append(w);
-  } else main.append(el('div', 'empty', 'Aucune.'));
+  } else main.append(el('div', 'empty', T('Aucune.', 'None.')));
   // Runs récents
-  const hh = el('h2', null, 'Runs — ' + (launchHours <= 48 ? '48 dernières heures' : '7 derniers jours') + ' · ' + L.runs.length + ' '); const sw = el('a', null, launchHours <= 48 ? 'voir 7 jours' : 'revenir à 48 h'); sw.href = '#'; sw.style.textTransform = 'none'; sw.style.fontWeight = '400';
+  const hh = el('h2', null, 'Runs — ' + (launchHours <= 48 ? T('48 dernières heures', 'last 48 hours') : T('7 derniers jours', 'last 7 days')) + ' · ' + L.runs.length + ' '); const sw = el('a', null, launchHours <= 48 ? T('voir 7 jours', 'show 7 days') : T('revenir à 48 h', 'back to 48 h')); sw.href = '#'; sw.style.textTransform = 'none'; sw.style.fontWeight = '400';
   sw.onclick = e => { e.preventDefault(); launchHours = launchHours <= 48 ? 168 : 48; launchData = null; renderLauncher(); loadLauncher(); }; hh.append(sw); main.append(hh);
-  const fi = el('input'); fi.className = 'lfilter'; fi.placeholder = 'filtrer : HD, titre, phase, résultat…'; fi.value = launchFilter; fi.oninput = () => { launchFilter = fi.value; renderLauncher(); const n = document.querySelector('.lfilter'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }; main.append(fi);
+  const fi = el('input'); fi.className = 'lfilter'; fi.placeholder = T('filtrer : HD, titre, phase, résultat…', 'filter: ticket, title, phase, outcome…'); fi.value = launchFilter; fi.oninput = () => { launchFilter = fi.value; renderLauncher(); const n = document.querySelector('.lfilter'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }; main.append(fi);
   const toks = norm(launchFilter).split(/\s+/).filter(Boolean);
   const runs = L.runs.filter(r => toks.every(t => norm(['HD-' + r.hd, r.title, r.phase, r.outcome, r.verdict, r.detail, r.stage].join(' ')).includes(t)));
   const list = el('div', 'lruns');
@@ -930,15 +931,15 @@ function renderLauncher() {
     const ko = /fail|abandon|error|refus|denied/i.test((r.outcome || '') + ' ' + (r.verdict || ''));
     const row = el('div', 'lrun ' + (r.running ? 'busy' : ko ? 'waiting' : ok ? 'done' : 'idle'));
     const h = el('div', 'lh');
-    h.append(el('span', 'dot'), el('span', 'lt', new Date(r.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })), el('span', 'lp', PHASE_FR[r.phase] || r.phase),
+    h.append(el('span', 'dot'), el('span', 'lt', new Date(r.at).toLocaleString(T('fr-FR', 'en-GB'), { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })), el('span', 'lp', PHASE_FR[r.phase] || r.phase),
              el('span', 'lx', 'HD-' + r.hd + ' — ' + (r.title || '')),
-             el('span', 'lo', r.running ? 'en cours' : [r.outcome, r.verdict].filter(Boolean).join(' · ') || '—'),
-             el('span', 'lm', [r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + ' tours' : null, r.costUsd != null ? (Math.round(r.costUsd * 100) / 100).toLocaleString('fr-FR') + ' $' : null].filter(Boolean).join(' · ')));
+             el('span', 'lo', r.running ? T('en cours', 'running') : [r.outcome, r.verdict].filter(Boolean).join(' · ') || '—'),
+             el('span', 'lm', [r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.turns ? r.turns + T(' tours', ' turns') : null, r.costUsd != null ? T((Math.round(r.costUsd * 100) / 100).toLocaleString('fr-FR') + ' $', '$' + (Math.round(r.costUsd * 100) / 100).toLocaleString('en-GB')) : null].filter(Boolean).join(' · ')));
     row.append(h);
     if (r.detail) row.append(el('div', 'ld', r.detail));
     const fl = el('div', 'lf');
-    for (const f of r.files) { const b = el('button', 'quick' + (launchView === r.dir + '/' + f.name ? ' on' : ''), f.name); b.title = Math.max(1, Math.round(f.size / 1024)) + ' Ko'; b.onclick = () => viewLaunchFile(r.dir, f.name); fl.append(b); }
-    if (r.sessionId && !r.running) { const b = el('button', 'quick', '↻ conversation'); b.title = 'Rouvrir cette conversation dans un onglet (claude --resume ' + r.sessionId.slice(0, 8) + '…)'; b.onclick = () => openRunConversation(r); fl.append(b); }
+    for (const f of r.files) { const b = el('button', 'quick' + (launchView === r.dir + '/' + f.name ? ' on' : ''), f.name); b.title = Math.max(1, Math.round(f.size / 1024)) + T(' Ko', ' KB'); b.onclick = () => viewLaunchFile(r.dir, f.name); fl.append(b); }
+    if (r.sessionId && !r.running) { const b = el('button', 'quick', '↻ conversation'); b.title = T('Rouvrir cette conversation dans un onglet (claude --resume ' + r.sessionId.slice(0, 8) + '…)', 'Reopen this conversation in a tab (claude --resume ' + r.sessionId.slice(0, 8) + '…)'); b.onclick = () => openRunConversation(r); fl.append(b); }
     row.append(fl);
     if (launchView && launchView.startsWith(r.dir + '/')) {
       const name = launchView.slice(r.dir.length + 1);
@@ -947,7 +948,7 @@ function renderLauncher() {
     }
     list.append(row);
   }
-  if (!runs.length) list.append(el('div', 'empty', 'Aucun run.'));
+  if (!runs.length) list.append(el('div', 'empty', T('Aucun run.', 'No run.')));
   main.append(list);
   main.scrollTop = keepScroll;
 }
