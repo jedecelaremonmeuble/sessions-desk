@@ -35,7 +35,10 @@ $pidFile = Join-Path $StateDir "sessions-desk-node-$Port.pid"
 $ping = "http://localhost:$Port/api/ping"
 
 function Write-Log([string]$m) { Add-Content $log "$(Get-Date -Format s) [$Port] $m" }
-function Test-Up { try { $null = Invoke-RestMethod $ping -TimeoutSec 5; $true } catch { $false } }
+# Port sans écouteur : réponse immédiate. Un ping HTTP vers un port fermé coûte ~4 s sous Windows (::1 puis
+# 127.0.0.1, chacun relancé) — autant de coupure en plus à chaque relance.
+function Test-Listening { [bool]([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Where-Object Port -eq $Port) }
+function Test-Up { if (-not (Test-Listening)) { return $false }; try { $null = Invoke-RestMethod $ping -TimeoutSec 5; $true } catch { $false } }
 # Un serveur Node DE CE PORT lancé depuis n'importe quel dossier (main.ts, et --port <Port> ou port par défaut 8767).
 function Test-OurServer($p) {
     if (-not $p -or $p.Name -ne 'node.exe' -or $p.CommandLine -notmatch 'server[\\/]src[\\/]main\.ts') { return $false }
@@ -44,9 +47,16 @@ function Test-OurServer($p) {
 }
 
 if (Test-Up) { return }
-# Un démarrage peut être en cours (quelques secondes) : on recontrôle avant de relancer.
-Start-Sleep -Seconds 5
-if (Test-Up) { return }
+# Lancé par un déploiement (marqueur posé par Install-NodeWatchdog.ps1, récent) : le serveur vient d'être arrêté
+# exprès, inutile d'attendre — et ce n'est pas une panne.
+$marker = Join-Path $StateDir "sessions-desk-node-$Port.deploying"
+$deploy = if ((Test-Path $marker) -and ((Get-Date) - (Get-Item $marker).LastWriteTime).TotalMinutes -lt 2) { "$(Get-Content $marker -Raw)".Trim() }
+Remove-Item $marker -Force -ErrorAction SilentlyContinue
+if (-not $deploy) {
+    # Un démarrage peut être en cours (quelques secondes) : on recontrôle avant de relancer.
+    Start-Sleep -Seconds 5
+    if (Test-Up) { return }
+}
 
 if (-not (Test-Path $main)) { Write-Log "serveur absent : $main"; return }
 $driver = Join-Path $root '.build\driver\sessions-desk-driver.exe'
@@ -77,7 +87,8 @@ if ((Test-Path $errLog) -and (Get-Item $errLog).Length -gt 0) {
     Add-Content $log "--- stderr du serveur précédent :"
     Get-Content $errLog -Tail 20 | Add-Content $log
 }
-Write-Log "serveur muet sur $ping => relance ($main$(if ($AllowWrite) { ', écriture permise' }))"
+if ($deploy) { Write-Log "démarrage après déploiement de $deploy ($main$(if ($AllowWrite) { ', écriture permise' }))" }
+else { Write-Log "serveur muet sur $ping => relance ($main$(if ($AllowWrite) { ', écriture permise' }))" }
 
 $nodeArgs = @("`"$main`"", '--port', $Port) + @(if ($AllowWrite) { '--allow-write' })
 $p = Start-Process $Node -WindowStyle Hidden -WorkingDirectory $root -PassThru `

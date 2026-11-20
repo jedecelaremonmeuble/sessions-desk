@@ -69,11 +69,24 @@ try {
 
     # 3. Plantage
     Stop-Process -Id $pid1 -Force; Start-Sleep 1
-    RunWd
+    $t0 = Get-Date; RunWd; $tookCrash = ((Get-Date) - $t0).TotalSeconds
     Check 'après kill : relancé' (WaitUp)
     $pid2 = [int](Get-Content $pidFile -Raw).Trim()
     Check 'après kill : nouveau process' ($pid2 -ne $pid1 -and (Holder) -eq $pid2)
     Check 'après kill : relance tracée' ((Get-Content $log -Raw) -match 'relance')
+
+    # 3 bis. Démarrage commandé par un déploiement (marqueur d'Install-NodeWatchdog.ps1) : sans délai de grâce, et
+    #        tracé comme un déploiement, pas comme une panne.
+    Stop-Process -Id $pid2 -Force; Start-Sleep 1
+    $marker = Join-Path $state "sessions-desk-node-$TestPort.deploying"
+    Set-Content $marker 'abc1234567'
+    $n = LogLines; $t0 = Get-Date; RunWd; $took = ((Get-Date) - $t0).TotalSeconds
+    Check 'déploiement : relancé' (WaitUp)
+    $pid2 = [int](Get-Content $pidFile -Raw).Trim()
+    $added = @(Get-Content $log | Select-Object -Skip $n) -join "`n"
+    Check 'déploiement : tracé comme tel' ($added -match 'démarrage après déploiement de abc1234567' -and $added -notmatch 'serveur muet') $added
+    Check 'déploiement : pas de délai de grâce (5 s de moins que la relance après plantage)' ($took -lt $tookCrash - 3) "$took s contre $tookCrash s"
+    Check 'déploiement : marqueur consommé' (-not (Test-Path $marker))
 
     # 4. Serveur FIGÉ : un process dont la ligne de commande est celle du serveur, qui tient le port sans répondre.
     Stop-Process -Id $pid2 -Force; Start-Sleep 1
