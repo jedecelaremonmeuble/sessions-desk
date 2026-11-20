@@ -162,7 +162,7 @@ function quotaSection() {
 // fin du tour, asks-judge.ts). L'heuristique se trompe rarement quand elle dit oui ; le modèle rattrape les formes qu'elle
 // ne connaît pas (« when you give the go », « je peux regarder… », un essai à faire).
 const asksOf = it => asks(it.reply) || !!(it.askVerdict && it.askVerdict.v);
-const stateOf = it => it.kind === 'closed' ? 'closed' : it.kind === 'run' || it.headless ? 'auto' : it.status === 'idle' ? (it.done ? (asksOf(it) ? 'ask' : 'done') : 'idle')
+const stateOf = it => it.kind === 'closed' ? 'closed' : it.kind === 'pass' ? 'auto:' + it.auto.id : it.kind === 'run' || it.headless ? 'auto' : it.status === 'idle' ? (it.done ? (asksOf(it) ? 'ask' : 'done') : 'idle')
   : it.status === 'shell' ? (asksOf(it) ? 'ask' : 'shell') : (LABEL[it.status] ? it.status : 'idle');
 function prTags(it) {
   const p = it.prInfo; if (!p || !it.pr) return [];
@@ -174,12 +174,13 @@ function prTags(it) {
 function allItems() {
   if (!data) return [];
   const rg = runGroup();          // runs du lanceur : la session headless d'un run en cours est absorbée par lui
-  const open = data.sessions.filter(s => !rg.absorbed.has(s.sessionId)).map(s => ({ ...s, kind:'open', key:s.sessionId, since:s.statusSince }));
+  const ag = autoGroup();         // passes des automates : idem pour la passe en cours
+  const open = data.sessions.filter(s => !rg.absorbed.has(s.sessionId) && !ag.absorbed.has(s.sessionId)).map(s => ({ ...s, kind:'open', key:s.sessionId, since:s.statusSince }));
   const ids = new Set(data.sessions.map(s => s.sessionId));
-  const runIds = new Set(rg.items.flatMap(it => it.runs || [it]).map(it => it.sessionId).filter(Boolean));     // un run « ↻ repris » n'est pas aussi une fermée
+  const runIds = new Set(rg.items.flatMap(it => it.runs || [it]).concat(ag.items).map(it => it.sessionId).filter(Boolean));     // un run « ↻ repris » n'est pas aussi une fermée
   const closed = closedData.closed.filter(c => !ids.has(c.sessionId) && !runIds.has(c.sessionId)).map(c => ({ ...c, kind:'closed', key:c.sessionId, since:c.lastActivity }));
-  return open.concat(closed, rg.items).map(it => ({ ...it, state: teamsHeld(stateOf(it), teamsWaitsOf(it)) ? 'teams' : stateOf(it), fav: favs.has(it.key), hidden: it.kind === 'closed' && hiddenSet.has(it.key),
-    hay: norm([it.title, it.name, it.pr ? '#' + it.pr + ' pr ' + it.pr : '', it.sessionId, it.cwd, it.reply, it.suggestion, it.outcome, it.run ? (it.runs || [it]).map(x => x.run.phase + ' ' + (x.run.detail || '')).join(' ') : '', (it.prompts || []).map(p => p.text).join(' '), tagHay(it)].join(' ')) }));
+  return open.concat(closed, rg.items, ag.items).map(it => ({ ...it, state: teamsHeld(stateOf(it), teamsWaitsOf(it)) ? 'teams' : stateOf(it), fav: favs.has(it.key), hidden: it.kind === 'closed' && hiddenSet.has(it.key),
+    hay: norm([it.title, it.name, it.pr ? '#' + it.pr + ' pr ' + it.pr : '', it.sessionId, it.cwd, it.reply, it.suggestion, it.outcome, it.run ? (it.runs || [it]).map(x => x.run.phase + ' ' + (x.run.detail || '')).join(' ') : '', it.kind === 'pass' ? it.auto.label + ' ' + (it.pass ? it.pass.summary + ' ' + (PASS_FR[it.pass.status] || '') : 'en cours') : '', (it.prompts || []).map(p => p.text).join(' '), tagHay(it)].join(' ')) }));
 }
 
 // ── Tags de l'étiqueteur ──
@@ -791,6 +792,185 @@ function openRun(hd) {
 }
 const runGroup = () => { const g = launcherGroup(runData ? runData.runs : [], runData ? runData.waiting : [], data ? data.sessions : [], midnight()); return { items: runsByHd(g.items), absorbed: g.absorbed }; };
 const money = v => (Math.round(v * 100) / 100).toLocaleString('fr-FR') + ' $';
+// ── Passes des AUTOMATES du poste (module « automations ») : scripts planifiés déclarés dans la configuration du
+// poste. Un groupe par automate dans la liste (passes du jour qui ont agi ou échoué, et la passe en cours), une carte
+// par automate dans la vue d'ensemble, le détail d'une passe (résumé, fichiers, conversation). Source :
+// /api/automations?since=<minuit>, relu toutes les 30 s page visible et juste après un « Lancer maintenant ».
+// Les passes sans effet (quiet) n'ont pas de ligne : l'en-tête du groupe les compte et redit la dernière.
+let autoData = null, autoAsked = false;
+const automationsOff = () => !(data && data.modules && data.modules.automations);
+async function loadAutomations() {
+  if (automationsOff()) { autoData = null; return; }
+  if (document.visibilityState === 'hidden' && autoData) return;
+  autoAsked = true;
+  try { const r = await fetch('/api/automations?since=' + midnight(), { cache:'no-store' }); autoData = r.ok ? await r.json() : null; if (data) { renderList(); renderDetail(); } } catch {}
+  if (pendingPass && autoData) { const p = pendingPass; pendingPass = null; openPass(p); }
+}
+// automationGroups est PURE (testée par server/test/automations-page.test.ts) : vue du serveur → un groupe par
+// automate et ses éléments de liste. La session sans terminal de la passe en cours (même sessionId, ou même pid) est
+// ABSORBÉE par la ligne de la passe : elle ne figure plus seule dans la liste.
+// Couleur (look) : en cours = busy · passe en erreur = waiting · alerte = ask · à blanc = idle · réussie = done.
+function automationGroups(autos, open) {
+  const look = p => p.level === 'error' ? 'waiting' : p.level === 'warn' ? 'ask' : p.status === 'dry-run' ? 'idle' : 'done';
+  const groups = [], items = [], absorbed = new Set();
+  for (const a of autos || []) {
+    const name = (a.icon ? a.icon + ' ' : '') + a.label;
+    groups.push({ key:'automation:' + a.id, title:name, states:['auto:' + a.id], auto:a });
+    if (a.running) {
+      const s = (open || []).find(x => x.headless && (x.sessionId === a.running.sessionId || (a.running.pid && x.pid === a.running.pid))) || null;
+      if (s) absorbed.add(s.sessionId);
+      items.push({ kind:'pass', key:'pass:' + a.id + ':' + a.running.run, auto:a, pass:null, running:true, look:'busy', sessionId:a.running.sessionId,
+        title:name + ' · passe en cours', at:a.running.at, since:a.running.at, model:s ? s.model || null : null, tokens:s ? s.tokens || null : null, reply:s ? s.reply || null : null });
+    }
+    for (const p of a.passes || []) {
+      if (a.running && p.run === a.running.run) continue;
+      items.push({ kind:'pass', key:'pass:' + a.id + ':' + p.run, auto:a, pass:p, running:false, look:look(p), sessionId:p.sessionId || null,
+        title:name + ' · ' + new Date(p.at).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }), at:p.at, since:p.at + Math.round((p.minutes || 0) * 60000) });
+    }
+  }
+  return { groups, items, absorbed };
+}
+const autoGroup = () => automationGroups(autoData ? autoData.automations : [], data ? data.sessions : []);
+// Groupes de la liste : ceux de la page, plus un par automate, juste avant « Fermées ».
+const groupList = () => { const ag = autoGroup().groups; if (!ag.length) return GROUPS; const i = GROUPS.findIndex(g => g.key === 'closed'); return GROUPS.slice(0, i).concat(ag, GROUPS.slice(i)); };
+const PASS_FR = { ok:'a agi', nothing:'rien à faire', 'dry-run':'à blanc', conflict:'conflit', rejected:'refusée', failed:'échec', unknown:'issue inconnue' };
+function passSub(it) {
+  if (it.running) return ['travaille' + (it.at ? ' depuis ' + ago(Date.now() - it.at) : ''), it.reply ? lastLine(it.reply) : null].filter(Boolean).join(' · ');
+  const p = it.pass;
+  return [p.summary, p.minutes != null ? (p.minutes < 1 ? '< 1 min' : Math.round(p.minutes) + ' min') : null, p.costUsd != null ? money(p.costUsd) : null].filter(Boolean).join(' · ');
+}
+// En-tête d'un groupe d'automate : passe en cours, dernière passe (et son résumé si elle était sans effet), passes
+// sans effet du jour.
+function autoGroupTitle(a) {
+  const parts = [];
+  if (a.running) parts.push('en cours');
+  if (a.last) parts.push('dernière il y a ' + ago(Date.now() - a.last.at) + (a.last.quiet ? ' : ' + a.last.summary : ''));
+  else if (!a.present) parts.push('historique absent');
+  if (a.quietToday) parts.push(a.quietToday + ' sans effet aujourd’hui');
+  return parts.length ? parts.join(' · ') : '';
+}
+// automationCard est PURE (testée par server/test/automations-page.test.ts) : la carte d'un automate dans la vue
+// d'ensemble — couleur, résumé de la dernière passe, et les lignes « dernière passe », « prochaine », « 7 jours »,
+// « dernier échec ».
+function automationCard(a, now) {
+  const fr = { ok:'a agi', nothing:'rien à faire', 'dry-run':'à blanc', conflict:'conflit', rejected:'refusée', failed:'échec', unknown:'issue inconnue' };
+  const since = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + ' min' : m < 2880 ? Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') : Math.floor(m / 1440) + ' j'; };
+  const usd = v => (Math.round(v * 100) / 100).toLocaleString('fr-FR') + ' $';
+  const l = a.last, w = a.week || {};
+  const look = a.running ? 'busy' : !a.present || !l ? 'idle' : l.level === 'error' ? 'waiting' : l.level === 'warn' || a.late ? 'ask' : 'done';
+  const lines = [];
+  if (!a.present) lines.push(['historique', 'introuvable — l’automate a-t-il déjà tourné ? (chemin dans la configuration du poste)']);
+  if (a.running) lines.push(['en cours', 'depuis ' + since(now - a.running.at)]);
+  if (l) lines.push(['dernière passe', 'il y a ' + since(now - l.at) + ' · ' + (fr[l.status] || l.status) + (l.dryRun && l.status !== 'dry-run' ? ' (à blanc)' : '')]);
+  if (a.late) lines.push(['en retard', (l ? 'aucune passe depuis ' + since(now - l.at) : 'aucune passe') + ' — la tâche planifiée tourne toutes les ' + a.everyMinutes + ' min']);
+  else if (a.next && !a.running) lines.push(['prochaine', 'dans ' + since(a.next - now)]);
+  if (w.count) lines.push(['7 jours', [w.count + (w.count > 1 ? ' passes' : ' passe'), w.failures ? w.failures + (w.failures > 1 ? ' échecs' : ' échec') : 'aucun échec',
+    w.warnings ? w.warnings + (w.warnings > 1 ? ' alertes' : ' alerte') : null, w.costUsd != null ? usd(w.costUsd) + ' (' + usd(w.costAvg) + ' par passe)' : null].filter(Boolean).join(' · ')]);
+  if (w.lastFailure) lines.push(['dernier échec', 'il y a ' + since(now - w.lastFailure.at) + ' : ' + w.lastFailure.summary]);
+  return { look, title:(a.icon ? a.icon + ' ' : '') + a.label, summary: l ? l.summary : a.running ? 'première passe en cours' : 'aucune passe sur 8 jours', lines };
+}
+function automationSection() {
+  const list = autoData ? autoData.automations : []; if (!list.length) return null;
+  const box = el('div', 'qcards');
+  for (const a of list) {
+    const v = automationCard(a, Date.now());
+    const c = el('div', 'qcard acard ' + v.look);
+    const h = el('div', 'qhead'); h.append(el('b', null, v.title)); c.append(h);
+    const sm = el('div', 'asum', v.summary);
+    const it = a.running ? allItems().find(x => x.kind === 'pass' && x.running && x.auto.id === a.id) : a.last && allItems().find(x => x.key === 'pass:' + a.id + ':' + a.last.run);
+    if (it) { sm.classList.add('lnk'); sm.title = 'Ouvrir cette passe'; sm.onclick = () => select(it.key, true); }
+    c.append(sm);
+    const dl = el('dl'); for (const [k, x] of v.lines) dl.append(el('dt', null, k), el('dd', null, x)); c.append(dl);
+    const ob = automationOrders(a); if (ob) c.append(ob);
+    box.append(c);
+  }
+  return box;
+}
+// « Lancer maintenant » : un bouton par ordre déclaré dans la configuration ; confirmation si l'ordre en demande une.
+function automationOrders(a) {
+  if (!canWrite || !a.orders || !a.orders.length) return null;
+  const box = el('div', 'actions');
+  for (const o of a.orders) {
+    const b = el('button', null, '▶ ' + o.label);
+    b.title = 'Lancer maintenant : ' + o.label + (a.week && a.week.costAvg != null ? ' — coût moyen d’une passe sur 7 jours : ' + money(a.week.costAvg) : '');
+    b.onclick = e => { e.stopPropagation(); runAutomationOrder(a, o); };
+    box.append(b);
+  }
+  return box;
+}
+async function runAutomationOrder(a, o) {
+  if (!canWrite) return;
+  if (o.confirm && !confirm(o.confirm)) return;
+  say((a.icon ? a.icon + ' ' : '') + a.label + ' : ' + o.label + '…');
+  try {
+    const r = await fetch('/api/automations/order', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ id: a.id, order: o.id }) });
+    const j = await r.json().catch(() => ({}));
+    say(j.error ? 'refusé : ' + j.error : j.done ? a.label + ' : terminé' + (j.output ? ' — ' + j.output : '') : a.label + ' : passe lancée — elle apparaît dans son groupe dès que sa session démarre');
+  } catch { say('échec de la demande'); }
+  setTimeout(loadAutomations, 3000); setTimeout(loadAutomations, 15000);
+}
+// Notification d'échec (cloche ou notification Windows ?pass=<automate>:<passe>) : la passe, si elle est du jour.
+let pendingPass = new URLSearchParams(location.search).get('pass');
+function openPass(ref) {
+  const it = byKey('pass:' + ref);
+  if (!it) { say('passe introuvable dans la liste (d’avant minuit ?)'); return; }
+  if (launchMode) closeLauncher();
+  select(it.key, true);
+}
+let passFile = null, passFileText = null;      // fichier de la passe affiché dans le détail : '<clé>/<nom>'
+async function openPassFile(it, name) {
+  const key = it.key + '/' + name;
+  if (passFile === key) { passFile = null; passFileText = null; return renderDetail(true); }
+  passFile = key; passFileText = name.endsWith('.png') ? null : '…'; renderDetail(true);
+  if (name.endsWith('.png')) return;
+  try { const r = await fetch(passFileUrl(it, name), { cache:'no-store' }); passFileText = r.ok ? await r.text() : '(illisible : ' + r.status + ')'; } catch { passFileText = '(illisible)'; }
+  if (passFile === key) renderDetail(true);
+}
+const passFileUrl = (it, name) => '/api/automations/file?id=' + encodeURIComponent(it.auto.id) + '&run=' + encodeURIComponent(it.pass.run) + '&name=' + encodeURIComponent(name);
+// Détail d'une passe : en-tête (automate, issue, durée, coût), résumé, fichiers, conversation (en direct pendant la passe).
+function renderPassDetail(it, force) {
+  const main = $('main'), a = it.auto, p = it.pass;
+  if (detailKey !== it.key || force) {
+    if (detailKey !== it.key) { passFile = null; passFileText = null; }
+    detailKey = it.key; main.replaceChildren();
+    const head = el('div'); head.id = 'head'; const body = el('div'); body.id = 'body'; main.append(head, body);
+    if (p) { const card = el('div', 'rcard ' + it.look); card.append(el('div', 'rtitle', p.summary)); body.append(card); }
+    if (p && p.files && p.files.length && a.files) {
+      body.append(el('h2', null, 'Fichiers de la passe'));
+      const fl = el('div', 'lf');
+      for (const f of p.files) { const b = el('button', 'quick' + (passFile === it.key + '/' + f ? ' on' : ''), f); b.onclick = () => openPassFile(it, f); fl.append(b); }
+      body.append(fl);
+      if (passFile && passFile.startsWith(it.key + '/')) {
+        const name = passFile.slice(it.key.length + 1);
+        if (name.endsWith('.png')) { const img = el('img', 'lview'); img.src = passFileUrl(it, name); body.append(img); }
+        else if (name.endsWith('.html') && passFileText !== '…') body.append(noteFrame(passFileText || ''));
+        else body.append(el('pre', 'lview', passFileText));
+      }
+    }
+    if (it.sessionId) { body.append(el('h2', null, 'Conversation complète'), convPane()); applyConvView(it); }
+    else body.append(el('div', 'empty', it.running ? 'Session de la passe pas encore repérée.' : 'Passe sans session Claude : pas de conversation (voir son résumé et ses fichiers).'));
+  }
+  const head = $('head'); head.replaceChildren(); head.className = it.look;
+  head.append(el('div', 'dtitle', it.title));
+  const chip = el('span', 'chip'); chip.append(el('span', 'dot'), it.running ? 'travaille · depuis ' + ago(Date.now() - it.at) : (PASS_FR[p.status] || p.status) + ' · il y a ' + ago(Date.now() - it.since));
+  if (p && p.dryRun && p.status !== 'dry-run') chip.append(el('span', 'tag cl', 'à blanc'));
+  head.append(chip);
+  if (it.model) head.append(el('span', 'tok', '  ·  modèle : ' + modelName(it.model)));
+  if (it.tokens) head.append(el('span', 'tok', '  ·  contexte : ' + it.tokens.toLocaleString('fr-FR') + ' tokens'));
+  head.append(el('div', 'meta', [(a.icon ? a.icon + ' ' : '') + a.label, 'lancée le ' + new Date(it.at).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
+    p && p.minutes != null ? (p.minutes < 1 ? '< 1 min' : Math.round(p.minutes) + ' min') : null, p && p.costUsd != null ? money(p.costUsd) : null, it.sessionId].filter(Boolean).join(' · ')));
+  const actions = el('div', 'actions');
+  if (!it.running && it.sessionId && canWrite) {
+    const b = el('button', 'primary', '↻ Reprendre dans un onglet'); b.title = 'claude --resume ' + it.sessionId + ' — pour l’inspecter ou la questionner ; l’automate ne la reprend pas';
+    b.onclick = () => openPassConversation(it); actions.append(b);
+  }
+  const ob = automationOrders(a); if (ob) for (const b of [...ob.children]) actions.append(b);
+  head.append(actions);
+}
+async function openPassConversation(it) {
+  if (!confirm('Rouvrir la conversation de cette passe (' + it.auto.label + ') dans un nouvel onglet (claude --resume) ?\n\nPour l’inspecter ou la questionner. L’automate ne la reprend pas.')) return;
+  try { const x = await post('/api/reopen?id=' + it.sessionId); say(x.error ? 'refusé : ' + x.error : 'onglet ouvert — la session apparaît dans quelques secondes'); } catch { say('échec de la demande'); }
+}
 // Enchaînement des phases d'une demande, du premier au dernier run ; au-delà de 5, seules les 5 dernières.
 const phaseChain = phases => (phases.length > 5 ? ['…'].concat(phases.slice(-5)) : phases).map(p => RUN_FR[p] || p).join(' → ');
 const RUN_FR = { diagnostic:'diagnostic', suite:'suite', dev:'dev', relecture:'relecture', recette:'recette', reprise:'reprise', relance:'relance', reveil:'réveil', go:'go', merge:'merge', production:'production', doc:'doc' };
@@ -1307,26 +1487,28 @@ function renderList() {
         const row = el('div', 'row-s ' + (it.look || it.state) + (it.key === selected ? ' sel' : ''));
         const tt = el('span', 't'); if (it.fav) tt.append(el('span', 'star', '★ ')); tt.append(label(it));
         row.append(el('span', 'dot'), tt, el('span', 'age', 'vue il y a ' + ago(Date.now() - r.at)));
-        row.append(el('span', 'sub', it.kind === 'run' ? runSub(it) : (it.kind === 'closed' ? 'fermée — terminal disparu' : LABEL[it.state]) + (it.lastPrompt ? ' · ' + it.lastPrompt : '')));
+        row.append(el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : (it.kind === 'closed' ? 'fermée — terminal disparu' : LABEL[it.state]) + (it.lastPrompt ? ' · ' + it.lastPrompt : '')));
         row.title = label(it); row.onclick = () => select(it.key); row.ondblclick = () => primary(it);
         list.append(row);
       }
     }
   }
-  for (const g of GROUPS) {
-    // 🤖 : en cours d'abord (runs et autres claude -p), puis du plus récent au plus ancien.
-    const live = it => it.kind === 'run' ? it.run.running : it.kind === 'open';
+  for (const g of groupList()) {
+    // 🤖 et automates : en cours d'abord (runs, passes et autres claude -p), puis du plus récent au plus ancien.
+    const live = it => it.kind === 'run' ? it.run.running : it.kind === 'pass' ? it.running : it.kind === 'open';
+    const byTime = g.key === 'auto' || !!g.auto;
     const rows = items.filter(it => g.states.includes(it.state)).sort(sortMode === 'created'
-      ? (g.key === 'auto' ? (a, b) => (live(b) - live(a)) || createdOf(b) - createdOf(a) : (a, b) => (b.fav - a.fav) || createdOf(b) - createdOf(a))
-      : g.key === 'auto' ? (a, b) => (live(b) - live(a)) || (b.at || b.since) - (a.at || a.since)
+      ? (byTime ? (a, b) => (live(b) - live(a)) || createdOf(b) - createdOf(a) : (a, b) => (b.fav - a.fav) || createdOf(b) - createdOf(a))
+      : byTime ? (a, b) => (live(b) - live(a)) || (b.at || b.since) - (a.at || a.since)
       : (a, b) => (b.fav - a.fav) || (g.asc ? (TODO.indexOf(a.state) - TODO.indexOf(b.state) || a.since - b.since) : b.since - a.since));
-    if (!rows.length && (g.key !== 'todo' || expandAll)) continue;   // « À traiter » reste visible même vide
+    if (!rows.length && (g.key !== 'todo' || expandAll) && !(g.auto && !expandAll)) continue;   // « À traiter » et les automates restent visibles même vides
     const isCollapsed = !expandAll && collapsed.has(g.key);
     // 🤖 replié : on garde sous les yeux ce qui compte — en cours, en échec, PR qui attend l'utilisateur.
-    const urgent = g.key === 'auto' ? rows.filter(it => live(it) || it.look === 'waiting' || it.look === 'ask') : [];
+    const urgent = g.key === 'auto' ? rows.filter(it => live(it) || it.look === 'waiting' || it.look === 'ask') : g.auto ? rows.filter(it => live(it) || it.look === 'waiting') : [];
     const head = el('div', 'grp');
-    const gTitle = g.key === 'auto' ? autoTitle(g.title, rows) : g.title;
+    const gTitle = g.key === 'auto' ? autoTitle(g.title, rows) : g.auto ? g.title + (autoGroupTitle(g.auto) ? ' — ' + autoGroupTitle(g.auto) : '') : g.title;
     head.append(el('span', 'car', isCollapsed ? '▸' : '▾'), el('span', null, gTitle + (g.key === 'closed' && closedData.days ? ' · ' + closedData.days + ' j' : '')), el('span', 'n', rows.length));
+    if (g.auto) head.title = 'Passes du jour qui ont agi ou échoué, et la passe en cours. Les passes sans effet sont comptées ici sans ligne. Replié : seulement en cours et en échec.' + (g.auto.last ? '\nDernière passe : ' + g.auto.last.summary : '');
     if (g.key === 'auto') head.title = 'Runs du lanceur depuis minuit et tout run en cours, plus les autres claude -p. Replié : seulement en cours, en échec et PR qui attend ta validation. L’historique long est dans la vue 🤖 ( l ).';
     if (g.key === 'todo' && rows.some(it => it.state === 'done' || it.state === 'ask')) {
       const all = el('a', null, 'tout marquer vu'); all.href = '#'; all.style.textTransform = 'none'; all.style.letterSpacing = '0'; all.style.fontWeight = '400';
@@ -1345,17 +1527,18 @@ function renderList() {
     head.onclick = () => { collapsed.has(g.key) ? collapsed.delete(g.key) : collapsed.add(g.key); localStorage.setItem('cc.collapsed', JSON.stringify([...collapsed])); renderList(); };
     list.append(head);
     if (isCollapsed && !urgent.length) continue;
+    if (!rows.length && g.auto) continue;
     if (!rows.length) { const e = el('div', 'row-s empty'); e.append(el('span'), el('span', 'sub', 'rien à traiter')); e.style.cursor = 'default'; list.append(e); continue; }
     for (const it of isCollapsed ? urgent : rows) {
       flat.push(it.key);
-      const r = el('div', 'row-s ' + (it.look || it.state) + (it.kind === 'run' ? ' run' : '') + (it.key === selected ? ' sel' : ''));
+      const r = el('div', 'row-s ' + (it.look || it.state) + (it.kind === 'run' || it.kind === 'pass' ? ' run' : '') + (it.key === selected ? ' sel' : ''));
       r.dataset.key = it.key;
       const tt = el('span', 't'); if (it.fav) tt.append(el('span', 'star', '★ ')); tt.append(label(it));
       { const d = driftTag(it); if (d) tt.append(d); }
       if (it.hidden) tt.append(el('span', 'tag hid', 'masquée'));
       r.append(el('span', 'dot'), tt, el('span', 'age', (it.model ? modelName(it.model) + ' · ' : '') + (it.tokens ? ktok(it.tokens) + ' · ' : '') + (sortMode === 'created' ? 'créée il y a ' + ago(data.now - createdOf(it)) : ago(data.now - it.since))));
       const merged = (closable(it) ? '✓ peut se fermer · ' : it.prInfo && it.prInfo.state === 'MERGED' ? 'PR mergée · ' : '') + (it.status === 'shell' && it.state !== 'shell' ? 'commande en arrière-plan · ' : '');
-      const sub = el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'open' ? merged + (it.state === 'idle' ? (it.lastPrompt || it.name) : LABEL[it.state] + (it.lastPrompt ? ' · ' + it.lastPrompt : '')) : 'fermée · ' + merged + (it.lastPrompt || short(it.cwd)));
+      const sub = el('span', 'sub', it.kind === 'run' ? runSub(it) : it.kind === 'pass' ? passSub(it) : it.kind === 'open' ? merged + (it.state === 'idle' ? (it.lastPrompt || it.name) : LABEL[it.state] + (it.lastPrompt ? ' · ' + it.lastPrompt : '')) : 'fermée · ' + merged + (it.lastPrompt || short(it.cwd)));
       r.append(sub);
       const chips = tagChips(it, 'tags'); if (chips) r.append(chips);
       const inb = teamsInboundOf(it);
@@ -1394,7 +1577,49 @@ function renderList() {
   const unread = data.notifs.filter(nf => nf.at > Number(localStorage.getItem('cc.notifSeen') || 0)).length; $('belln').textContent = unread ? unread : '';
   const todo = allItems().filter(it => TODO.includes(it.state)).length;
   document.title = (todo ? '(' + todo + ') ' : '') + 'Sessions Claude Code';
+  refreshHoverCard();
 }
+
+// Survol d'une ligne de la liste : le dernier message de Claude (et sa proposition 💡), sans ouvrir la session.
+// La ligne ne montre que TON dernier prompt et le bouton ▶ : pour savoir si la proposition vaut d'être lancée, il
+// faut lire ce que Claude vient de dire. La liste est reconstruite à chaque rendu (toutes les 2 s) : la carte vit
+// hors de la liste, l'écoute est déléguée à #list et renderList la rafraîchit. Pas de carte sur écran tactile ou
+// étroit (pas de survol), ni pour la session déjà ouverte à droite (son message y est affiché).
+const HOVER_DELAY = 350, CAN_HOVER = matchMedia('(hover: hover)');
+let hoverKey = null, hoverShown = false, hoverTimer = null, hoverMuted = null;
+function hoverCardEl() {
+  let c = $('hovercard');
+  if (!c) { c = el('div'); c.id = 'hovercard'; c.hidden = true; document.body.append(c); }
+  return c;
+}
+function hideHoverCard() { clearTimeout(hoverTimer); hoverTimer = null; hoverShown = false; const c = $('hovercard'); if (c) c.hidden = true; }
+function refreshHoverCard() {
+  if (!hoverShown) return;
+  const it = hoverKey && byKey(hoverKey), row = it && [...$('list').querySelectorAll('.row-s')].find(r => r.dataset.key === hoverKey);
+  const reply = it && it.reply ? String(it.reply).trim() : '';
+  if (!row || !reply || !CAN_HOVER.matches || NARROW.matches || hoverKey === selected) { const c = $('hovercard'); if (c) c.hidden = true; return; }
+  const c = hoverCardEl(); c.className = it.look || it.state || '';
+  const sig = hoverKey + '\n' + reply + '\n' + (it.suggestion || '');
+  if (c.dataset.sig !== sig) {                     // même contenu : on ne touche pas au DOM (pas de saut de défilement)
+    c.dataset.sig = sig; c.replaceChildren(el('div', 'hh', 'Dernier message de Claude'), el('div', 'hb', reply));
+    if (it.suggestion) c.append(el('div', 'hs', '💡 ' + it.suggestion));
+  }
+  c.hidden = false;
+  const a = $('list').getBoundingClientRect(), r = row.getBoundingClientRect();
+  c.style.left = Math.round(a.right + 8) + 'px';
+  c.style.top = Math.round(Math.max(8, Math.min(r.top, innerHeight - c.offsetHeight - 8))) + 'px';
+  const hb = c.querySelector('.hb'); hb.scrollTop = hb.scrollHeight;   // message long : c'est sa fin qui dit où on en est
+}
+function hoverRow(key) {
+  if (key === hoverKey) return;
+  hideHoverCard(); hoverKey = key; if (key !== hoverMuted) hoverMuted = null;
+  if (!key || key === hoverMuted) return;
+  hoverTimer = setTimeout(() => { hoverShown = true; refreshHoverCard(); }, HOVER_DELAY);
+}
+$('list').addEventListener('mouseover', e => { const r = e.target.closest ? e.target.closest('.row-s') : null; hoverRow(r && r.dataset.key ? r.dataset.key : null); });
+$('list').addEventListener('mouseleave', () => hoverRow(null));
+$('list').addEventListener('scroll', () => { if (hoverShown) refreshHoverCard(); }, { passive: true });
+$('list').addEventListener('click', () => { hoverMuted = hoverKey; hideHoverCard(); });   // on ouvre la session : la carte ne masque pas le détail
 
 // Sessions consultées : une session compte comme « vue » si elle reste sélectionnée 1,5 s (parcourir la
 // liste au clavier ne pollue pas l'historique), ou aussitôt qu'on agit dessus (onglet, réouverture, réponse).
@@ -1461,11 +1686,16 @@ const noTab = new Set();     // sessions dont l'onglet n'a pas pu être affiché
 async function relaunch(it) {
   // Sans confirmation : rien ne se perd (session inactive, invite vide exigées par le serveur ; conversation reprise).
   say('relance de « ' + label(it) + ' »…');
+  relaunching = { key: it.key, until: Date.now() + 90000 };
   try { const r = await post('/api/relaunch?pid=' + it.pid);
-    if (r.error) say('non relancée : ' + r.error); else { noTab.delete(it.key); say('relancée dans un nouvel onglet — elle réapparaît dans quelques secondes'); } }
-  catch { say('échec de la demande'); }
+    if (r.error) { relaunching = null; say('non relancée : ' + r.error); } else { noTab.delete(it.key); say('relancée dans un nouvel onglet — elle réapparaît dans quelques secondes'); } }
+  catch { relaunching = null; say('échec de la demande'); }
   tick();
 }
+// Entre la fermeture et la réapparition dans le nouvel onglet, la session n'est dans aucune liste pendant quelques
+// secondes : la sélection est gardée, pour que son détail revienne tout seul au lieu de la chercher dans la liste.
+let relaunching = null;
+const awaitingRelaunch = key => !!relaunching && relaunching.key === key && Date.now() < relaunching.until;
 async function closeSession(it) {
   if (!it || it.kind !== 'open') return;
   if (!confirm('Fermer « ' + label(it) + ' » ?\n\nLa conversation est conservée : elle passe dans « Fermées, reprenables ». L’onglet du terminal reste ouvert sur une invite PowerShell.')) return;
@@ -1637,7 +1867,7 @@ async function reopen(it) {
 }
 const resumeCmd = it => (it.cwd ? 'cd "' + it.cwd + '"; ' : '') + 'claude --dangerously-skip-permissions --resume ' + it.sessionId;
 async function copyCmd(it) { try { await navigator.clipboard.writeText(resumeCmd(it)); say('commande de reprise copiée'); } catch { say('copie refusée par le navigateur'); } }
-const primary = it => { touchRecent(it.key); return it.kind === 'run' ? (!it.run.running && it.run.sessionId ? openRunConversation(it.run) : undefined) : it.kind === 'open' ? openTab(it) : reopen(it); };
+const primary = it => { touchRecent(it.key); if (it.kind === 'pass') return undefined; return it.kind === 'run' ? (!it.run.running && it.run.sessionId ? openRunConversation(it.run) : undefined) : it.kind === 'open' ? openTab(it) : reopen(it); };
 
 // ── Recherche dans les conversations ──
 // Dès 3 caractères dans la recherche, le panneau de droite liste les passages des conversations (index plein
@@ -1915,11 +2145,12 @@ function renderDetail(force) {
   if (findMode) { if (detailKey !== '__find__' || force) renderFind(); return; }
   const main = $('main'); const it = selected && byKey(selected);
   if (!it) {
-    if (selected && data && closedData.days) { selected = null; sessionStorage.removeItem('cc.sel'); }
+    if (selected && data && closedData.days && !awaitingRelaunch(selected)) { selected = null; sessionStorage.removeItem('cc.sel'); }
     if (detailKey !== '' || force) { detailKey = ''; main.replaceChildren(el('div', null), el('div', null)); main.firstChild.id = 'head'; main.lastChild.id = 'body'; }
     renderOverview(); return;
   }
   if (it.kind === 'run') return renderRunDetail(pickRun(it), force);
+  if (it.kind === 'pass') return renderPassDetail(it, force);
   if (detailKey !== it.key || force) {
     detailKey = it.key; main.replaceChildren();
     const head = el('div'); head.id = 'head'; const body = el('div'); body.id = 'body'; main.append(head, body);
@@ -2072,12 +2303,13 @@ function renderOverview() {
   head.append(tiles);
   const cl = allItems().filter(closable);
   const nsig = idleSig() + '/' + restartSig() + '/' + data.restarts.length + ':' + (data.restarts.length ? data.restarts[data.restarts.length - 1].at : 0) + '/' + data.notifs.length + '/' + (data.notifs.length ? data.notifs[data.notifs.length - 1].at : 0) + '/' + (data.reboot ? data.reboot.sessions.map(s => s.sessionId).join(',') : '') + '/' + cl.map(it => it.key).join(',')
-    + '/' + (data.quota || []).map(q => q.alias + ':' + q.weeklyPct + ':' + q.measuredAt + ':' + q.status).join(',') + '/' + Math.floor(Date.now() / 60000);
+    + '/' + (data.quota || []).map(q => q.alias + ':' + q.weeklyPct + ':' + q.measuredAt + ':' + q.status).join(',') + '/' + Math.floor(Date.now() / 60000) + '/' + (autoData ? autoData.now : '');
   if (body.dataset.sig === 'overview' && body.dataset.n === nsig) return;
   body.dataset.sig = 'overview'; body.dataset.n = nsig; body.replaceChildren();
   const rp = rebootPanel(); if (rp) body.append(rp);
   const qs = quotaSection(); if (qs) body.append(el('h2', null, 'Quota Claude de la semaine'), qs);
   const sp = restartPanel(); if (sp) body.append(sp);
+  const as = automationSection(); if (as) body.append(el('h2', null, 'Automates du poste'), as);
   if (cl.length) {
     body.append(el('h2', null, 'Peuvent se fermer — ' + cl.length));
     const act = el('div', 'actions');
@@ -2096,10 +2328,10 @@ function renderOverview() {
   else {
     const box = el('div', 'notifs');
     for (const nf of data.notifs.slice().reverse().slice(0, 30)) {
-      const d = el('div', 'notif ' + (nf.kind === 'waiting' ? 'waiting' : nf.kind === 'launcher' ? 'ask' : 'done'));
+      const d = el('div', 'notif ' + (nf.kind === 'waiting' || nf.kind === 'automation' ? 'waiting' : nf.kind === 'launcher' ? 'ask' : 'done'));
       d.append(el('span', 'dot'), el('span', 'when', new Date(nf.at).toLocaleString('fr-FR')), el('span', 'nt', (nf.kind === 'launcher' ? '🤖 ' : '') + nf.title), el('span', 'nx', nf.text));
-      d.title = nf.hd ? 'Ouvrir le dernier run de HD-' + nf.hd : nf.kind === 'launcher' ? 'Ouvrir la vue Lanceur' : 'Sélectionner la session';
-      d.onclick = () => { if (nf.hd) openRun(nf.hd); else if (nf.kind === 'launcher') openLauncher(); else if (byKey(nf.sessionId)) select(nf.sessionId, true); else say('cette session n\'est plus listée'); };
+      d.title = nf.pass ? 'Ouvrir cette passe' : nf.hd ? 'Ouvrir le dernier run de HD-' + nf.hd : nf.kind === 'launcher' ? 'Ouvrir la vue Lanceur' : 'Sélectionner la session';
+      d.onclick = () => { if (nf.pass) openPass(nf.pass); else if (nf.hd) openRun(nf.hd); else if (nf.kind === 'launcher') openLauncher(); else if (byKey(nf.sessionId)) select(nf.sessionId, true); else say('cette session n\'est plus listée'); };
       box.append(d);
     }
     body.append(box);
@@ -2440,7 +2672,7 @@ function drawConv(toBottom, keepTop) {
 }
 function refreshConv() {
   const it = pickRun(selected && byKey(selected)), w = $('conv');
-  if (it && w && !w.hidden && (it.kind === 'open' || (it.kind === 'run' && it.run.running)) && conv && conv.key === it.key && conv.id === it.sessionId && conv.end != null) loadConv(it, 'more');
+  if (it && w && !w.hidden && (it.kind === 'open' || (it.kind === 'run' && it.run.running) || (it.kind === 'pass' && it.running)) && conv && conv.key === it.key && conv.id === it.sessionId && conv.end != null) loadConv(it, 'more');
 }
 
 async function refreshScreen() {
@@ -2463,6 +2695,7 @@ async function tick() {
     data = await (await fetch('/api/state', { cache:'no-store' })).json(); favs = new Set(data.favs || []); hiddenSet = new Set(data.hidden || []); $('launchbtn').hidden = launcherOff();
     renderList(); renderDetail(); refreshScreen(); refreshConv(); try { renderQuota(); } catch (e) { console.log('[sessions] quota :', e); }
     if (pendingRun && runData) { const hd = pendingRun; pendingRun = null; openRun(hd); }   // ?run= : runs arrivés avant l'état
+    if (!autoAsked && !automationsOff()) loadAutomations();                               // module annoncé par l'état : première lecture
     live.className = ''; if (!notice) live.textContent = 'à jour · ' + new Date().toLocaleTimeString('fr-FR');
   } catch { live.className = 'down'; live.textContent = 'serveur injoignable — relancer cc-dash'; }
 }
@@ -2539,6 +2772,6 @@ $('sortbtn').onclick = () => { sortMode = sortMode === 'created' ? 'activity' : 
   addEventListener('resize', () => { const w = +localStorage.getItem('cc.sidew'); if (w) apply(w); });
 })();
 if (selected && new URLSearchParams(location.search).get('sel')) setPane(true);   // lien direct : on arrive sur la session
-tick(); loadClosed(); loadRuns(); setInterval(tick, 2000); setInterval(loadClosed, 30000); runTimer = setInterval(loadRuns, 30000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') loadRuns(); });
+tick(); loadClosed(); loadRuns(); setInterval(tick, 2000); setInterval(loadClosed, 30000); runTimer = setInterval(loadRuns, 30000); setInterval(loadAutomations, 30000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { loadRuns(); loadAutomations(); } });
 if (new URLSearchParams(location.search).get('view') === 'launcher') openLauncher();    // clic sur une alerte du lanceur (notification Windows)

@@ -10,6 +10,7 @@ import { createServer as createTcpServer, connect, type Server as TcpServer, typ
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Actions } from './actions.ts';
+import { Automations } from './automations.ts';
 import type { Config } from './config.ts';
 import { startGitRefresh } from './gitpr.ts';
 import { Launcher, lookupDeliveryDiff, lookupHd, runLauncherOrder } from './launcher.ts';
@@ -30,13 +31,14 @@ const PAGE: Record<string, [string, string]> = {
   '/app.css': ['app.css', 'text/css; charset=utf-8'],
 };
 const JSON_TYPE = 'application/json; charset=utf-8';
-const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab']);
+const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file']);
 const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy']);
-const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/launcher/order']);
+const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/launcher/order', '/api/automations/order']);
 const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/close', '/api/relaunch']);
 /** Routes d'un module optionnel : sans lui, elles n'existent pas (404, comme une route inconnue). */
 const LAUNCHER_ROUTES = new Set(['/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/order', '/api/test-launcher-alerts']);
 const TEAMS_ROUTES = new Set(['/api/teams-wait']);
+const AUTOMATION_ROUTES = new Set(['/api/automations', '/api/automations/file', '/api/automations/order']);
 export const STALE_AFTER_SECONDS = 90;
 const FORBIDDEN_URL = ['<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN""http://www.w3.org/TR/html4/strict.dtd">',
   '<HTML><HEAD><TITLE>Forbidden</TITLE>', '<META HTTP-EQUIV="Content-Type" Content="text/html; charset=us-ascii"></HEAD>',
@@ -116,6 +118,7 @@ export class Server {
   readonly cfg: Config;
   readonly d: Dashboard;
   readonly launcher: Launcher;
+  readonly automations: Automations;
   readonly search: Search;
   readonly actions: Actions;
   readonly watch: Watch;
@@ -134,7 +137,7 @@ export class Server {
 
   constructor(d: Dashboard) {
     this.d = d; this.cfg = d.cfg;
-    this.launcher = new Launcher(d); this.search = new Search(d); this.actions = new Actions(d); this.watch = new Watch(d, this.launcher);
+    this.launcher = new Launcher(d); this.automations = new Automations(d); this.search = new Search(d); this.actions = new Actions(d); this.watch = new Watch(d, this.launcher, this.automations);
     this.uploadDir = join(this.cfg.claude, `uploads${this.cfg.suffix}`);
   }
 
@@ -360,7 +363,7 @@ export class Server {
       const payload = async (): Promise<unknown> => parseBody(raw);
       const headless = knownPid && HEADLESS_REFUSED.has(path) && (await this.d.openSessions()).some((s) => Number(s.pid) === target && s.headless);
       if (headless) { status = 409; body = '{"code":4,"error":"automate sans terminal (claude -p) : il se pilote depuis son lanceur"}'; }
-      else if ((!this.launcher.enabled && LAUNCHER_ROUTES.has(path)) || (!this.cfg.modules.teams && TEAMS_ROUTES.has(path))) { req.resume(); status = 404; body = '{}'; }
+      else if ((!this.launcher.enabled && LAUNCHER_ROUTES.has(path)) || (!this.cfg.modules.teams && TEAMS_ROUTES.has(path)) || (!this.automations.enabled && AUTOMATION_ROUTES.has(path))) { req.resume(); status = 404; body = '{}'; }
       else switch (path) {
         case '/api/state': body = JSON.stringify(await this.d.state()); break;
         case '/api/closed': body = JSON.stringify(await this.d.closed()); break;
@@ -398,6 +401,24 @@ export class Server {
           const f = this.launcher.file(q.get('path') ?? '');
           if (f.status !== 404) res.setHeader('X-Content-Type-Options', 'nosniff');
           if (f.body) { type = f.type!; body = f.body; } else { status = f.status; body = '{}'; }
+          break;
+        }
+        case '/api/automations': {                       // passes des automates du poste (module « automations »)
+          const s0 = Number(q.get('since')); const now = nowMs();
+          body = JSON.stringify(await this.automations.view(Number.isFinite(s0) && s0 > 0 ? Math.max(s0, now - 8 * 24 * 3600e3) : now - 24 * 3600e3));
+          break;
+        }
+        case '/api/automations/file': {
+          const f = this.automations.file(q.get('id') ?? '', q.get('run') ?? '', q.get('name') ?? '');
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          if (f.body) { type = f.type!; body = f.body; } else { status = f.status; body = '{}'; }
+          break;
+        }
+        case '/api/automations/order': {                 // « Lancer maintenant » : python <cli> <args> détaché
+          const j = await payload();
+          if (!isObjBody(j)) { status = 400; body = '{}'; break; }
+          const r = await this.automations.order(psString(pget(j, 'id')), psString(pget(j, 'order')));
+          status = r.status; body = JSON.stringify(r.body);
           break;
         }
         case '/api/send-many': { const j = await payload(); if (!isObjBody(j)) { status = 400; body = '{}'; } else body = JSON.stringify(await this.actions.sendMany(arr(pget(j, 'pids')), psString(pget(j, 'text')))); break; }

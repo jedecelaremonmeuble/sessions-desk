@@ -23,7 +23,8 @@ read their screen and conversation, and lets you answer them — from one browse
 - **From your phone** — read and answer over your own Tailscale network.
 
 Optional modules, all off by default: an external orchestrator that launches headless sessions, Microsoft Teams
-reply tracking, ticket references, and an account usage banner. See [Optional modules](#optional-modules).
+reply tracking, ticket references, an account usage banner, and the passes of your own scheduled scripts. See
+[Optional modules](#optional-modules).
 
 ## Requirements
 
@@ -93,9 +94,23 @@ server never fails to start because of this file.
 | `teams` | Sessions that wait for a Microsoft Teams reply or an Outlook email reply (opt-in `"mail": true`), with reminders | `enabled` |
 | `tickets` | The "current subject" of a session, from ticket references in your prompts | `pattern`: a regular expression |
 | `quota` | An account usage banner | `file`: a usage file written by a collector of your own |
+| `automations` | Your scheduled scripts (cleanups, reports…): one group per script in the list, a card in the overview, the detail of a pass (summary, files, live conversation of its `claude -p` session), failure notifications and « run now » buttons | A list: `id`, `label`, `icon`, `history` (its JSONL history) · `runs` (folder of its passes) · `everyMinutes` · `cli` + `python` + `orders` (`id`, `label`, `args`, `confirm`) |
 
 The `launcher` module is published as an example of plugging an orchestrator in; it expects that orchestrator's
 own folder layout and is unlikely to fit yours unchanged.
+
+The `automations` module reads one key per history line, written by your script:
+
+```json
+{"pass": {"v": 1, "status": "ok", "level": "ok", "summary": "3 folders cleaned · 4.2 GB freed", "startedAt": "2026-11-20T08:00:16Z",
+          "minutes": 2.4, "runDir": "C:\\…\\runs\\20261120-080001", "sessionId": null, "costUsd": null,
+          "files": ["report.md"], "quiet": false, "dryRun": false}}
+```
+
+`status` is `ok`, `nothing`, `dry-run`, `conflict`, `rejected` or `failed`; `level` (`ok`, `warn`, `error`) is the
+health of the pass itself and drives notifications (every `error`, a second `warn` in a row); `quiet` passes get no
+row, only a count in the group header; `files` are the only files of `runDir` the page may open, and `runDir` must be
+under `runs`. A running `claude -p` whose command line cites a folder under `runs` is shown as the running pass.
 
 ### Tags
 
