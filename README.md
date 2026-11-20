@@ -129,6 +129,11 @@ and the Teams watcher to `~/.claude/scripts`, creating their scheduled tasks on 
 When only `page/` changed since the running commit, it swaps the page files in place instead of restarting the
 server: no downtime, and open pages reload themselves (`-Restart` forces a restart; decision and tests in
 `server/watchdog/Deploy-Plan.ps1` and `deploy-plan-tests.ps1`).
+Only one deployment runs at a time: a second one waits, then starts again from whatever the first one put in
+service. A clone that is behind the running commit is refused (`-Rollback` to go back on purpose). The server is
+first asked to stop cleanly (`/api/stop`: it finishes what it has received), and is killed only if it does not exit.
+Each deployment is logged next to the watchdog's restarts in `%TEMP%\sessions-desk-node-watchdog.log` (hot page swap
+or restart, clean or forced stop, length of the outage).
 
 ## Keyboard shortcuts
 

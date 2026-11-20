@@ -44,9 +44,16 @@ function Test-OurServer($p) {
 }
 
 if (Test-Up) { return }
-# Un démarrage peut être en cours (quelques secondes) : on recontrôle avant de relancer.
-Start-Sleep -Seconds 5
-if (Test-Up) { return }
+# Lancé par un déploiement (marqueur posé par Install-NodeWatchdog.ps1, récent) : le serveur vient d'être arrêté
+# exprès, inutile d'attendre — et ce n'est pas une panne.
+$marker = Join-Path $StateDir "sessions-desk-node-$Port.deploying"
+$deploy = if ((Test-Path $marker) -and ((Get-Date) - (Get-Item $marker).LastWriteTime).TotalMinutes -lt 2) { "$(Get-Content $marker -Raw)".Trim() }
+Remove-Item $marker -Force -ErrorAction SilentlyContinue
+if (-not $deploy) {
+    # Un démarrage peut être en cours (quelques secondes) : on recontrôle avant de relancer.
+    Start-Sleep -Seconds 5
+    if (Test-Up) { return }
+}
 
 if (-not (Test-Path $main)) { Write-Log "serveur absent : $main"; return }
 $driver = Join-Path $root '.build\driver\sessions-desk-driver.exe'
@@ -77,7 +84,8 @@ if ((Test-Path $errLog) -and (Get-Item $errLog).Length -gt 0) {
     Add-Content $log "--- stderr du serveur précédent :"
     Get-Content $errLog -Tail 20 | Add-Content $log
 }
-Write-Log "serveur muet sur $ping => relance ($main$(if ($AllowWrite) { ', écriture permise' }))"
+if ($deploy) { Write-Log "démarrage après déploiement de $deploy ($main$(if ($AllowWrite) { ', écriture permise' }))" }
+else { Write-Log "serveur muet sur $ping => relance ($main$(if ($AllowWrite) { ', écriture permise' }))" }
 
 $nodeArgs = @("`"$main`"", '--port', $Port) + @(if ($AllowWrite) { '--allow-write' })
 $p = Start-Process $Node -WindowStyle Hidden -WorkingDirectory $root -PassThru `

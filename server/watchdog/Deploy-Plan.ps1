@@ -57,3 +57,44 @@ function Update-RunCopy([string]$Repo, [string]$Head, [string]$RunDir, [string]$
     $lines += "$(if ($Plan -eq 'page') { 'page remplacée à chaud' } else { 'rien à remplacer' }) le $(Get-Date -Format s) (serveur démarré sur $($Running.Substring(0, 10)))"
     Set-Content (Join-Path $RunDir 'DEPLOYED.txt') $lines
 }
+
+<# $Head est-il un ANCÊTRE strict du commit en service ? (déployer depuis un clone en retard = revenir en arrière) #>
+function Test-BehindRunning([string]$Repo, [string]$Head, [string]$Running) {
+    if (-not $Running -or $Running -eq $Head) { return $false }
+    git -C $Repo merge-base --is-ancestor $Head $Running 2>$null
+    return -not $LASTEXITCODE
+}
+
+# ── Un seul déploiement à la fois, et une trace de chacun ──
+# Plusieurs sessions déploient depuis le même poste : deux déploiements simultanés se marchent dessus (même dossier
+# de préparation, l'un arrête le serveur que l'autre vient de lancer…). Verrou = mutex Windows nommé, par port : il
+# est rendu à la sortie du process, même tué — pas de fichier de verrou orphelin à nettoyer. Réentrant dans le même
+# process (Deploy.ps1 appelle Install-NodeWatchdog.ps1, qui le prend aussi).
+
+<# Ligne du journal des relances du watchdog (%TEMP%\sessions-desk-node-watchdog.log) : les déploiements y sont
+   tracés à côté des relances, qu'on distingue enfin des pannes. #>
+function Write-DeployLog([int]$Port, [string]$Message) {
+    try { Add-Content (Join-Path $env:TEMP 'sessions-desk-node-watchdog.log') "$(Get-Date -Format s) [$Port] déploiement : $Message" } catch { }
+}
+
+<# Prend le verrou de déploiement du port ; attend (au plus $TimeoutSec) qu'un autre déploiement finisse. #>
+function Enter-DeployLock([int]$Port, [string]$What, [int]$TimeoutSec = 600) {
+    $m = [Threading.Mutex]::new($false, "Local\sessions-desk-deploy-$Port")
+    $info = Join-Path $env:TEMP "sessions-desk-deploy-$Port.lock.txt"
+    $take = { param([int]$ms) try { $m.WaitOne($ms) } catch [Threading.AbandonedMutexException] { $true } }   # abandonné = détenteur mort : il est à nous
+    if (-not (& $take 0)) {
+        $who = if (Test-Path $info) { "$(Get-Content $info -Raw)".Trim() } else { 'détenteur inconnu' }
+        Write-Host "un autre déploiement est en cours ($who) : attente de sa fin…" -ForegroundColor Yellow
+        $t0 = Get-Date
+        if (-not (& $take ($TimeoutSec * 1000))) { $m.Dispose(); throw "un autre déploiement tient toujours le verrou après $TimeoutSec s ($who)" }
+        Write-DeployLog $Port "attendu $([int]((Get-Date) - $t0).TotalSeconds) s la fin d'un autre déploiement ($who)"
+    }
+    try { Set-Content $info "pid $PID, $What, depuis $(Get-Date -Format s)" } catch { }
+    return $m
+}
+
+function Exit-DeployLock($Lock) {
+    if (-not $Lock) { return }
+    try { $Lock.ReleaseMutex() } catch { }
+    $Lock.Dispose()
+}

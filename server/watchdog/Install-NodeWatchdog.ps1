@@ -46,6 +46,8 @@ $taskName = "sessions-desk - Node $Port (watchdog)"
 $runDir = Join-Path $env:LOCALAPPDATA "sessions-desk\node-$Port"
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 
+. (Join-Path $PSScriptRoot 'Deploy-Plan.ps1')   # verrou et journal des déploiements
+
 function Stop-NodeServer {
     $ids = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Object OwningProcess)
     $pidFile = Join-Path $env:TEMP "sessions-desk-node-$Port.pid"
@@ -66,12 +68,17 @@ function Stop-NodeServer {
         if ($asked) {
             foreach ($id in $ours) { Wait-Process -Id $id -Timeout 12 -ErrorAction SilentlyContinue }
             $left = @($ours | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
-            if (-not $left) { Write-Host "serveur Node arrêté proprement (pid $($ours -join ', '), $([int]((Get-Date) - $t0).TotalMilliseconds) ms)" }
+            if (-not $left) {
+                $m = "serveur arrêté proprement (pid $($ours -join ', '), $([int]((Get-Date) - $t0).TotalMilliseconds) ms)"
+                Write-Host "$m"; Write-DeployLog $Port $m
+            }
         }
     }
+    if (-not $ours) { Write-DeployLog $Port 'aucun serveur à arrêter (il ne tournait pas)' }
     foreach ($id in $ours) {
         if (-not (Get-Process -Id $id -ErrorAction SilentlyContinue)) { continue }
         Write-Host "arrêt FORCÉ du serveur Node (pid $id) : il n'a pas répondu à /api/stop ou n'est pas sorti à temps"
+        Write-DeployLog $Port "arrêt FORCÉ du serveur (pid $id) : pas de réponse à /api/stop ou pas sorti à temps"
         Stop-Process -Id $id -Force
     }
     for ($i = 0; $i -lt 20 -and (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 250 }
@@ -100,64 +107,88 @@ if ($v -lt [version]'22.18.0') { throw "Node $v : 22.18+ requis (TypeScript exé
 . (Join-Path $PSScriptRoot 'Resolve-StablePwsh.ps1')
 $pwsh = Resolve-StablePwsh (Get-Process -Id $PID).Path
 
-$stage = "$runDir.new"
-if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-New-Item -ItemType Directory -Force $stage | Out-Null
-$zip = Join-Path $env:TEMP "sessions-desk-node-$Port-$($sha.Substring(0,7)).zip"
-# Page et scripts d'accompagnement : legacy/ tant que le serveur historique est dans le dépôt, sinon page/ et server/scripts/.
-[string[]]$extra = if (Test-Path (Join-Path $repo 'legacy')) { 'legacy' } else { 'page', 'server/scripts' }
-git -C $repo archive --format=zip -o $zip $sha server/src server/package.json server/watchdog @extra
-if ($LASTEXITCODE -ne 0) { throw 'git archive en échec' }
-Expand-Archive $zip $stage -Force; Remove-Item $zip
-dotnet build (Join-Path $repo 'driver\SessionsDesk.Driver.csproj') -c Release -o (Join-Path $stage '.build\driver') --nologo -v q
-if ($LASTEXITCODE -ne 0) { throw 'compilation du pilote en échec' }
-Set-Content (Join-Path $stage 'DEPLOYED.txt') @(
-    "commit $sha$(if ($onMain) { ' (origin/main)' } else { ' (PAS origin/main)' })"
-    "posé le $(Get-Date -Format s) depuis $repo"
-    "node $node ($v)"
-    "mode $role"
-)
+# Un seul déploiement à la fois sur ce port (dossier de préparation commun, arrêt/relance du même serveur) : un
+# second attend la fin du premier. Voir Deploy-Plan.ps1.
+$lock = Enter-DeployLock $Port "Install-NodeWatchdog.ps1 $($sha.Substring(0, 10))"
+$marker = Join-Path $env:TEMP "sessions-desk-node-$Port.deploying"
+try {
+    $stage = "$runDir.new"
+    if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+    New-Item -ItemType Directory -Force $stage | Out-Null
+    $zip = Join-Path $env:TEMP "sessions-desk-node-$Port-$($sha.Substring(0,7)).zip"
+    # Page et scripts d'accompagnement : legacy/ tant que le serveur historique est dans le dépôt, sinon page/ et server/scripts/.
+    [string[]]$extra = if (Test-Path (Join-Path $repo 'legacy')) { 'legacy' } else { 'page', 'server/scripts' }
+    git -C $repo archive --format=zip -o $zip $sha server/src server/package.json server/watchdog @extra
+    if ($LASTEXITCODE -ne 0) { throw 'git archive en échec' }
+    Expand-Archive $zip $stage -Force; Remove-Item $zip
+    dotnet build (Join-Path $repo 'driver\SessionsDesk.Driver.csproj') -c Release -o (Join-Path $stage '.build\driver') --nologo -v q
+    if ($LASTEXITCODE -ne 0) { throw 'compilation du pilote en échec' }
+    Set-Content (Join-Path $stage 'DEPLOYED.txt') @(
+        "commit $sha$(if ($onMain) { ' (origin/main)' } else { ' (PAS origin/main)' })"
+        "posé le $(Get-Date -Format s) depuis $repo"
+        "node $node ($v)"
+        "mode $role"
+    )
 
-# 2. Remplacer le dossier d'exécution, tâche désactivée pour que le watchdog ne relance pas en plein échange.
-$existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if ($existing) { $null = Disable-ScheduledTask -TaskName $taskName }
-Stop-NodeServer
-# Sur 8765, http.sys (le .ps1) ne figure pas comme écouteur TCP d'un process : on vérifie qu'aucun serveur ne répond.
-if ($Port -eq 8765) {
-    try { $null = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 2; $busy = $true } catch { $busy = $false }
-    if ($busy) { if ($existing) { $null = Enable-ScheduledTask -TaskName $taskName }; throw "un serveur répond encore sur $Port (le .ps1 ?) : passer par Switch-SessionsDesk.ps1 -To node" }
-}
-if (Test-Path $runDir) {
-    if (Test-Path "$runDir.previous") { Remove-Item "$runDir.previous" -Recurse -Force }
-    Move-Item $runDir "$runDir.previous"
-}
-Move-Item $stage $runDir
+    # 2. Remplacer le dossier d'exécution, tâche désactivée pour que le watchdog ne relance pas en plein échange.
+    $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($existing) { $null = Disable-ScheduledTask -TaskName $taskName }
+    $cut = Get-Date   # début de la coupure : jusqu'à la première réponse du nouveau serveur
+    Stop-NodeServer
+    # Sur 8765, http.sys (le .ps1) ne figure pas comme écouteur TCP d'un process : on vérifie qu'aucun serveur ne répond.
+    if ($Port -eq 8765) {
+        try { $null = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 2; $busy = $true } catch { $busy = $false }
+        if ($busy) { if ($existing) { $null = Enable-ScheduledTask -TaskName $taskName }; throw "un serveur répond encore sur $Port (le .ps1 ?) : passer par Switch-SessionsDesk.ps1 -To node" }
+    }
+    if (Test-Path $runDir) {
+        if (Test-Path "$runDir.previous") { Remove-Item "$runDir.previous" -Recurse -Force }
+        Move-Item $runDir "$runDir.previous"
+    }
+    Move-Item $stage $runDir
 
-# 3. Tâche : mêmes réglages que celle du .ps1 (ouverture de session + toutes les 2 min, sans fenêtre).
-$watchdog = Join-Path $runDir 'server\watchdog\sessions-desk-node-watchdog.ps1'
-$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$pwsh`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$watchdog`" -Port $Port -Node `"$node`"$(if ($Primary) { ' -Primary' } elseif ($AllowWrite) { ' -AllowWrite' })"
-$user = "$env:USERDOMAIN\$env:USERNAME"
-$triggers = @(
-    (New-ScheduledTaskTrigger -AtLogOn -User $user),
-    (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2))
-)
-$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 1) `
-    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-$null = Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -Principal $principal -Settings $settings `
-    -Description "Serveur Node sessions-desk $(if ($Primary) { 'de PRODUCTION (primary)' } else { "à côté du .ps1, $role" }) (port $Port). Posé par server/watchdog/Install-NodeWatchdog.ps1 ; dossier $runDir." -Force
-# Relecture : l'action posée ne doit viser aucun dossier versionné du Store.
-$posed = (Get-ScheduledTask -TaskName $taskName).Actions[0].Arguments
-if ($posed -match '\\Program Files\\WindowsApps\\') { throw "action de la tâche sur un chemin versionné : $posed" }
+    # 3. Tâche : mêmes réglages que celle du .ps1 (ouverture de session + toutes les 2 min, sans fenêtre).
+    $watchdog = Join-Path $runDir 'server\watchdog\sessions-desk-node-watchdog.ps1'
+    $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$pwsh`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$watchdog`" -Port $Port -Node `"$node`"$(if ($Primary) { ' -Primary' } elseif ($AllowWrite) { ' -AllowWrite' })"
+    $user = "$env:USERDOMAIN\$env:USERNAME"
+    $triggers = @(
+        (New-ScheduledTaskTrigger -AtLogOn -User $user),
+        (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2))
+    )
+    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 1) `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    $null = Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -Principal $principal -Settings $settings `
+        -Description "Serveur Node sessions-desk $(if ($Primary) { 'de PRODUCTION (primary)' } else { "à côté du .ps1, $role" }) (port $Port). Posé par server/watchdog/Install-NodeWatchdog.ps1 ; dossier $runDir." -Force
+    # Relecture : l'action posée ne doit viser aucun dossier versionné du Store.
+    $posed = (Get-ScheduledTask -TaskName $taskName).Actions[0].Arguments
+    if ($posed -match '\\Program Files\\WindowsApps\\') { throw "action de la tâche sur un chemin versionné : $posed" }
 
-# 4. Lancer et attendre le serveur.
-Start-ScheduledTask -TaskName $taskName
-$up = $false
-for ($i = 0; $i -lt 40 -and -not $up; $i++) {
-    Start-Sleep -Milliseconds 500
-    try { $null = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 3; $up = $true } catch {}
+    # 4. Lancer et attendre le serveur. Le marqueur dit au watchdog que ce démarrage est un déploiement : il démarre
+    #    sans son délai de grâce et ne le trace pas comme une panne (« serveur muet => relance »).
+    Set-Content $marker $sha.Substring(0, 10)
+    Start-ScheduledTask -TaskName $taskName
+    $up = $false
+    for ($i = 0; $i -lt 40 -and -not $up; $i++) {
+        Start-Sleep -Milliseconds 500
+        try { $null = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 3; $up = $true } catch {}
+    }
+    if ($up) { Write-DeployLog $Port "serveur $($sha.Substring(0, 10)) en service : coupure de $([math]::Round(((Get-Date) - $cut).TotalSeconds, 1)) s (arrêt => première réponse)" }
+    if (-not $up) { throw "le serveur ne répond pas sur $Port (voir $env:TEMP\sessions-desk-node-watchdog.log et sessions-desk-node-$Port.err.log)" }
+    $w = Invoke-RestMethod "http://localhost:$Port/api/whoami"
+    if ([bool]$w.write -ne [bool]$AllowWrite) { throw "serveur en $(if ($w.write) { 'écriture' } else { 'lecture seule' }) alors que demandé : $(if ($AllowWrite) { 'écriture' } else { 'lecture seule' })" }
+    Write-Host "Serveur Node sur http://localhost:$Port/ ($role), commit $($sha.Substring(0,7)), tâche « $taskName »"
+} catch {
+    Write-DeployLog $Port "installation de $($sha.Substring(0, 10)) EN ÉCHEC : $($_.Exception.Message)"
+    # Ne jamais laisser le poste sans serveur : copie précédente remise en place si la nouvelle n'a pas pris sa place,
+    # tâche réactivée et lancée (elle était désactivée pendant l'échange).
+    try {
+        if (-not (Test-Path $runDir) -and (Test-Path "$runDir.previous")) { Move-Item "$runDir.previous" $runDir; Write-DeployLog $Port 'copie précédente remise en service' }
+        $t = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        if ($t -and $t.State -eq 'Disabled') { $null = Enable-ScheduledTask -TaskName $taskName }
+        if ($t) { Start-ScheduledTask -TaskName $taskName }
+    } catch { Write-DeployLog $Port "remise en service impossible : $($_.Exception.Message)" }
+    throw
+} finally {
+    Remove-Item $marker -Force -ErrorAction SilentlyContinue
+    Exit-DeployLock $lock
 }
-if (-not $up) { throw "le serveur ne répond pas sur $Port (voir $env:TEMP\sessions-desk-node-watchdog.log et sessions-desk-node-$Port.err.log)" }
-$w = Invoke-RestMethod "http://localhost:$Port/api/whoami"
-if ([bool]$w.write -ne [bool]$AllowWrite) { throw "serveur en $(if ($w.write) { 'écriture' } else { 'lecture seule' }) alors que demandé : $(if ($AllowWrite) { 'écriture' } else { 'lecture seule' })" }
-Write-Host "Serveur Node sur http://localhost:$Port/ ($role), commit $($sha.Substring(0,7)), tâche « $taskName »"

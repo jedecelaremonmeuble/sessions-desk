@@ -13,13 +13,19 @@
      le serveur continue de tourner (aucune coupure) et les pages ouvertes se rechargent seules. Décision :
      Deploy-Plan.ps1.
 
+  Un seul déploiement à la fois : un second attend la fin du premier, puis repart du commit alors en service (souvent
+  il n'a plus que la page à remplacer, ou rien). Refuse de déployer un commit plus ANCIEN que celui en service (clone
+  en retard), sauf -Rollback. Chaque déploiement est tracé dans %TEMP%\sessions-desk-node-watchdog.log : commit,
+  page à chaud ou redémarrage, arrêt propre ou forcé, durée de la coupure.
+
   -SkipServer : les étapes 1 et 2 seulement (le serveur n'est ni arrêté ni relancé).
   -Restart    : redémarre le serveur même si seule la page a changé.
+  -Rollback   : accepte de remettre en service un commit plus ancien que celui qui tourne.
 
 .EXAMPLE
   pwsh -NoProfile -File server/watchdog/Deploy.ps1
 #>
-param([string]$Target = (Join-Path $env:USERPROFILE '.claude\scripts'), [switch]$SkipServer, [switch]$Restart)
+param([string]$Target = (Join-Path $env:USERPROFILE '.claude\scripts'), [switch]$SkipServer, [switch]$Restart, [switch]$Rollback)
 $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -30,6 +36,11 @@ if ($dirty) { throw "déploiement refusé : modifications non commitées dans le
 $head = git -C $repo rev-parse HEAD
 if (-not (git -C $repo branch -r --contains $head)) { throw "déploiement refusé : le commit $($head.Substring(0, 10)) n'est sur aucune branche distante (git push d'abord)." }
 $branch = git -C $repo rev-parse --abbrev-ref HEAD
+
+. (Join-Path $PSScriptRoot 'Deploy-Plan.ps1')
+$short = $head.Substring(0, 10)
+$lock = Enter-DeployLock 8765 "Deploy.ps1 $short ($branch)"
+try {
 
 $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $nodeExe) { throw 'node introuvable dans le PATH.' }
@@ -66,8 +77,8 @@ Write-Host "Étiqueteur, surveillant Teams et scripts copiés vers $Target (comm
 
 if ($SkipServer) { return }
 
-# Page seule changée depuis le commit en service : on la remplace dans la copie, sans arrêter le serveur.
-. (Join-Path $PSScriptRoot 'Deploy-Plan.ps1')
+# Page seule changée depuis le commit en service : on la remplace dans la copie, sans arrêter le serveur. Lu APRÈS
+# la prise du verrou : un déploiement qui a attendu repart de ce que le précédent a mis en service.
 $runDir = Join-Path $env:LOCALAPPDATA 'sessions-desk\node-8765'
 $plan = 'restart'; $why = '-Restart demandé'; $running = $null
 if (-not $Restart) {
@@ -86,13 +97,25 @@ if (-not $Restart) {
         }
     }
 }
+$was = Get-DeployedCommit $runDir
+if ((Test-BehindRunning $repo $head $was) -and -not $Rollback) {
+    throw "déploiement refusé : $short est plus ancien que le commit en service $($was.Substring(0, 10)) (clone en retard : git pull ; retour arrière voulu : -Rollback)."
+}
+Write-DeployLog 8765 "$short ($branch) commencé, en service $(if ($was) { $was.Substring(0, 10) } else { 'inconnu' })"
 if ($plan -ne 'restart') {
     Update-RunCopy -Repo $repo -Head $head -RunDir $runDir -Plan $plan -Running $running
     $msg = if ($plan -eq 'page') { 'page remplacée à chaud, serveur NON redémarré (les pages ouvertes se rechargent seules)' } else { 'rien qui concerne le serveur ni la page, serveur NON redémarré' }
-    Write-Host "Production (8765) sur le commit $($head.Substring(0, 10)) ($branch) : $msg." -ForegroundColor Green
+    Write-Host "Production (8765) sur le commit $short ($branch) : $msg." -ForegroundColor Green
+    Write-DeployLog 8765 "$short : $(if ($plan -eq 'page') { 'page remplacée à chaud, aucune coupure' } else { 'rien à remplacer, aucune coupure' })"
     return
 }
 Write-Host "redémarrage du serveur : $why." -ForegroundColor Yellow
+Write-DeployLog 8765 "$short : redémarrage du serveur ($why)"
 & (Join-Path $PSScriptRoot 'Install-NodeWatchdog.ps1') -Port 8765 -Primary
 if (-not $?) { throw 'réinstallation du serveur Node en échec — voir ci-dessus.' }
-Write-Host "Production (8765) redéployée sur le commit $($head.Substring(0, 10)) ($branch)." -ForegroundColor Green
+Write-Host "Production (8765) redéployée sur le commit $short ($branch)." -ForegroundColor Green
+
+} catch {
+    Write-DeployLog 8765 "$short EN ÉCHEC : $($_.Exception.Message)"
+    throw
+} finally { Exit-DeployLock $lock }
