@@ -11,6 +11,7 @@
 //   node teams-watcher.ts --dry-run --since=24   aperçu des demandes entrantes des 24 dernières heures (rien d'ouvert ni d'écrit)
 //   node teams-watcher.ts act <dismiss|remind|snooze> <sessionId> <messageId>   boutons de la page (lot 2)
 //   node teams-watcher.ts conversations   la vue par conversation, en texte (lot 9 ; ne lit que les fichiers d'état)
+//   node teams-watcher.ts send <chatId>   envoie dans ce chat le texte lu sur stdin (lot 10 ; bouton « Répondre » de la page)
 // Lot 2 : sans réponse, la session est réveillée pour RELANCER elle-même (4 h ouvrées, puis J+1 10 h, puis alerte à
 // l'utilisateur), rouverte si elle est fermée. Relances autonomes éteintes tant que teams-watcher-config.json ne dit pas
 // { "reminders": true } ; « Relancer maintenant » (clic de l'utilisateur) marche sans.
@@ -33,6 +34,12 @@
 // dernier pointage « Vu » de l'utilisateur : message d'un collègue OU message envoyé par une session en son nom), « à jour ».
 // L'état lu de Teams ne sert pas (le lot 8 marque lu ce qu'une session a traité). Chat.Read suffit. Éteint tant que
 // teams-watcher-config.json ne dit pas { "conversations": { "enabled": true } }.
+// Lot 10 (FIL ET RÉPONSE) : le dernier message seul ne suffit pas — une mention suivie d'un autre message, ou une question
+// sans mention dans un groupe, passaient à côté. La passe lit donc les derniers messages des chats qui ont bougé (un appel
+// par chat, seulement quand son dernier message change) : « à toi de répondre » se décide sur tout ce qui est arrivé depuis
+// le dernier message de l'utilisateur (mention, citation d'un de ses messages, son prénom, question qui suit son message), et
+// la page montre les messages EN ENTIER. Répondre depuis la page : { "conversations": { "reply": true } } — la réponse part
+// par Graph au nom de l'utilisateur, sur son clic seulement ; « login » demande alors ChatMessage.Send (à refaire une fois).
 //
 // Fichiers : ~/.claude/state/teams-waits/
 //   _inbound.json                 demandes entrantes : curseur par chat, session ouverte (jamais de texte de message)
@@ -84,7 +91,7 @@ export interface MailRef {
 export interface GraphMessage {
   id: string; createdDateTime: string; messageType?: string; deletedDateTime?: string | null;
   from?: { user?: { id?: string; displayName?: string } | null } | null;
-  body?: { contentType?: string; content?: string } | null; attachments?: { name?: string | null; contentUrl?: string | null }[] | null;
+  body?: { contentType?: string; content?: string } | null; attachments?: { name?: string | null; contentUrl?: string | null; contentType?: string | null; content?: string | null }[] | null;
 }
 export interface SummaryWait {
   messageId: string; chatId: string; chatLabel: string | null; status: 'open' | 'replied'; sentAt: number; excerpt: string; repliedAt: number | null; replyFrom: string | null; lastError: string | null;
@@ -92,7 +99,7 @@ export interface SummaryWait {
   channel?: 'mail'; pendingSend?: boolean;
 }
 export interface SummaryInbound { chatId: string; chatLabel: string | null; from: string; at: number; openedAt: number }
-export interface Summary { at: number; enabled: boolean; reminders: boolean; sessions: Record<string, SummaryWait[]>; inbound?: Record<string, SummaryInbound>; validations?: Record<string, ValSummary>; /** Lot 9 : compteurs de la vue par conversation (absents = vue éteinte). */ conversations?: { reply: number; unseen: number; total: number; at: number } }
+export interface Summary { at: number; enabled: boolean; reminders: boolean; sessions: Record<string, SummaryWait[]>; inbound?: Record<string, SummaryInbound>; validations?: Record<string, ValSummary>; /** Lot 9 : compteurs de la vue par conversation (absents = vue éteinte). */ conversations?: { reply: number; unseen: number; total: number; at: number; /** Réponse depuis la page allumée (lot 10). */ send: boolean } }
 
 export const TOOL = 'mcp__claude_ai_Microsoft_365__teams_send_chat_message';
 const M365 = 'mcp__claude_ai_Microsoft_365__';
@@ -188,6 +195,16 @@ export function htmlText(html: string): string {
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&')
     .replace(/\s+/g, ' ').trim();
+}
+/** Comme htmlText, en gardant les retours à la ligne et les puces : pour afficher un message EN ENTIER (lot 10). */
+export function htmlLines(html: string): string {
+  return html
+    .replace(/<attachment[^>]*>.*?<\/attachment>/gis, ' ')
+    .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>|<\/tr>|<\/h[1-6]>|<\/blockquote>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&')
+    .replace(/[^\S\n]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 /** Le pied de suivi dit « sans réponse attendue » : la session n'attend rien (D2). */
@@ -536,8 +553,23 @@ export interface ConversationsConfig {
   max: number;
   /** Noms affichés d'expéditeurs à traiter comme des applications (compte de service qui notifie, robot) : listés, jamais « à voir ». */
   mute: string[];
+  /** Lot 10 : fils relus par passe (les chats dont le dernier message a changé, les plus récents d'abord). 0 = dernier message seul. */
+  threads: number;
+  /** Lot 10 : répondre depuis la page. Éteint par défaut ; allumé, il demande ChatMessage.Send au « login ». */
+  reply: boolean;
 }
-export const defaultConversations: ConversationsConfig = { enabled: false, days: 14, max: 120, mute: [] };
+export const defaultConversations: ConversationsConfig = { enabled: false, days: 14, max: 120, mute: [], threads: 15, reply: false };
+/** Longueur gardée d'un message (affiché en entier ; au-delà, coupé avec « … »). */
+const MSG_MAX = 4000;
+/** Un message d'un fil, tel que la passe l'a lu (lot 10). */
+export interface ConvMsg {
+  id: string; at: number; from: string | null; who: 'me' | 'other' | 'app'; text: string;
+  /** Rien à répondre (needsNoReply). */
+  ack: boolean;
+  /** Ce qui l'adresse à l'utilisateur : mention @, citation d'un de ses messages, son prénom dans le texte. */
+  mention: boolean; quotesMe: boolean; named: boolean;
+  question: boolean;
+}
 export type ConvKind = 'oneOnOne' | 'group' | 'meeting';
 /** Un chat tel que la passe l'a vu : son dernier VRAI message (les événements système ne comptent pas). */
 export interface ConvChat {
@@ -550,8 +582,12 @@ export interface ConvChat {
   ack: boolean;
   /** L'utilisateur est mentionné (@) dans ce message : dans un groupe, c'est ce qui en fait une demande pour lui. */
   mention: boolean;
+  /** Lot 10 : derniers messages du fil (ordre chronologique), valables tant que recentFor === lastId. */
+  recent?: ConvMsg[]; recentFor?: string;
 }
-export interface ConvState { v: 1; since: number; at: number; chats: Record<string, ConvChat> }
+export interface ConvState { v: 1; since: number; at: number; chats: Record<string, ConvChat>; /** Réponse depuis la page allumée (pour le résumé, qui ne lit pas la configuration). */ reply?: boolean }
+/** Un message montré sur la ligne d'une conversation. */
+export interface ConvShown { id: string; at: number; from: string | null; by: 'me' | 'session' | 'other' | 'app'; text: string }
 export interface ConvSeen { v: 1; chats: Record<string, number> }
 /** Session liée à un chat : attente ouverte, réponse reçue en cours de remise, demande entrante, ou attente close récente. */
 export interface ConvSession { sessionId: string; role: 'wait' | 'replied' | 'inbound' | 'past'; at: number }
@@ -565,6 +601,10 @@ export interface ConvRow {
   unseen: boolean;
   /** 'reply' : à l'utilisateur de répondre · 'session' : une session a reçu ce message · 'waiting' : une session attend leur réponse. */
   ball: 'reply' | 'session' | 'waiting' | null;
+  /** Dans un groupe, ce qui fait de ce fil une demande pour l'utilisateur (lot 10). */
+  why: 'mention' | 'quote' | 'named' | 'question' | null;
+  /** Messages à lire, en entier : ceux auxquels répondre, sinon ceux arrivés depuis le pointage (vide : le dernier message suffit). */
+  news: ConvShown[];
   sessions: ConvSession[];
 }
 
@@ -596,7 +636,9 @@ export function convFromPreview(p: GraphPreview | null | undefined, meId: string
   const uid = p.from?.user?.id ?? null;
   const html = p.body?.content ?? '';
   const text = p.isDeleted ? '' : p.body?.contentType === 'text' ? html.replace(/\s+/g, ' ').trim() : htmlText(html);
-  const excerpt = p.isDeleted ? '(message supprimé)' : text ? clip(text, 140) : /<img/i.test(html) ? '(image)' : '(pièce jointe ou carte)';
+  // L'extrait est le message ENTIER (retours à la ligne gardés) : la page l'affiche tel quel.
+  const full = p.isDeleted ? '' : p.body?.contentType === 'text' ? html.trim() : htmlLines(html);
+  const excerpt = p.isDeleted ? '(message supprimé)' : full ? clip(full, MSG_MAX) : /<img/i.test(html) ? '(image)' : '(pièce jointe ou carte)';
   const lastFrom = p.from?.user?.displayName ?? p.from?.application?.displayName ?? null;
   const muted = !!lastFrom && mute.some((m) => fold(m).trim() === fold(lastFrom).trim());
   const who = !uid || (muted && uid !== meId) ? 'app' : uid === meId ? 'me' : 'other';
@@ -606,6 +648,46 @@ export function convFromPreview(p: GraphPreview | null | undefined, meId: string
     ack: who === 'other' && (!!p.isDeleted || (!!text && needsNoReply(text))), mention: who === 'other' && mentionsOwner(html),
   };
 }
+
+/** Le prénom de l'utilisateur apparaît dans le texte (hors mentions @, comptées à part). */
+function namesOwner(html: string): boolean {
+  if (!OWNER_GREETING.length) return false;
+  return fold(htmlText(html.replace(/<at\b[^>]*>.*?<\/at>/gis, ' '))).split(/[^a-z0-9]+/).includes(OWNER_GREETING[0]!);
+}
+/** Ce message cite-t-il (« Répondre ») un message de l'utilisateur ? La citation est une pièce jointe messageReference. */
+function quotesUser(m: GraphMessage, meId: string): boolean {
+  for (const a of m.attachments ?? []) {
+    if (a.contentType !== 'messageReference' || !a.content) continue;
+    try { if ((JSON.parse(a.content) as { messageSender?: { user?: { id?: string } | null } | null }).messageSender?.user?.id === meId) return true; } catch { /* citation illisible */ }
+  }
+  return false;
+}
+/** Un message Graph d'un fil → ce qu'on en garde (null : événement système, message supprimé ou vide). */
+export function convMsgFrom(m: GraphMessage, meId: string, mute: string[] = []): ConvMsg | null {
+  const at = Date.parse(m.createdDateTime ?? '');
+  if (!m.id || !Number.isFinite(at) || (m.messageType ?? 'message') !== 'message' || m.deletedDateTime) return null;
+  const uid = m.from?.user?.id ?? null;
+  const from = m.from?.user?.displayName ?? null;
+  const muted = !!from && mute.some((x) => fold(x).trim() === fold(from).trim());
+  const who: ConvMsg['who'] = !uid || (muted && uid !== meId) ? 'app' : uid === meId ? 'me' : 'other';
+  const html = m.body?.content ?? '';
+  const isText = m.body?.contentType === 'text';
+  const body = isText ? html.trim() : htmlLines(html);
+  const files = (m.attachments ?? []).filter((a) => a.contentType !== 'messageReference').map((a) => a.name || '').filter((x) => !!x);
+  if (!body && !files.length && !/<img/i.test(html)) return null;
+  const text = clip([body || (/<img/i.test(html) ? '(image)' : ''), files.length ? `📎 ${files.join(', ')}` : ''].filter(Boolean).join('\n'), MSG_MAX);
+  const other = who === 'other';
+  return {
+    id: m.id, at, from, who, text,
+    ack: other && !!body && !files.length && needsNoReply(isText ? body : htmlText(html)),
+    mention: other && !isText && mentionsOwner(html), quotesMe: other && quotesUser(m, meId), named: other && namesOwner(html),
+    // Une question qui mentionne (@) quelqu'un d'autre que lui s'adresse à cette personne.
+    question: other && body.includes('?') && (isText || !/<at\b/i.test(html) || mentionsOwner(html)),
+  };
+}
+/** Derniers messages d'un fil (réponse Graph, ordre quelconque) → les 20 derniers gardés, du plus ancien au plus récent. */
+export const convThread = (messages: GraphMessage[], meId: string, mute: string[] = []): ConvMsg[] =>
+  messages.map((m) => convMsgFrom(m, meId, mute)).filter((m): m is ConvMsg => !!m).sort((a, b) => a.at - b.at).slice(-20);
 
 const ROLE_RANK: Record<ConvSession['role'], number> = { replied: 0, wait: 1, inbound: 2, past: 3 };
 /** La vue par conversation : chats connus × pointages × attentes × demandes entrantes. « À traiter » d'abord, puis le plus récent. */
@@ -629,23 +711,50 @@ export function conversationRows(st: ConvState | undefined, seen: ConvSeen | und
       else if (now - w.sentAt < days * 86_400_000) add({ sessionId: w.sessionId, role: 'past', at: w.sentAt });
     }
     if (inb?.sessionId && inb.openedAt && now - inb.openedAt < days * 86_400_000) add({ sessionId: inb.sessionId, role: 'inbound', at: inb.openedAt });
-    let ball: ConvRow['ball'] = null;
+    let ball: ConvRow['ball'] = null, why: ConvRow['why'] = null;
+    // Un pointage EXPLICITE (« Rien à répondre ») éteint « à toi de répondre » ; le départ de la première passe, non.
+    const pointed = seen?.chats[chatId] ?? 0;
+    // Le fil lu par la passe ne vaut que pour le dernier message qu'elle connaît (lot 10) ; sinon, le dernier message seul.
+    const thread = c.recent && c.recentFor === c.lastId ? c.recent : null;
+    const byOf = (m: ConvMsg): ConvShown['by'] => (m.who === 'me' ? (sessionSent.has(m.id) ? 'session' : 'me') : m.who);
+    const lastMineAt = thread?.filter((m) => m.who === 'me').at(-1)?.at ?? 0;
+    // À répondre : ce que les autres ont écrit depuis le dernier message de l'utilisateur (lui ou une session) et depuis son pointage.
+    const cand = thread?.filter((m) => m.who === 'other' && m.at > lastMineAt && m.at > pointed) ?? [];
+    let unseen = (by === 'other' || by === 'session') && c.lastAt > seenAt;
     if (by === 'other') {
       const handled = mine.some((w) => w.replies?.some((r) => r.id === c.lastId)) || (!!inb?.sessionId && (inb.sessionUpTo ?? inb.openedAt ?? 0) >= c.lastAt);
       if (handled) ball = 'session';
-      // Un pointage EXPLICITE de ce message (« Rien à répondre ») l'éteint ; le départ de la première passe, non.
-      else if (!c.ack && (c.type === 'oneOnOne' || c.mention) && c.lastAt > (seen?.chats[chatId] ?? 0)) ball = 'reply';
+      else if (!thread) { if (!c.ack && (c.type === 'oneOnOne' || c.mention) && c.lastAt > pointed) ball = 'reply'; }
+      else if (c.type === 'oneOnOne') { if (cand.some((m) => !m.ack)) ball = 'reply'; }
+      else {
+        // Groupe : seulement ce qui s'adresse à lui — mention, citation, prénom, ou question qui suit directement son message.
+        const firstAfterMine = lastMineAt ? thread.find((m) => m.at > lastMineAt && m.who !== 'app') : undefined;
+        for (const m of cand) {
+          if (m.ack) continue;
+          const w: ConvRow['why'] = m.mention ? 'mention' : m.quotesMe ? 'quote' : m.named ? 'named' : m.question && m === firstAfterMine ? 'question' : null;
+          if (w) { ball = 'reply'; why = w; }
+        }
+      }
     } else if (by !== 'app' && mine.some((w) => w.status === 'open')) ball = 'waiting';
+    let news: ConvShown[] = [];
+    if (thread) {
+      // Son propre message (tapé par lui) vaut pointage : il a vu ce qui précède.
+      const typedAt = thread.filter((m) => byOf(m) === 'me').at(-1)?.at ?? 0;
+      const fresh = thread.filter((m) => m.at > Math.max(seenAt, typedAt) && (m.who === 'other' || byOf(m) === 'session'));
+      unseen = fresh.length > 0;
+      const show = ball === 'reply' ? thread.filter((m) => m.at > Math.max(lastMineAt, pointed) && m.who === 'other') : fresh;
+      news = show.slice(-12).map((m) => ({ id: m.id, at: m.at, from: m.from, by: byOf(m), text: m.text }));
+    }
     rows.push({
       chatId, label: c.label, type: c.type, webUrl: c.webUrl, lastAt: c.lastAt, lastFrom: c.lastFrom, by, excerpt: c.excerpt, seenAt,
-      unseen: (by === 'other' || by === 'session') && c.lastAt > seenAt, ball,
+      unseen, ball, why, news,
       sessions: [...bySession.values()].sort((a, b) => ROLE_RANK[a.role] - ROLE_RANK[b.role] || b.at - a.at).slice(0, 4),
     });
   }
   const rank = (r: ConvRow) => (r.ball === 'reply' ? 0 : r.unseen ? 1 : 2);
   return rows.sort((a, b) => rank(a) - rank(b) || b.lastAt - a.lastAt);
 }
-export const conversationCounts = (rows: ConvRow[], at: number) => ({ reply: rows.filter((r) => r.ball === 'reply').length, unseen: rows.filter((r) => r.unseen && r.ball !== 'reply').length, total: rows.length, at });
+export const conversationCounts = (rows: ConvRow[], at: number, send = false) => ({ reply: rows.filter((r) => r.ball === 'reply').length, unseen: rows.filter((r) => r.unseen && r.ball !== 'reply').length, total: rows.length, at, send });
 
 // ─────────────── fichiers ───────────────
 
@@ -672,7 +781,7 @@ export function writeSummary(dir: string, now: number, reminders?: boolean) {
   const inbound = readJson<InboundState>(join(dir, '_inbound.json'));
   const conv = readJson<ConvState>(join(dir, '_conversations.json'));
   const sum: Summary = { ...summarize(waits, existsSync(join(dir, '_token.dpapi')), now, on), inbound: inboundSummary(inbound, now), validations: validationSummaries(validationsDir(dir), waits, now),
-    ...(conv ? { conversations: conversationCounts(conversationRows(conv, readJson<ConvSeen>(join(dir, '_conv-seen.json')), waits, inbound, now), conv.at) } : {}) };
+    ...(conv ? { conversations: conversationCounts(conversationRows(conv, readJson<ConvSeen>(join(dir, '_conv-seen.json')), waits, inbound, now), conv.at, !!conv.reply) } : {}) };
   writeAtomic(join(dir, '_summary.json'), JSON.stringify(sum));
 }
 /** Vue par conversation pour la page (lot 9) : null tant que la passe n'a rien listé (vue éteinte). */
@@ -680,6 +789,42 @@ export function conversationsView(dir: string, now: number): { at: number; since
   const conv = readJson<ConvState>(join(dir, '_conversations.json'));
   if (!conv || conv.v !== 1) return null;
   return { at: conv.at, since: conv.since, rows: conversationRows(conv, readJson<ConvSeen>(join(dir, '_conv-seen.json')), loadWaits(dir), readJson<InboundState>(join(dir, '_inbound.json')), now) };
+}
+/** Fil d'une conversation pour la page (lot 10) : les derniers messages lus par la passe, en entier. */
+export function conversationThread(dir: string, chatId: string): { fresh: boolean; messages: ConvShown[] } | null {
+  const c = readJson<ConvState>(join(dir, '_conversations.json'))?.chats[chatId];
+  if (!c) return null;
+  const sent = new Set(loadWaits(dir).map((w) => w.messageId));
+  return { fresh: c.recentFor === c.lastId, messages: (c.recent ?? []).map((m) => ({ id: m.id, at: m.at, from: m.from, by: m.who === 'me' ? (sent.has(m.id) ? 'session' : 'me') : m.who, text: m.text })) };
+}
+const escapeHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** Corps Teams d'une réponse tapée dans la page : texte brut, retours à la ligne gardés — jamais de HTML de l'utilisateur. */
+export const replyHtml = (text: string): string => escapeHtml(text.trim()).replace(/\r?\n/g, '<br>');
+export type GraphSend = (path: string, body: unknown) => Promise<{ id?: string; createdDateTime?: string }>;
+/** Bouton « Répondre » de la page (lot 10) : poste le texte dans le chat AU NOM de l'utilisateur, puis tient la vue à
+ *  jour sans attendre la passe (dernier mot = le sien, conversation pointée). Retourne l'erreur, ou null. */
+export async function sendChatReply(dir: string, cfg: Pick<WatcherConfig, 'conversations'>, chatId: string, text: string, now: number, post: GraphSend): Promise<string | null> {
+  if (!cfg.conversations.enabled || !cfg.conversations.reply) return 'réponse depuis la page éteinte ({ "conversations": { "reply": true } } dans teams-watcher-config.json)';
+  const body = text.trim();
+  if (!body) return 'message vide';
+  if (body.length > 8000) return 'message trop long (8 000 caractères au plus)';
+  const file = join(dir, '_conversations.json');
+  if (!readJson<ConvState>(file)?.chats[chatId]) return 'conversation introuvable';
+  let sent: { id?: string; createdDateTime?: string };
+  try { sent = await post(`/chats/${encodeURIComponent(chatId)}/messages`, { body: { contentType: 'html', content: replyHtml(body) } }); }
+  catch (e) { return `envoi refusé : ${String((e as Error).message)}`; }
+  // Relu APRÈS l'envoi : une passe a pu réécrire le fichier entre-temps.
+  const st = readJson<ConvState>(file);
+  const c = st?.chats[chatId];
+  const at = Date.parse(sent.createdDateTime ?? '') || now;
+  if (st && c && sent.id) {
+    const msg: ConvMsg = { id: sent.id, at, from: OWNER, who: 'me', text: clip(body, MSG_MAX), ack: false, mention: false, quotesMe: false, named: false, question: false };
+    const fresh = c.recentFor === c.lastId;
+    st.chats[chatId] = { ...c, lastId: sent.id, lastAt: at, lastFrom: OWNER, who: 'me', excerpt: msg.text, ack: false, mention: false, ...(fresh ? { recent: [...(c.recent ?? []), msg].slice(-20), recentFor: sent.id } : {}) };
+    writeAtomic(file, JSON.stringify(st));
+  }
+  markConversationSeen(dir, chatId, 'seen', at, Math.max(now, at));
+  return null;
 }
 /** Boutons « Vu » / « Remettre à voir » / « Tout marquer vu » de la page. Le pointage porte l'heure du dernier message
  *  AFFICHÉ (`at`), pas celle du clic : un message arrivé entre-temps reste à voir. chatId '*' = toutes les conversations. */
@@ -1101,6 +1246,8 @@ export interface WatcherConfig {
   markRead: boolean; readScope: string;
   /** Lot 9 : vue par conversation (tous les chats actifs). Éteinte par défaut ; Chat.Read suffit. */
   conversations: ConversationsConfig;
+  /** Lot 10 : portée de la réponse depuis la page (demandée au « login » quand conversations.reply est allumé). */
+  sendScope: string;
 }
 export const defaultConfig: WatcherConfig = {
   tenant: 'organizations',
@@ -1112,11 +1259,11 @@ export const defaultConfig: WatcherConfig = {
   mail: false, mailScope: 'Mail.Read User.Read offline_access',
   export: null,
   markRead: false, readScope: 'Chat.ReadWrite User.Read offline_access',
-  conversations: defaultConversations,
+  conversations: defaultConversations, sendScope: 'ChatMessage.Send User.Read offline_access',
 };
 /** Portée demandée au « login » : celles des emails et des fils lus en plus quand ils sont allumés (le jeton de rafraîchissement les couvre alors toutes). */
-export const loginScope = (cfg: Pick<WatcherConfig, 'scope' | 'mail' | 'mailScope'> & Partial<Pick<WatcherConfig, 'markRead' | 'readScope'>>): string =>
-  [...new Set([cfg.scope, cfg.mail ? cfg.mailScope : '', cfg.markRead ? cfg.readScope ?? '' : ''].join(' ').split(/\s+/).filter(Boolean))].join(' ');
+export const loginScope = (cfg: Pick<WatcherConfig, 'scope' | 'mail' | 'mailScope'> & Partial<Pick<WatcherConfig, 'markRead' | 'readScope' | 'conversations' | 'sendScope'>>): string =>
+  [...new Set([cfg.scope, cfg.mail ? cfg.mailScope : '', cfg.markRead ? cfg.readScope ?? '' : '', cfg.conversations?.reply ? cfg.sendScope ?? '' : ''].join(' ').split(/\s+/).filter(Boolean))].join(' ');
 const pwsh = () => (process.platform === 'win32' ? 'pwsh.exe' : 'pwsh');
 function protect(secret: string): string {
   return execFileSync(pwsh(), ['-NoProfile', '-NonInteractive', '-Command', 'ConvertTo-SecureString $env:SD_SECRET -AsPlainText -Force | ConvertFrom-SecureString'],
@@ -1163,6 +1310,12 @@ async function login(cfg: WatcherConfig, dir: string): Promise<number> {
 async function graph<T>(token: string, path: string, headers: Record<string, string> = {}): Promise<T> {
   const r = await fetch(`https://graph.microsoft.com/v1.0${path}`, { headers: { authorization: `Bearer ${token}`, ...headers } });
   if (!r.ok) throw Object.assign(new Error(`Graph ${r.status} sur ${path.split('?')[0]!.replace(/19:[^/]+/, '<chat>').replace(/messages\/[^/]+/, 'messages/<id>')}`), { status: r.status });
+  return (await r.json()) as T;
+}
+/** POST Graph qui rend l'objet créé (lot 10 : le message envoyé, pour son id et son heure). */
+async function graphPostJson<T>(token: string, path: string, body: unknown): Promise<T> {
+  const r = await fetch(`https://graph.microsoft.com/v1.0${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) });
+  if (!r.ok) throw Object.assign(new Error(`Graph ${r.status} sur ${path.replace(/19(:|%3A)[^/]+/i, '<chat>')}`), { status: r.status });
   return (await r.json()) as T;
 }
 async function graphPost(token: string, path: string, body: unknown): Promise<void> {
@@ -1303,7 +1456,7 @@ export async function runInbound(dir: string, cfg: WatcherConfig, meId: string, 
 
 /** Chat listé par Graph, avec l'aperçu de son dernier message. */
 interface GraphChatFull { id: string; chatType?: string; topic?: string | null; webUrl?: string | null; viewpoint?: { isHidden?: boolean } | null; lastMessagePreview?: GraphPreview | null }
-export interface ConvResult { listed: number; errors: string[] }
+export interface ConvResult { listed: number; errors: string[]; /** Fils relus par cette passe (lot 10). */ threads?: number }
 const GRAPH_ROOT = 'https://graph.microsoft.com/v1.0';
 /** Passe de la vue par conversation (lot 9) : tous les chats actifs de la fenêtre, leur dernier message, leur nom.
  *  Un appel par page de 50 chats ; les membres ne sont lus qu'une fois par chat sans sujet ni nom connu (20 au plus par passe). */
@@ -1314,10 +1467,10 @@ export async function runConversations(dir: string, cfg: Pick<WatcherConfig, 'co
   const prev = readJson<ConvState>(file);
   const inbound = readJson<InboundState>(join(dir, '_inbound.json'));
   // Première passe : on part de MAINTENANT — l'historique est réputé vu (« à toi de répondre » reste calculé).
-  const st: ConvState = { v: 1, since: prev?.since ?? now, at: now, chats: {} };
+  const st: ConvState = { v: 1, since: prev?.since ?? now, at: now, chats: {}, reply: !!cc.reply };
   const floor = now - cc.days * 86_400_000;
   let path: string | null = '/me/chats?$expand=lastMessagePreview&$orderby=lastMessagePreview/createdDateTime desc&$top=50';
-  let labels = 0, done = false;
+  let labels = 0, threads = 0, done = false;
   try {
     for (let page = 0; path && !done && page < 6; page++) {
       const r: { value: GraphChatFull[]; '@odata.nextLink'?: string } = await graphGet(path);
@@ -1336,7 +1489,17 @@ export async function runConversations(dir: string, cfg: Pick<WatcherConfig, 'co
           labels++;
           try { label = chatLabel(await graphGet(`/chats/${encodeURIComponent(c.id)}?$expand=members`), meId); } catch { /* au prochain passage */ }
         }
-        st.chats[c.id] = { label, type, webUrl: c.webUrl ?? old?.webUrl ?? null, ...last };
+        // Fil (lot 10) : relu seulement quand le dernier message a changé, les chats les plus récents d'abord ; passé le
+        // plafond de la passe, l'ancien fil est gardé (périmé : recentFor ≠ lastId) et relu à la suivante.
+        let recent = old?.recent, recentFor = old?.recentFor;
+        if (recentFor !== last.lastId && threads < (cc.threads ?? 0)) {
+          threads++;
+          try {
+            recent = convThread((await graphGet<{ value: GraphMessage[] }>(`/chats/${encodeURIComponent(c.id)}/messages?$top=30&$orderby=createdDateTime desc`)).value, meId, cc.mute ?? []);
+            recentFor = last.lastId;
+          } catch { /* au prochain passage */ }
+        }
+        st.chats[c.id] = { label, type, webUrl: c.webUrl ?? old?.webUrl ?? null, ...last, ...(recent ? { recent } : {}), ...(recentFor ? { recentFor } : {}) };
         if (++res.listed >= cc.max) { done = true; break; }
       }
       const next: string | undefined = r['@odata.nextLink'];
@@ -1346,6 +1509,7 @@ export async function runConversations(dir: string, cfg: Pick<WatcherConfig, 'co
     // Liste incomplète : on garde l'état d'avant plutôt que de faire disparaître des conversations.
     res.errors.push(`conversations : ${String((e as Error).message)}`); return res;
   }
+  if (threads) res.threads = threads;
   if (!opts.dryRun) writeAtomic(file, JSON.stringify(st));
   return res;
 }
@@ -1650,9 +1814,17 @@ async function main(argv: string[]): Promise<number> {
     const v = conversationsView(dir, Date.now());
     if (!v) { console.error('vue par conversation éteinte : { "conversations": { "enabled": true } } dans teams-watcher-config.json, puis une passe'); return 1; }
     const tag = (r: ConvRow) => (r.ball === 'reply' ? 'À TOI DE RÉPONDRE' : r.unseen ? 'à voir' : r.ball === 'session' ? 'une session s\'en occupe' : r.ball === 'waiting' ? 'en attente de leur réponse' : 'à jour');
-    for (const r of v.rows) console.log(`${tag(r).padEnd(26)} ${hhmm(r.lastAt)}  ${r.label ?? '(sans nom)'} — ${r.by === 'me' ? 'toi' : r.by === 'session' ? 'une session, en ton nom' : r.lastFrom ?? '?'} : « ${r.excerpt} »${r.sessions.length ? `  [${r.sessions.length} session(s)]` : ''}`);
+    for (const r of v.rows) console.log(`${tag(r).padEnd(26)} ${hhmm(r.lastAt)}  ${r.label ?? '(sans nom)'} — ${r.by === 'me' ? 'toi' : r.by === 'session' ? 'une session, en ton nom' : r.lastFrom ?? '?'} : « ${clip(r.excerpt.replace(/\s+/g, ' '), 110)} »${r.news.length > 1 ? `  (${r.news.length} messages)` : ''}${r.sessions.length ? `  [${r.sessions.length} session(s)]` : ''}`);
     console.log(`${v.rows.length} conversation(s), liste du ${hhmm(v.at)}`);
     return 0;
+  }
+  if (cmd === 'send') {
+    // node teams-watcher.ts send <chatId> — le texte arrive sur stdin (bouton « Répondre » de la page).
+    let token = '';
+    const post: GraphSend = async (path, body) => graphPostJson(token ||= await accessToken(cfg, dir, cfg.sendScope).catch((e: Error) => { throw new Error(`${e.message} — relancer « login » pour accorder ChatMessage.Send`); }), path, body);
+    const err = await sendChatReply(dir, cfg, argv[1] ?? '', readFileSync(0, 'utf8'), Date.now(), post);
+    if (err) { console.error(err); return 1; }
+    console.log('envoyé'); return 0;
   }
   if (cmd === 'login') return login(cfg, dir);
   if (cmd === 'logout') { rmSync(join(dir, '_token.dpapi'), { force: true }); writeSummary(dir, Date.now()); console.log('Jeton oublié : surveillance éteinte.'); return 0; }

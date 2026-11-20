@@ -613,9 +613,10 @@ function chatsBadge() {
 function openChats() { if (chatsOff()) return; findMode = false; newMode = false; bcMode = false; boardMode = false; launchMode = false; selected = null; sessionStorage.removeItem('cc.sel'); chatsMode = true; setPane(true);
   clearInterval(chatsTimer); chatsTimer = setInterval(loadChats, 30000); renderList(); renderDetail(true); loadChats(); }
 function closeChats() { chatsMode = false; setPane(false); clearInterval(chatsTimer); renderDetail(true); }
-async function loadChats() {
+async function loadChats(force) {
   if (!chatsMode) { clearInterval(chatsTimer); return; }
-  try { const r = await fetch('/api/teams-conversations', { cache:'no-store' }); chatsData = r.ok ? await r.json() : null; if (chatsMode) renderChats(); } catch { say('conversations illisibles'); }
+  // Pendant qu'on tape une réponse, la liste n'est pas redessinée sous les doigts (elle l'est à l'envoi, ou à la relecture suivante).
+  try { const r = await fetch('/api/teams-conversations', { cache:'no-store' }); chatsData = r.ok ? await r.json() : null; if (chatsMode && (force === true || !chatTyping())) renderChats(); } catch { say('conversations illisibles'); }
 }
 // chatGroups est PURE (testée par server/test/conversations-page.test.ts) : lignes du serveur → les trois groupes de la vue.
 function chatGroups(rows) {
@@ -634,17 +635,51 @@ async function chatSeen(chatId, action, at) {
     const r = await (await fetch('/api/teams-seen', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ chatId, action, at }) })).json();
     if (r.error) say('refusé : ' + r.error);
   } catch { say('échec de la demande'); }
-  loadChats();
+  loadChats(true);
 }
 const CHAT_ICON = { oneOnOne:'👤', group:'👥', meeting:'📅' };
 const CHAT_ROLE = { wait:'attend leur réponse', replied:'reçoit leur réponse', inbound:'ouverte pour cette demande', past:'y a écrit' };
+const CHAT_WHY = { mention:'tu es mentionné', quote:'on répond à un de tes messages', named:'on t’y nomme', question:'question qui suit ton message' };
+// Lot 10 : messages en entier, fil dépliable (/api/teams-thread), réponse depuis la page (/api/teams-reply — le veilleur
+// poste dans Teams en ton nom, sur ton clic). Brouillons, fils ouverts et boîtes de réponse survivent aux relectures.
+const chatDrafts = new Map(), chatReplying = new Set(), chatThreads = new Map(), chatWide = new Set();
+let chatSending = null;
+const chatTyping = () => !!(document.activeElement && document.activeElement.closest && document.activeElement.closest('.creply'));
+// chatWho est PURE (testée par server/test/conversations-page.test.ts) : l'auteur d'un message tel qu'on l'affiche.
+function chatWho(m) {
+  return m.by === 'me' ? 'toi' : m.by === 'session' ? '🤖 une session, en ton nom' : m.from || 'une application';
+}
+function chatMsg(m, when) {
+  const d = el('div', 'cmsg' + (m.by === 'me' || m.by === 'session' ? ' mine' : ''));
+  const h = el('span', 'who' + (m.by === 'session' ? ' ses' : ''), chatWho(m)); if (when) h.append(el('span', 'when', ' · il y a ' + ago(data.now - m.at)));
+  d.append(h, el('div', 'txt', m.text)); return d;
+}
+async function chatToggleThread(chatId) {
+  if (chatThreads.has(chatId)) { chatThreads.delete(chatId); return renderChats(); }
+  chatThreads.set(chatId, null); renderChats();
+  try { const r = await fetch('/api/teams-thread?chatId=' + encodeURIComponent(chatId), { cache:'no-store' }); if (chatThreads.has(chatId)) chatThreads.set(chatId, r.ok ? await r.json() : { fresh:false, messages:[] }); }
+  catch { chatThreads.delete(chatId); say('fil illisible'); }
+  if (chatsMode) renderChats();
+}
+async function chatSend(chatId) {
+  const text = (chatDrafts.get(chatId) || '').trim(); if (!text || chatSending || !canWrite) return;
+  chatSending = chatId; renderChats();
+  try {
+    const r = await (await fetch('/api/teams-reply', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ chatId, text }) })).json();
+    if (r.error) say('non envoyé : ' + r.error); else { chatDrafts.delete(chatId); chatReplying.delete(chatId); chatThreads.delete(chatId); say('envoyé dans Teams'); }
+  } catch { say('échec de la demande — vérifie dans Teams avant de renvoyer'); }
+  chatSending = null; await loadChats(true);
+}
 function renderChats() {
-  const main = $('main'), keep = detailKey === '__chats__' ? main.scrollTop : 0; detailKey = '__chats__'; main.replaceChildren();
+  const main = $('main'), keep = detailKey === '__chats__' ? main.scrollTop : 0;
+  const foc = chatTyping() ? document.activeElement : null, focId = foc && foc.closest('.creply').dataset.chat, sel = foc && [foc.selectionStart, foc.selectionEnd];
+  detailKey = '__chats__'; main.replaceChildren();
   const D = chatsData, rows = D && D.rows;
   main.append(el('div', 'dtitle', 'Conversations Teams'));
   if (!D) { main.append(el('div', 'meta', 'Chargement…')); return; }
   if (!rows) { main.append(el('div', 'meta', 'Vue éteinte : le veilleur n’a encore rien listé ({ "conversations": { "enabled": true } } dans teams-watcher-config.json).')); return; }
   const groups = chatGroups(rows), todo = groups[0].rows.length + groups[1].rows.length;
+  const canSend = canWrite && !!(data.teams && data.teams.conversations && data.teams.conversations.send);
   const meta = el('div', 'meta', rows.length + ' chats actifs sur 14 jours (1:1, groupes, réunions), qu’une session les suive ou non · liste d’il y a ' + ago(data.now - D.at) + ' · '
     + (todo ? todo + ' à traiter' : 'tu es à jour partout') + '. « Vu » pointe le dernier message affiché : ce qui arrive ensuite revient « à voir ».');
   main.append(meta);
@@ -656,13 +691,37 @@ function renderChats() {
     box.append(h);
     if (!g.rows.length) box.append(el('div', 'meta', 'Personne n’attend ta réponse.'));
     for (const r of g.rows) {
-      const row = el('div', 'crow ' + g.key);
+      const row = el('div', 'crow g-' + g.key);
       const t = el('div', 'ct', (CHAT_ICON[r.type] || '') + ' ' + (r.label || '(chat sans nom)')); t.append(el('span', 'when', 'il y a ' + ago(data.now - r.lastAt))); row.append(t);
-      const m = el('div', 'cm');
-      m.append(el('span', 'who' + (r.by === 'session' ? ' ses' : ''), (r.by === 'me' ? 'toi' : r.by === 'session' ? '🤖 une session, en ton nom' : r.lastFrom || 'une application') + ' : '), '« ' + r.excerpt + ' »');
-      row.append(m);
+      const bs = el('div', 'cb');
+      if (r.webUrl) { const l = el('a', null, 'Teams ↗'); l.href = r.webUrl; l.target = '_blank'; l.rel = 'noopener'; l.title = 'Ouvrir la conversation dans Teams'; bs.append(l); }
+      { const b = el('button', null, chatThreads.has(r.chatId) ? 'Replier' : 'Fil'); b.title = 'Les derniers messages de la conversation, en entier'; b.onclick = () => chatToggleThread(r.chatId); bs.append(b); }
+      if (canSend) { const b = el('button', null, 'Répondre'); b.title = 'Écrire ta réponse ici : elle part dans Teams en ton nom, sans ouvrir Teams'; b.onclick = () => { chatReplying.has(r.chatId) ? chatReplying.delete(r.chatId) : chatReplying.add(r.chatId); renderChats(); const ta = main.querySelector('.creply[data-chat="' + CSS.escape(r.chatId) + '"] textarea'); if (ta) ta.focus(); }; bs.append(b); }
+      if (g.key === 'reply') { const b = el('button', null, 'Rien à répondre'); b.title = 'Tu as lu, il n’y a rien à répondre : la conversation passe « à jour » jusqu’au prochain message'; b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
+      else if (g.key === 'unseen') { const b = el('button', null, 'Vu'); b.title = 'Tu as vu ce qui s’est passé ici : la conversation passe « à jour » jusqu’au prochain message'; b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
+      else if (r.by !== 'me' && r.by !== 'app') { const b = el('button', null, '↺'); b.title = 'Remettre à voir'; b.onclick = () => chatSeen(r.chatId, 'unseen', r.lastAt); bs.append(b); }
+      row.append(bs);
+      const th = chatThreads.get(r.chatId);
+      if (chatThreads.has(r.chatId)) {
+        // Fil déplié : les derniers messages, du plus ancien au plus récent (il remplace les messages à lire, qu'il contient).
+        const x = el('div', 'cthread');
+        if (!th) x.append(el('div', 'tx', 'chargement…'));
+        else { if (!th.messages.length || !th.fresh) x.append(el('div', 'tx', th.messages.length ? 'fil pas encore relu depuis le dernier message (prochaine passe du veilleur, 2 min)' : 'fil pas encore lu par le veilleur (prochaine passe, 2 min)')); for (const m of th.messages) x.append(chatMsg(m, true)); }
+        row.append(x); if (th) requestAnimationFrame(() => { x.scrollTop = x.scrollHeight; });
+      } else {
+        const m = el('div', 'cm'), news = r.news || [];
+        if (news.length > 1) m.append(el('div', 'cnt', news.length + ' messages à lire'));
+        if (news.length) for (const x of news) m.append(chatMsg(x, news.length > 1));
+        else {
+          const last = chatMsg({ by: r.by, from: r.lastFrom, at: r.lastAt, text: r.excerpt }, false);
+          // « À jour » : deux lignes suffisent, un clic donne le message entier.
+          if (g.key === 'ok' && !chatWide.has(r.chatId)) { last.classList.add('clamp'); last.title = 'Clic : afficher le message en entier'; last.onclick = () => { chatWide.add(r.chatId); renderChats(); }; }
+          m.append(last);
+        }
+        row.append(m);
+      }
       const s = el('div', 'cs');
-      if (r.ball === 'reply') s.append(el('span', 'tag reply', 'à toi de répondre'));
+      if (r.ball === 'reply') s.append(el('span', 'tag toreply', 'à toi de répondre' + (r.why ? ' — ' + CHAT_WHY[r.why] : '')));
       else if (r.ball === 'session') s.append(el('span', 'tag ses', 'une session a reçu ce message'));
       else if (r.ball === 'waiting') s.append(el('span', 'tag wait', 'en attente de leur réponse'));
       for (const x of r.sessions) {
@@ -671,16 +730,21 @@ function renderChats() {
         else { const o = el('span', 'chip gone', 'session fermée — ' + CHAT_ROLE[x.role]); o.title = x.sessionId; s.append(o); }
       }
       if (s.childNodes.length) row.append(s);
-      const bs = el('div', 'cb');
-      if (r.webUrl) { const l = el('a', null, 'Teams ↗'); l.href = r.webUrl; l.target = '_blank'; l.rel = 'noopener'; l.title = 'Ouvrir la conversation dans Teams'; bs.append(l); }
-      if (g.key === 'reply') { const b = el('button', null, 'Rien à répondre'); b.title = 'Tu as lu, il n’y a rien à répondre : la conversation passe « à jour » jusqu’au prochain message'; b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
-      else if (g.key === 'unseen') { const b = el('button', null, 'Vu'); b.title = 'Tu as vu ce qui s’est passé ici : la conversation passe « à jour » jusqu’au prochain message'; b.onclick = () => chatSeen(r.chatId, 'seen', r.lastAt); bs.append(b); }
-      else if (r.by !== 'me' && r.by !== 'app') { const b = el('button', null, '↺'); b.title = 'Remettre à voir'; b.onclick = () => chatSeen(r.chatId, 'unseen', r.lastAt); bs.append(b); }
-      row.append(bs);
+      if (canSend && chatReplying.has(r.chatId)) {
+        const f = el('div', 'creply'); f.dataset.chat = r.chatId;
+        const ta = el('textarea'); ta.placeholder = 'Ta réponse à ' + (r.label || 'ce chat') + '…'; ta.value = chatDrafts.get(r.chatId) || ''; ta.spellcheck = true;
+        ta.oninput = () => chatDrafts.set(r.chatId, ta.value);
+        const rb = el('div', 'rb'), busy = chatSending === r.chatId;
+        const ok = el('button', null, busy ? 'Envoi…' : 'Envoyer'); ok.disabled = !!chatSending; ok.title = 'Poste ce message dans Teams, en ton nom  ( Ctrl+Entrée )'; ok.onclick = () => chatSend(r.chatId);
+        const no = el('button', null, 'Annuler'); no.title = 'Referme sans envoyer (le brouillon est gardé)  ( Échap )'; no.onclick = () => { chatReplying.delete(r.chatId); renderChats(); };
+        rb.append(ok, no, el('span', 'tx', 'part dans Teams en ton nom, tel quel · Ctrl+Entrée pour envoyer'));
+        f.append(ta, rb); row.append(f);
+      }
       box.append(row);
     }
   }
   main.append(box); main.scrollTop = keep;
+  if (focId) { const ta = main.querySelector('.creply[data-chat="' + CSS.escape(focId) + '"] textarea'); if (ta) { ta.focus(); try { ta.setSelectionRange(sel[0], sel[1]); } catch {} } }
 }
 
 // ── Lanceur (🤖) : supervision des claude -p du diagnostic automatique — santé, runs en cours, tickets qui attendent,
@@ -3037,6 +3101,11 @@ document.addEventListener('keydown', e => {
   }
   if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#bcform')) {    // message groupé : Ctrl+Entrée / Échap seulement
     if (e.key === 'Escape') { e.preventDefault(); closeBc(); } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendBc(); }
+    return;
+  }
+  if (chatTyping()) {                                                              // réponse à une conversation Teams : Ctrl+Entrée / Échap seulement
+    const id = document.activeElement.closest('.creply').dataset.chat;
+    if (e.key === 'Escape') { e.preventDefault(); chatReplying.delete(id); renderChats(); } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); chatSend(id); }
     return;
   }
   if (document.activeElement && document.activeElement.id === 'sendtext') {       // dans la zone de réponse : rien d'autre que Entrée / Échap
