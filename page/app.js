@@ -1461,11 +1461,16 @@ const noTab = new Set();     // sessions dont l'onglet n'a pas pu être affiché
 async function relaunch(it) {
   // Sans confirmation : rien ne se perd (session inactive, invite vide exigées par le serveur ; conversation reprise).
   say('relance de « ' + label(it) + ' »…');
+  relaunching = { key: it.key, until: Date.now() + 90000 };
   try { const r = await post('/api/relaunch?pid=' + it.pid);
-    if (r.error) say('non relancée : ' + r.error); else { noTab.delete(it.key); say('relancée dans un nouvel onglet — elle réapparaît dans quelques secondes'); } }
-  catch { say('échec de la demande'); }
+    if (r.error) { relaunching = null; say('non relancée : ' + r.error); } else { noTab.delete(it.key); say('relancée dans un nouvel onglet — elle réapparaît dans quelques secondes'); } }
+  catch { relaunching = null; say('échec de la demande'); }
   tick();
 }
+// Entre la fermeture et la réapparition dans le nouvel onglet, la session n'est dans aucune liste pendant quelques
+// secondes : la sélection est gardée, pour que son détail revienne tout seul au lieu de la chercher dans la liste.
+let relaunching = null;
+const awaitingRelaunch = key => !!relaunching && relaunching.key === key && Date.now() < relaunching.until;
 async function closeSession(it) {
   if (!it || it.kind !== 'open') return;
   if (!confirm('Fermer « ' + label(it) + ' » ?\n\nLa conversation est conservée : elle passe dans « Fermées, reprenables ». L’onglet du terminal reste ouvert sur une invite PowerShell.')) return;
@@ -1915,7 +1920,7 @@ function renderDetail(force) {
   if (findMode) { if (detailKey !== '__find__' || force) renderFind(); return; }
   const main = $('main'); const it = selected && byKey(selected);
   if (!it) {
-    if (selected && data && closedData.days) { selected = null; sessionStorage.removeItem('cc.sel'); }
+    if (selected && data && closedData.days && !awaitingRelaunch(selected)) { selected = null; sessionStorage.removeItem('cc.sel'); }
     if (detailKey !== '' || force) { detailKey = ''; main.replaceChildren(el('div', null), el('div', null)); main.firstChild.id = 'head'; main.lastChild.id = 'body'; }
     renderOverview(); return;
   }
