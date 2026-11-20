@@ -3,6 +3,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { CardsFeed } from './cards.ts';
 import type { Dashboard } from './state.ts';
 import { launchMs, readClaudeUsage, readUsageRaw, roundHalfEven } from './usage.ts';
 import { exists, isDir, leaf, netTrim, nowMs, psString, readJson, setContent, splitPathParent } from './util.ts';
@@ -185,6 +186,8 @@ export class Launcher {
   readonly runs: string;
   /** Module « launcher » éteint : aucune route, aucune alerte. */
   readonly enabled: boolean;
+  /** Cartes de questions adressées à l'opérateur (cards.ts) ; éteint sans `cardsApi`. */
+  readonly cards: CardsFeed;
   readonly #runRe: RegExp;
   readonly #busyRe: RegExp;
   #cache: { at: number; hours: number; value: Obj | null } = { at: 0, hours: 0, value: null };
@@ -195,6 +198,7 @@ export class Launcher {
     this.d = d;
     const mod = d.cfg.modules.launcher;
     this.enabled = !!mod;
+    this.cards = new CardsFeed(mod, process.env, () => this.invalidate());
     this.root = mod?.root ?? join(d.cfg.temp, 'sessions-desk-sans-lanceur');
     this.runs = join(this.root, 'runs');
     // Un run en cours se reconnaît à sa ligne de commande : <dossier du lanceur>\runs\HD-<n>\<horodatage>…
@@ -242,18 +246,24 @@ export class Launcher {
     }
     const openByPid = new Map<number, Obj>(); for (const s of await this.d.openSessions()) openByPid.set(Math.trunc(Number(s.pid)), s);
     const cut = now - hours * 3600000;
+    // Une demande dont une carte attend l'opérateur garde son DERNIER run dans la vue, quel que soit son âge : la carte
+    // se traite depuis le détail de ce run.
+    const feed = this.cards.current();
+    const carded = new Set(((Array.isArray(feed.cards) ? feed.cards : []) as Obj[]).map((c) => psString(c.hd)).filter(Boolean));
     const runs: Obj[] = [];
-    for (const t of listDirs(this.runs).filter((x) => x.mtime >= cut)) {
+    for (const t of listDirs(this.runs).filter((x) => x.mtime >= cut || carded.has(x.name.replace(/^HD-/i, '')))) {
       const hd = t.name.replace(/^HD-/i, '');
       if (!titles.get(hd)) titles.set(hd, this.title(t.full));
-      for (const d of listDirs(t.full)) {
+      const dirs = listDirs(t.full);
+      const kept = carded.has(hd) ? dirs.map((x) => x.name).filter((n) => /^\d{8}-\d{6}/.test(n)).sort().pop() ?? null : null;
+      for (const d of dirs) {
         const m = d.name.match(/^(\d{8}-\d{6})(?:-(.+))?$/);
         if (!m) continue;
         const s = m[1]!;
         const at = Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(9, 11), +s.slice(11, 13), +s.slice(13, 15));
         const phase = m[2] ?? 'diagnostic';
         const key = d.full.toLowerCase(); const lv = live.get(key);
-        if (at < cut && !lv) continue;
+        if (at < cut && !lv && d.name !== kept) continue;
         let names: string[] = []; try { names = readdirSync(d.full); } catch { /* disparu */ }
         const files = names.map((n) => { try { const st2 = statSync(join(d.full, n)); return st2.isFile() ? { name: n, size: st2.size } : null; } catch { return null; } })
           .filter((x): x is { name: string; size: number } => !!x && FILE_EXT.includes(extOf(x.name)) && !HIDDEN_FILES.includes(x.name.toLowerCase()) && x.size < 4 * 1024 * 1024)
@@ -302,6 +312,7 @@ export class Launcher {
     }
     errors.sort((a, b) => (b.at as number) - (a.at as number));
     const v: Obj = { present: true, now, hours, heartbeat: this.#heartbeat(), quota: readClaudeUsage(this.d.cfg), errors, runs, waiting, decisions,
+      cards: Array.isArray(feed.cards) ? feed.cards : [], cardsToken: psString(feed.token) || 'unknown', cardsError: feed.error ?? null,
       cost: roundHalfEven(runs.reduce((t, r) => t + (Number(r.costUsd ?? 0) || 0), 0), 2),
       triage: st?.triage ?? null, devMode: st?.devMode ?? null, recetteMode: st?.recetteMode ?? null, reworkMode: st?.reworkMode ?? null };
     this.#cache = { at: nowMs(), hours, value: v };
@@ -346,12 +357,25 @@ export class Launcher {
       const det = psString(g.detail).replace(/\s+/g, ' ');
       alerts.push({ key, title: `Lanceur : dev en échec — HD-${name}`, text: det.slice(0, Math.min(200, det.length)) });
     }
+    // 3 ter. Une CARTE de questions attend l'opérateur (cards.ts) : une notification par carte, à la place du « t'attend »
+    // de la même demande. Pas de fenêtre de 2 h : une carte ouverte est toujours à traiter, et n'est signalée qu'une fois.
+    const feed = this.cards.current();
+    const carded = new Set<string>();
+    for (const c of (Array.isArray(feed.cards) ? feed.cards : []) as Obj[]) {
+      const hd = psString(c.hd); if (!hd) continue;
+      carded.add(hd);
+      const key = `card:${hd}:${psString(c.id)}`; if (seen[key]) continue;
+      const qs = Array.isArray(c.questions) ? (c.questions as Obj[]) : [];
+      const first = psString(qs[0]?.question).replace(/\s+/g, ' ');
+      alerts.push({ key, hd, title: `Lanceur : HD-${hd} — ${qs.length > 1 ? qs.length + ' questions t’attendent' : 'une question t’attend'}`, text: first.slice(0, Math.min(200, first.length)) });
+    }
     // 3 bis. Demande qui PASSE à une étape où c'est à l'utilisateur d'agir (waitingOn = actor) — cadrage L5. Seulement un passage
     // récent (< 2 h) ; exclues « dev en échec » (alerte 3) et « diagnostic écarté » (rien à décider).
     if (stages) for (const [name, raw] of Object.entries(stages)) {
       let g: Obj; try { g = JSON.parse(String(raw)) as Obj; } catch { continue; }
       const stg = psString(g.stage);
       if (psString(g.waitingOn) !== 'actor' || stg === 'dev-failed' || stg === 'diagnosis-skipped') continue;
+      if (carded.has(name)) continue;   // une carte attend sur cette demande : c'est elle qui notifie (3 ter)
       const since = launchMs(g.since);
       if (!since || now - since > 2 * 3600000) continue;
       const key = `wait:${name}:${stg}:${since}`; if (seen[key]) continue;
@@ -391,10 +415,10 @@ export class Launcher {
     const seen = (readJson(this.alertFile) ?? {}) as Obj;
     const alerts = await this.alerts(seen);
     // Plus de 3 « t'attend » dans la même passe (rafale du lanceur) : UNE notification qui les liste.
-    const waits = alerts.filter((a) => a.key.startsWith('wait:')); const burst = waits.length > 3;
+    const waits = alerts.filter((a) => a.key.startsWith('wait:') || a.key.startsWith('card:')); const burst = waits.length > 3;
     for (const a of alerts) {
       if (a.key === '-down') delete seen.down; else seen[a.key] = nowMs();
-      if (burst && a.key.startsWith('wait:')) continue;
+      if (burst && (a.key.startsWith('wait:') || a.key.startsWith('card:'))) continue;
       if (!first || a.key === 'down') notify(a.title, a.text, a.hd);
     }
     if (burst && !first) notify(`Lanceur : ${waits.length} demandes t'attendent`, waits.map((a) => `HD-${a.hd}`).join(', '));

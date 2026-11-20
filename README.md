@@ -90,7 +90,7 @@ server never fails to start because of this file.
 
 | Module | What it turns on | Settings |
 |---|---|---|
-| `launcher` | A view of runs started by an external orchestrator (headless sessions), their files, alerts and orders | `root`: the orchestrator's data folder · `cli`: the command that receives orders · `ticketApi`: the command that reads a ticket · `python` |
+| `launcher` | A view of runs started by an external orchestrator (headless sessions), their files, alerts and orders | `root`: the orchestrator's data folder · `cli`: the command that receives orders · `ticketApi`: the command that reads a ticket · `cardsApi`: the command that lists and answers the question cards the orchestrator addresses to you (`pending`, `cards <ticket>`, `answer <ticket> <card> --answers-file <file>`, one JSON line each; it alone holds the ticket system's address and token) · `python` |
 | `teams` | Sessions that wait for a Microsoft Teams reply or an Outlook email reply (opt-in `"mail": true`), with reminders | `enabled` |
 | `tickets` | The "current subject" of a session, from ticket references in your prompts | `pattern`: a regular expression |
 | `quota` | An account usage banner | `file`: a usage file written by a collector of your own |

@@ -168,7 +168,7 @@ function quotaSection() {
 // fin du tour, asks-judge.ts). L'heuristique se trompe rarement quand elle dit oui ; le modèle rattrape les formes qu'elle
 // ne connaît pas (« when you give the go », « je peux regarder… », un essai à faire).
 const asksOf = it => asks(it.reply) || !!(it.askVerdict && it.askVerdict.v);
-const stateOf = it => it.kind === 'closed' ? 'closed' : it.kind === 'pass' ? 'auto:' + it.auto.id : it.kind === 'run' || it.headless ? 'auto' : it.status === 'idle' ? (it.done ? (asksOf(it) ? 'ask' : 'done') : 'idle')
+const stateOf = it => it.kind === 'closed' ? 'closed' : it.kind === 'pass' ? 'auto:' + it.auto.id : it.kind === 'run' && it.cards && it.cards.length && !it.run.running ? 'ask' : it.kind === 'run' || it.headless ? 'auto' : it.status === 'idle' ? (it.done ? (asksOf(it) ? 'ask' : 'done') : 'idle')
   : it.status === 'shell' ? (asksOf(it) ? 'ask' : 'shell') : (LABEL[it.status] ? it.status : 'idle');
 function prTags(it) {
   const p = it.prInfo; if (!p || !it.pr) return [];
@@ -796,7 +796,13 @@ function openRun(hd) {
   runPick.delete(it.key);
   select(it.key, true);
 }
-const runGroup = () => { const g = launcherGroup(runData ? runData.runs : [], runData ? runData.waiting : [], data ? data.sessions : [], midnight()); return { items: runsByHd(g.items), absorbed: g.absorbed }; };
+const runGroup = () => {
+  const runs = runData ? runData.runs : [], waiting = runData ? runData.waiting : [], open = data ? data.sessions : [], cards = cardsOn() ? runData.cards || [] : [];
+  const g = launcherGroup(runs, waiting, open, midnight());
+  // Une carte qui attend garde sa demande dans la liste, même si son dernier run date d'avant minuit.
+  const old = cardRuns(runs, cards, midnight()), g2 = old.length ? launcherGroup(old, waiting, open, 0) : { items: [] };
+  return { items: withCards(runsByHd(g.items.concat(g2.items)), cards), absorbed: g.absorbed };
+};
 const money = v => (Math.round(v * 100) / 100).toLocaleString('fr-FR') + ' $';
 // ── Passes des AUTOMATES du poste (module « automations ») : scripts planifiés déclarés dans la configuration du
 // poste. Un groupe par automate dans la liste (la passe en cours et la DERNIÈRE passe du jour qui a agi ou échoué), une carte
@@ -1277,6 +1283,136 @@ function renderDecision(box, it, d) {
   card.append(a, el('div', 'hint', 'Ordre « decide ' + hd + ' … » — rejouée comme un clic sur la carte ; une note visible le dit au demandeur et ferme la carte.'));
   box.append(card);
 }
+// ── Cartes de questions du lanceur (module « launcher », clé cardsApi — server/src/cards.ts) : ce que l'orchestrateur
+// demande à l'opérateur sous une de ses notes se lit et se RÉPOND ici, comme le dialogue d'une session : options en
+// boutons avec leur description, recommandée en premier, « Autre » en texte libre. Toutes les questions de la carte
+// sont visibles ; rien ne part avant « Envoyer les réponses ». La réponse passe par la commande des cartes : dans le
+// ticket, c'est un clic de l'opérateur sur la carte. cardRuns, withCards, cardForm et cardAnswers sont PURES
+// (testées par server/test/page-cards.test.ts).
+const CARD_FR = { arbitrage:'⚖️ Question pour toi', question:'❓ Question pour toi', validation:'✅ Validation — lancer le développement ?', cadrage:'📐 Ouvrir un cadrage ?', doc:'📝 Mémoire de domaine' };
+// Le DERNIER run d'une demande dont une carte attend, quand il est antérieur à `since` (minuit) : la liste ne garde
+// que les runs du jour, et la carte se traite depuis le détail d'un run.
+function cardRuns(runs, cards, since) {
+  const hds = new Set((cards || []).map(c => String(c.hd))), latest = new Map();
+  for (const r of runs || []) { const k = String(r.hd); if (hds.has(k) && (!latest.has(k) || latest.get(k).at < r.at)) latest.set(k, r); }
+  return [...latest.values()].filter(r => !r.running && !(r.at >= since));
+}
+// Éléments de la liste (un par demande) → les mêmes, avec leurs cartes ; une demande qui a une carte et ne travaille
+// pas « attend ta décision » (couleur ask, groupe « À traiter »).
+function withCards(items, cards) {
+  const by = new Map();
+  for (const c of cards || []) { const k = String(c.hd); if (!by.has(k)) by.set(k, []); by.get(k).push(c); }
+  return (items || []).map(it => by.has(String(it.run.hd)) ? { ...it, cards: by.get(String(it.run.hd)), look: it.run.running ? it.look : 'ask' } : it);
+}
+function cardForm(card) {
+  const qs = Array.isArray(card && card.questions) ? card.questions.filter(q => q && q.id != null) : [];
+  return {
+    id: String(card.id), title: CARD_FR[card.flavor] || CARD_FR[card.kind] || 'Question pour toi', neighbours: Number(card.neighbours) || 0,
+    questions: qs.map(q => {
+      const options = (Array.isArray(q.options) ? q.options : []).map(o => ({ id: String(o.id), label: String(o.label || o.id), description: String(o.description || ''), recommended: !!o.recommended }));
+      options.sort((a, b) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
+      return { id: String(q.id), header: String(q.header || q.id), question: String(q.question || ''), multi: !!q.multiSelect, open: !options.length, options,
+        required: card.kind === 'validation' && String(q.id) === 'decision' };
+    }),
+  };
+}
+// Ce qui part : { answers } ou { error } ; `missing` = les questions laissées sans réponse (la carte se ferme quand même).
+function cardAnswers(card, picks, others) {
+  const f = cardForm(card), answers = [], missing = [];
+  for (const q of f.questions) {
+    const known = new Set(q.options.map(o => o.id));
+    let selected = ((picks && picks[q.id]) || []).filter(v => known.has(v));
+    if (!q.multi) selected = selected.slice(0, 1);
+    const other = String((others && others[q.id]) || '').trim();
+    if (other.length > 2000) return { error: '« ' + q.header + ' » : 2 000 caractères au plus' };
+    if (selected.length || other) answers.push({ questionId: q.id, selected, other: other || null }); else missing.push(q.header);
+  }
+  if (!answers.length) return { error: 'Réponds à au moins une question' };
+  const dec = f.questions.find(q => q.required);
+  if (dec) {
+    const a = answers.find(x => x.questionId === dec.id);
+    if (!a || a.selected.length !== 1) return { error: 'Choisis la décision : ' + dec.options.map(o => o.label).join(' / ') };
+    if (card.flavor === 'validation' && a.selected[0] === 'non' && !a.other) return { error: '« Ne pas faire » demande un motif : il est dit au demandeur' };
+  }
+  return { answers, missing };
+}
+const cardsOn = () => !!(runData && runData.cardsToken === 'ok');
+const cardsFor = hd => cardsOn() ? (runData.cards || []).filter(c => String(c.hd) === String(hd)) : [];
+let cardUi = { key: null, picks: {}, others: {}, busy: false };
+let cardFresh = null;   // demande dont les cartes ont été relues à l'instant pour l'affichage
+// Avant de proposer une carte, la relire dans le ticket : elle a pu être répondue ou remplacée depuis le dernier relevé.
+async function refreshCards(it, hd) {
+  if (cardFresh === hd) return;
+  cardFresh = hd;
+  try {
+    const r = await (await fetch('/api/launcher/cards?hd=' + encodeURIComponent(hd), { cache:'no-store' })).json();
+    if (!runData || !Array.isArray(r.cards)) return;
+    const fresh = r.cards.map(c => ({ hd, title: r.title || null, ...c }));
+    const before = JSON.stringify(cardsFor(hd).map(c => c.id));
+    runData.cards = (runData.cards || []).filter(c => String(c.hd) !== hd).concat(fresh);
+    if (before !== JSON.stringify(fresh.map(c => c.id))) { renderList(); if (orderUi.key === it.key) renderOrders(it); }
+  } catch {}
+}
+function renderCard(box, it, card) {
+  const f = cardForm(card), hd = String(it.run.hd), key = hd + ':' + f.id;
+  if (cardUi.key !== key) cardUi = { key, picks: {}, others: {}, busy: false };
+  const c = el('div', 'dlg qcard');
+  const since = card.postedAt ? Date.parse(String(card.postedAt).replace(/Z?$/, 'Z')) : 0;
+  c.append(el('div', 'tabs', f.title + (card.addressee ? ' · ' + card.addressee : '') + (since ? ' · posée il y a ' + ago(Date.now() - since) : '')));
+  for (const q of f.questions) {
+    const blk = el('div', 'qblock');
+    blk.append(el('div', 'q', q.header + ' — ' + q.question));
+    if (q.options.length) {
+      const os = el('div', 'opts');
+      for (const o of q.options) {
+        const on = (cardUi.picks[q.id] || []).includes(o.id);
+        const b = el('button', 'opt' + (on ? ' sel' : '')); b.type = 'button'; b.disabled = cardUi.busy;
+        b.append(el('span', 'n', on ? '✔' : (q.options.indexOf(o) + 1) + '.'), el('span', null, o.label + (o.recommended ? ' (recommandé)' : '')));
+        if (o.description) b.append(el('span', 'd', o.description));
+        b.onclick = () => {
+          const cur = cardUi.picks[q.id] || [];
+          cardUi.picks[q.id] = on ? cur.filter(v => v !== o.id) : q.multi ? cur.concat(o.id) : [o.id];
+          orderUi.result = null; renderOrders(it);
+        };
+        os.append(b);
+      }
+      blk.append(os);
+      if (q.multi) blk.append(el('div', 'hint', 'Plusieurs réponses possibles.'));
+    }
+    const row = el('div', 'row'); const ta = el('textarea'); ta.rows = q.open ? 2 : 1; ta.maxLength = 2000; ta.value = cardUi.others[q.id] || ''; ta.disabled = cardUi.busy;
+    ta.placeholder = q.open ? 'Ta réponse…' : q.required ? 'Consigne pour le développement (Lancer), ou motif (Ne pas faire : obligatoire, dit au demandeur)' : 'Autre réponse, ou une précision (facultatif)';
+    ta.oninput = () => { cardUi.others[q.id] = ta.value; };
+    row.append(ta); blk.append(row);
+    c.append(blk);
+  }
+  const a = el('div', 'row');
+  const go = el('button', 'primary', 'Envoyer les réponses'); go.disabled = cardUi.busy || !canWrite;
+  go.onclick = () => sendCard(it, card);
+  a.append(go); c.append(a);
+  c.append(el('div', 'hint', 'La réponse part dans le ticket sous ton nom, comme un clic sur la carte, et la carte se ferme : une question laissée vide reste sans réponse.'
+    + (f.neighbours ? ' ' + plural(f.neighbours, 'autre carte reste ouverte', 'autres cartes restent ouvertes') + ' sous la même note.' : '')));
+  box.append(c);
+}
+async function sendCard(it, card) {
+  if (!canWrite || cardUi.busy) return;
+  const hd = String(it.run.hd), key = it.key;
+  const body = cardAnswers(card, cardUi.picks, cardUi.others);
+  if (body.error) { orderUi.result = { ok: false, text: '⛔ ' + body.error }; renderOrders(it); return; }
+  cardUi.busy = true; orderUi.result = null; renderOrders(it);
+  let res, done = false;
+  try {
+    const r = await fetch('/api/launcher/answer', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ hd, card: String(card.id), answers: body.answers }) });
+    const j = await r.json().catch(() => ({}));
+    done = !!(r.ok && (j.ok === true || j.gone));
+    res = r.ok && j.ok === true ? { ok: true, text: '✅ Réponse enregistrée dans HD-' + hd + (body.missing.length ? ' — sans réponse : ' + body.missing.join(', ') : '') + '. Le lanceur la lit à sa prochaine passe.' }
+      : { ok: false, text: '⛔ ' + (j.error || 'réponse refusée (' + r.status + ')') };
+  } catch { res = { ok: false, text: '⛔ serveur injoignable' }; }
+  cardUi.busy = false;
+  if (done && runData) { runData.cards = (runData.cards || []).filter(c => !(String(c.hd) === hd && String(c.id) === String(card.id))); cardUi = { key: null, picks: {}, others: {}, busy: false }; renderList(); }
+  say(res.text.split('\n')[0]);
+  if (orderUi.key !== key) return;
+  orderUi.result = res; renderOrders(it); setTimeout(loadRuns, 3000);
+}
 const ORDER_FR = { go:'▶ Feu vert (go)', merge:'🚀 Livrer la PR', review:'🔎 Relire la PR', 'recette-skip':'⏭ Sauter la recette', rework:'🔁 Reprendre la PR',
   adopt:'🔎 Relire les commits ajoutés, puis livrer', retry:'↻ Relancer la livraison', session:'🧑‍💻 Reprendre en session' };
 // Livraison refusée (lot 1 des livraisons refusées) : la NATURE du refus, publiée par le
@@ -1319,11 +1455,17 @@ function renderOrders(it) {
   box.replaceChildren();
   if (r.running) return;
   const stage = it.wait ? it.wait.stage : null, pr = it.pr;
-  const dec = decisionOf(hd);
+  // Cartes de questions (jeton rangé) : elles portent AUSSI la décision ✅ — l'ancien formulaire ne sert plus que sans elles.
+  const cards = cardsFor(hd);
+  if (cards.length) refreshCards(it, hd);
+  const dec = cardsOn() ? null : decisionOf(hd);
   // Une décision en attente remplace le go nu : « Lancer » de la carte part avec ses choix et laisse la trace.
-  const list = deliveryOrders(runOrders(r.phase, stage, pr).filter(o => !(dec && o === 'go')), it.wait ? it.wait.refusalKind : null);
-  if (!list.length && !dec) return;
+  const list = deliveryOrders(runOrders(r.phase, stage, pr).filter(o => !((dec || cards.some(c => c.kind === 'validation')) && o === 'go')), it.wait ? it.wait.refusalKind : null);
+  const noToken = !!(runData && runData.cardsToken === 'absent' && (r.files || []).some(f => f.name === 'questions.json'));
+  if (!list.length && !dec && !cards.length && !noToken) return;
   box.append(el('h2', null, 'Piloter HD-' + hd));
+  for (const c of cards) renderCard(box, it, c);
+  if (noToken) box.append(el('div', 'meta', 'Ce run a posé des questions : pour y répondre ici, range le jeton des cartes sur ce poste. En attendant, elles se traitent dans le ticket.'));
   if (dec) renderDecision(box, it, dec);
   const row = el('div', 'actions');
   for (const o of list) {
@@ -1365,6 +1507,7 @@ function renderOrders(it) {
     const a = el('div', 'actions'); a.append(ok, cancel); f.append(a);
     box.append(f);
   }
+  if (cardUi.busy) box.append(el('div', 'meta', 'Réponse en cours d’envoi…'));
   if (orderUi.busy) box.append(el('div', 'meta', 'Ordre en cours de transmission au lanceur…'));
   else if (orderUi.result) box.append(el('pre', 'orderres ' + (orderUi.result.ok ? 'ok' : 'ko'), orderUi.result.text));
 }
