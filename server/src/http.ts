@@ -26,6 +26,7 @@ import { readTranscript } from './transcript.ts';
 import { upload } from './upload.ts';
 import { addContent, exists, GUID, ieq, nowMs, psArray, psIntZero, psString, psTruthy, sleep, tryParseInt, tryParseUInt } from './util.ts';
 import { Watch } from './watch.ts';
+import { setPhase } from './stall.ts';
 import { DeliveryKick, linkedPending, type KickSession, type KickSummary } from './teams-kick.ts';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -151,6 +152,9 @@ export class Server {
   #wake: (() => void) | null = null;
   #dirty = false;
   readonly #kick = new DeliveryKick();
+  #firstState!: () => void;
+  /** Résolue au premier état calculé par la boucle (trace de démarrage). */
+  readonly firstState = new Promise<void>((ok) => { this.#firstState = ok; });
   #stopping = false;
   #draining = false;
   #inflight = 0;
@@ -177,6 +181,7 @@ export class Server {
         // Arrêt en cours : refus net, que la page sait lire (bandeau de reconnexion) — jamais une requête acceptée puis coupée.
         if (this.#draining) { req.resume(); res.setHeader('Connection', 'close'); json(res, 503, { error: withLang(langOf(req.headers['x-sd-lang']), () => T("serveur en cours d'arrêt", 'server is shutting down')) }); return; }
         this.#inflight++; res.once('close', () => { this.#inflight--; });
+        setPhase('requête');
         withLang(langOf(req.headers['x-sd-lang']), () => this.#handle(req, res)).catch((e) => { this.logError(`${req.url} : ${(e as Error).message}`); reply(res, 500, null, ''); });
       });
       s.keepAliveTimeout = 5000;
@@ -400,10 +405,12 @@ export class Server {
       if (this.#dirty || now - lastState >= 1000) {
         lastState = now;
         try {
+          setPhase('état');
           const st = await this.d.state();
           this.#state = Buffer.from(JSON.stringify({ ...st, server: { boot: BOOT, page: this.#pageVersion(), relay: this.cfg.primary ? this.relayHealth() : null } })); this.beat();
+          this.#firstState();
           if (!this.cfg.noBackground && now - lastWatch >= 2000) {
-            lastWatch = now;
+            lastWatch = now; setPhase('veille');
             try { await this.watch.tick(st as never); } catch { /* idem */ }
             try { this.#kickTeams(st as { sessions?: KickSession[]; teams?: unknown }, now); } catch { /* idem */ }
             if (this.cfg.primary) this.search.maybeIndex();
@@ -413,9 +420,9 @@ export class Server {
           }
         } catch (e) { this.logError(`état : ${(e as Error).message}`); }
       }
-      if (this.#dirty || now - lastClosed >= 15000) { lastClosed = now; try { this.#closed = Buffer.from(JSON.stringify(await this.d.closed())); } catch { /* idem */ } }
+      if (this.#dirty || now - lastClosed >= 15000) { lastClosed = now; setPhase('fermées'); try { this.#closed = Buffer.from(JSON.stringify(await this.d.closed())); } catch { /* idem */ } }
       this.#dirty = false;
-      this.beat();
+      this.beat(); setPhase('attente');
       const item = this.#queue.shift() ?? await new Promise<Queued | undefined>((ok) => {
         const t = setTimeout(() => { this.#wake = null; ok(undefined); }, 500);
         this.#wake = () => { clearTimeout(t); this.#wake = null; ok(this.#queue.shift()); };
