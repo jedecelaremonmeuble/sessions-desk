@@ -25,6 +25,8 @@ read their screen and conversation, and lets you answer them — from one browse
   a lasting setting. A mistyped command is refused instead of running its closest match.
 - **Model for one session** — switch the model of a running session without touching the default for the next
   ones: the server drives the `/model` menu of the terminal and picks "this session only".
+- **Terminal menus** — a menu left open in the terminal (`/mcp`, `/permissions`, `/config`…) is shown in the page
+  with a key pad (arrows, Enter, Tab, Space, Backspace, Esc) and a text field, so it can be driven from a phone.
 - **Start, fork, reopen, close** — new session in a folder or in a fresh git worktree, a fork of an existing
   session, reopen a closed one, close the ones whose work is merged.
 - **Find** — full-text search across conversations, favourites, hide, tags.

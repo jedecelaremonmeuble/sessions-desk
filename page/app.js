@@ -2512,7 +2512,7 @@ function slashNotes(st, busy, many) {
   if (!st || st.token.length < 2) return [];
   if (!st.cmd) return st.typing && st.items.length ? [] : [T('commande absente de la liste : elle sera refusée (faute de frappe ?) — tu pourras l’envoyer quand même', 'command not in the list: it will be refused (typo?) — you will be able to send it anyway')];
   const c = st.cmd, dialog = c.dialog === 'always' || (c.dialog === 'bare' && !st.args), out = [];
-  if (dialog) out.push(many ? T('ouvre un menu dans le terminal : refusée en message groupé', 'opens a menu in the terminal: refused in a grouped message') : T('ouvre un menu dans le terminal de la session', 'opens a menu in the session terminal'));
+  if (dialog) out.push(many ? T('ouvre un menu dans le terminal : refusée en message groupé', 'opens a menu in the terminal: refused in a grouped message') : T('ouvre un menu dans le terminal : il se pilote ensuite ici, au pavé de touches', 'opens a menu in the terminal: you then drive it here, with the key pad'));
   if (c.risky) out.push(many ? T('ne se rattrape pas : refusée en message groupé', 'cannot be undone: refused in a grouped message') : T('ne se rattrape pas', 'cannot be undone'));
   if (c.persist && st.args) out.push(T('change aussi le réglage par défaut des prochaines sessions', 'also changes the default for future sessions'));
   if (busy && !c.immediate) out.push(T('session au travail : exécutée à la fin du tour', 'session working: runs at the end of the turn'));
@@ -3132,7 +3132,7 @@ function renderDetail(force) {
     $('sendbtn').textContent = queue ? T('Mettre en file', 'Queue') : T('Envoyer', 'Send');
     inp.placeholder = queue ? T('La session travaille : ton message sera mis en file  ( r )  — Entrée pour l’ajouter · Maj+Entrée : à la ligne', 'The session is working: your message will be queued  ( r )  — Enter to add it · Shift+Enter: new line')
       : can ? (suggestKey === it.key && suggestion ? T('Tab : reprendre la proposition ci-dessus · ', 'Tab: take the suggestion above · ') : '') + T('Répondre à cette session…  ( r )  — Entrée pour envoyer · Maj+Entrée : à la ligne', 'Reply to this session…  ( r )  — Enter to send · Shift+Enter: new line')
-      : T('Réponse impossible : la session ' + (it.status === 'waiting' ? 'attend la réponse à un dialogue — utilise le panneau « Dialogue en attente » ou son onglet' : 'n’a pas d’invite libre'), 'Cannot reply: the session ' + (it.status === 'waiting' ? 'is waiting for the answer to a dialog — use the "Pending dialog" panel or its tab' : 'has no free prompt'));
+      : T('Réponse impossible : la session ' + (it.status === 'waiting' ? 'attend la réponse à un dialogue — réponds-y dans le panneau au-dessus (dialogue ou menu) ou dans son onglet' : 'n’a pas d’invite libre'), 'Cannot reply: the session ' + (it.status === 'waiting' ? 'is waiting for the answer to a dialog — answer it in the panel above (dialog or menu) or in its tab' : 'has no free prompt'));
     $('sendhint').textContent = queue ? T('Tapé dans l’invite de la session pendant qu’elle travaille : Claude Code le met en file et le prend dès qu’il peut (comme dans le terminal). Seulement si son invite est vide — les retours à la ligne y deviennent des espaces.', 'Typed into the session prompt while it works: Claude Code queues it and takes it as soon as it can (as in the terminal). Only if its prompt is empty — line breaks become spaces.')
       : can ? T('Tapé dans le terminal de la session, seulement si son invite est vide — les retours à la ligne y deviennent des espaces.', 'Typed into the session terminal, only if its prompt is empty — line breaks become spaces.') : '';
   }
@@ -3227,7 +3227,7 @@ const SEP = /^[─━═-]{8,}$/;
 function parseDialog(text) {
   const L = text.split('\n').map(s => s.replace(/^\s*│ ?/, '').replace(/\s*│\s*$/, ''));
   let end = L.length;
-  for (let i = L.length - 1; i >= Math.max(0, L.length - 14); i--) if (/enter to (select|confirm|submit)|esc to (cancel|exit|go back)|to navigate/i.test(L[i])) { end = i; break; }
+  for (let i = L.length - 1; i >= Math.max(0, L.length - 14); i--) if (/enter to (select|confirm|submit|view)|esc to (cancel|exit|go back|close)|to navigate/i.test(L[i])) { end = i; break; }
   const opts = []; let first = -1, submit = false;
   for (let i = Math.max(0, end - 45); i < end; i++) {
     const m = L[i].match(/^\s*(❯\s*)?(\d{1,2})\.\s+(.*\S)\s*$/);
@@ -3250,6 +3250,39 @@ function parseDialog(text) {
     q.unshift(t); if (q.length >= 8) break;
   }
   return { opts, q: q.join('\n'), tabs, submit, multi: opts.some(o => /^\[[ ✔xX]\]/.test(o.label)), foot: end < L.length ? L[end].trim() : '' };
+}
+// MENU SANS OPTIONS NUMÉROTÉES (/mcp, /permissions, /config…) : rien à cliquer par son chiffre, mais le pied du dialogue
+// (« ↑/↓ to navigate · Enter to view · Esc to close ») dit qu'il attend des touches. On rend ce que le terminal affiche
+// depuis le trait qui ouvre le menu jusqu'au pied : le pavé de touches se lit alors sans l'écran complet (téléphone,
+// vue « conversation »). Le pied sert de repère : le serveur le retrouve à l'écran avant chaque touche.
+function parseKeyMenu(text) {
+  const L = text.split('\n');
+  let foot = -1;
+  for (let i = L.length - 1; i >= Math.max(0, L.length - 14); i--) if (/enter to (select|confirm|submit|view)|esc to (cancel|exit|go back|close)|to navigate/i.test(L[i])) { foot = i; break; }
+  if (foot < 0) return null;
+  let start = foot;
+  for (let i = foot - 1; i >= Math.max(0, foot - 60); i--) { if (/^\s*[▔─━═]{8,}\s*$/.test(L[i])) break; start = i; }
+  const body = L.slice(start, foot).map(l => l.trimEnd()); while (body.length && !body[0].trim()) body.shift(); while (body.length && !body[body.length - 1].trim()) body.pop();
+  return { body: body.join('\n'), foot: L[foot].trim() };
+}
+const MENU_KEYS = () => [['Up', '↑', T('Monter', 'Up')], ['Down', '↓', T('Descendre', 'Down')], ['Left', '←', T('Onglet ou choix précédent', 'Previous tab or choice')], ['Right', '→', T('Onglet ou choix suivant', 'Next tab or choice')],
+  ['Enter', T('Entrée', 'Enter'), T('Valider la ligne', 'Confirm the line')], ['Tab', 'Tab', T('Champ suivant', 'Next field')], ['Space', T('Espace', 'Space'), T('Cocher / décocher', 'Check / uncheck')],
+  ['Backspace', '⌫', T('Effacer un caractère', 'Erase one character')], ['Esc', T('Échap', 'Esc'), T('Revenir en arrière, ou fermer le menu', 'Go back, or close the menu')]];
+function renderKeyMenu(it, box, m) {
+  box.append(el('h2', null, T('Menu ouvert dans le terminal — pilote-le ici', 'Menu open in the terminal — drive it here')));
+  const c = el('div', 'dlg');
+  if (m.body) c.append(el('pre', 'menu', m.body));
+  const kr = el('div', 'row keys pad');
+  for (const [k, t, h] of MENU_KEYS()) { const b = el('button', k === 'Esc' ? 'esc' : null, t); b.title = h; b.onclick = () => sendKeys(it, [{ k }], m.foot, t); kr.append(b); }
+  c.append(kr);
+  const row = el('div', 'row'); const inp = el('input'); inp.type = 'text'; inp.maxLength = 400; inp.autocapitalize = 'off'; inp.autocomplete = 'off'; inp.spellcheck = false;
+  inp.placeholder = T('Texte à taper dans le menu (recherche, règle…) — Entrée pour le taper', 'Text to type into the menu (search, rule…) — Enter to type it');
+  const go = el('button', null, T('Taper', 'Type'));
+  const fire = () => { const v = inp.value; if (!v.trim()) return; inp.value = ''; inp.blur(); sendKeys(it, [{ t: v }], m.foot, T('texte tapé', 'text typed')); };
+  go.onclick = fire; inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); fire(); } else if (e.key === 'Escape') inp.blur(); };
+  row.append(inp, go); c.append(row);
+  c.append(el('div', 'hint', T('Dans le terminal : ', 'In the terminal: ') + m.foot + '. ' + T('Chaque touche est tapée dans le terminal de la session ; ce pied de menu est revérifié à l’écran juste avant. Le texte est tapé tel quel, sans Entrée. Tant que le menu est ouvert, la session ne reçoit aucun message : Échap le referme.', 'Each key is typed into the session terminal; this menu footer is checked again on the screen just before. The text is typed as is, without Enter. While the menu is open the session receives no message: Esc closes it.')));
+  box.append(c);
 }
 function renderStuckPrompt(it, box, draft) {
   const sig = 'stuck:' + draft;
@@ -3288,11 +3321,13 @@ function renderDialog(it, text, draft) {
   if (!d && free && draft == null) { const x = parseDialog(text); if (x && x.foot) d = x; }
   const stuck = !d && free && draft ? draft : null;
   if (stuck) { renderStuckPrompt(it, box, stuck); return; }
-  const sig = d ? JSON.stringify(d) : '';
+  const menu = !d && (it.status === 'waiting' || (free && draft == null)) ? parseKeyMenu(text) : null;
+  const sig = d ? JSON.stringify(d) : menu ? 'menu:' + JSON.stringify(menu) : '';
   if (sig === lastDialogSig && box.dataset.pid === String(it.pid)) return;
   // Ne pas écraser une saisie en cours dans le panneau.
   const act = document.activeElement; if (act && (act.tagName === 'INPUT' || act.tagName === 'TEXTAREA') && box.contains(act) && act.value) return;
   lastDialogSig = sig; box.dataset.pid = it.pid; box.replaceChildren();
+  if (menu) { renderKeyMenu(it, box, menu); return; }
   if (!d) return;
   box.append(el('h2', null, T('Dialogue en attente — réponds ici', 'Pending dialog — answer here')));
   const c = el('div', 'dlg');
