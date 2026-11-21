@@ -47,14 +47,14 @@ describe('slashNotes', () => {
     expect(slashNotes(null, false, false)).toEqual([]); expect(notes('/')).toEqual([]); expect(notes('/compact')).toEqual([]);
   });
   test('menu dans le terminal : sans argument seulement pour /mcp, toujours pour /memory', () => {
-    expect(notes('/mcp')).toEqual(['ouvre un menu dans le terminal de la session']);
+    expect(notes('/mcp')).toEqual(['ouvre un menu dans le terminal : il se pilote ensuite ici, au pavé de touches']);
     expect(notes('/mcp reconnect all')).toEqual([]);
-    expect(notes('/memory x')).toEqual(['ouvre un menu dans le terminal de la session']);
+    expect(notes('/memory x')).toEqual(['ouvre un menu dans le terminal : il se pilote ensuite ici, au pavé de touches']);
   });
   test('ne se rattrape pas ; réglage durable seulement avec un argument', () => {
     expect(notes('/clear')).toEqual(['ne se rattrape pas']);
     expect(notes('/model opus')).toEqual(['change aussi le réglage par défaut des prochaines sessions']);
-    expect(notes('/model')).toEqual(['ouvre un menu dans le terminal de la session']);
+    expect(notes('/model')).toEqual(['ouvre un menu dans le terminal : il se pilote ensuite ici, au pavé de touches']);
   });
   test('session au travail : en file, sauf commande à effet immédiat', () => {
     expect(notes('/compact', true)).toEqual(['session au travail : exécutée à la fin du tour']);
