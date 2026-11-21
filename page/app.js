@@ -3252,13 +3252,19 @@ function renderOverview() {
 // permission, menu. On le lit sur l'écran (options « N. libellé » au-dessus du pied « Enter to select · Esc to
 // cancel ») et on propose de cliquer l'option : la page tape son chiffre dans la console. Le clavier ci-dessous
 // couvre le reste (cases à cocher, onglets de questions, « Submit »), l'écran du terminal montre le résultat.
-const SEP = /^[─━═-]{8,}$/;
+// QUESTION AVEC APERÇU : chaque option porte une maquette, dessinée dans un cadre À DROITE de la liste. Deux effets.
+// Le cadre partage les lignes des options (« 1. libellé     ┌────┐ ») : on coupe la ligne au cadre, sinon il finit
+// dans le libellé. Et ce dialogue-là N'ÉCOUTE PAS LES CHIFFRES (son pied : « Enter to select · ↑/↓ to navigate · n to
+// add notes ») : `preview` le signale, l'option se choisit alors aux flèches depuis le curseur, puis Entrée.
+const SEP = /^[─━═-]{8,}$/, BOX = /\s+[┌╭│└╰├].*$/;
 function parseDialog(text) {
-  const L = text.split('\n').map(s => s.replace(/^\s*│ ?/, '').replace(/\s*│\s*$/, ''));
+  const R = text.split('\n'), L = R.map(s => s.replace(/^\s*│ ?/, '').replace(/\s*│\s*$/, ''));
   let end = L.length;
   for (let i = L.length - 1; i >= Math.max(0, L.length - 14); i--) if (/enter to (select|confirm|submit|view)|esc to (cancel|exit|go back|close)|to navigate/i.test(L[i])) { end = i; break; }
-  const opts = []; let first = -1, submit = false;
+  const opts = []; let first = -1, submit = false, preview = false;
   for (let i = Math.max(0, end - 45); i < end; i++) {
+    if (opts.length && (/^\s{4,}[┌╭│└╰├]/.test(R[i]) || /^\s*Notes: press n\b/.test(R[i]))) { preview = true; continue; }   // cadre seul, pied de l'aperçu
+    if (/\S\s+[┌╭│└╰├]/.test(R[i]) && !/^\s*│/.test(R[i])) { L[i] = R[i].replace(BOX, ''); preview = true; }
     const m = L[i].match(/^\s*(❯\s*)?(\d{1,2})\.\s+(.*\S)\s*$/);
     if (m) {
       const num = +m[2];
@@ -3278,7 +3284,7 @@ function parseDialog(text) {
     if (/[☐☒✔]/.test(t) && /submit|→|←/i.test(t)) { tabs = t; break; }
     q.unshift(t); if (q.length >= 8) break;
   }
-  return { opts, q: q.join('\n'), tabs, submit, multi: opts.some(o => /^\[[ ✔xX]\]/.test(o.label)), foot: end < L.length ? L[end].trim() : '' };
+  return { opts, q: q.join('\n'), tabs, submit, preview, multi: opts.some(o => /^\[[ ✔xX]\]/.test(o.label)), foot: end < L.length ? L[end].trim() : '' };
 }
 // MENU SANS OPTIONS NUMÉROTÉES (/mcp, /permissions, /config…) : rien à cliquer par son chiffre, mais le pied du dialogue
 // (« ↑/↓ to navigate · Enter to view · Esc to close ») dit qu'il attend des touches. On rend ce que le terminal affiche
@@ -3363,12 +3369,17 @@ function renderDialog(it, text, draft) {
   if (d.tabs) c.append(el('div', 'tabs', d.tabs));
   if (d.q) c.append(el('div', 'q', d.q));
   const os = el('div', 'opts'); let other = null;
+  // Touches qui AMÈNENT sur une option : son chiffre, ou — question avec aperçu, sourde aux chiffres — les flèches
+  // depuis le curseur. Le chiffre valide tout seul ; après les flèches il faut Entrée.
+  const at = d.opts.findIndex(o => o.sel), arrows = d.preview && at >= 0;
+  const reach = o => arrows ? Array.from({ length: Math.abs(o.num - 1 - at) }, () => ({ k: o.num - 1 > at ? 'Down' : 'Up' })) : [{ t: String(o.num) }];
   for (const o of d.opts) {
     const b = el('button', 'opt' + (o.sel ? ' sel' : '')); b.append(el('span', 'n', o.num + '.'), el('span', null, o.label));
     if (o.desc.length) b.append(el('span', 'd', o.desc.join(' ')));
-    b.title = T('Tape « ' + o.num + ' » dans le terminal  ( touche ' + o.num + ' )', 'Types "' + o.num + '" into the terminal  ( key ' + o.num + ' )');
+    b.title = arrows ? T('Amène le curseur sur l’option ' + o.num + ' puis Entrée, dans le terminal  ( touche ' + o.num + ' )', 'Moves the cursor to option ' + o.num + ' then Enter, in the terminal  ( key ' + o.num + ' )')
+      : T('Tape « ' + o.num + ' » dans le terminal  ( touche ' + o.num + ' )', 'Types "' + o.num + '" into the terminal  ( key ' + o.num + ' )');
     if (!d.multi && /^(type something|other|autre)/i.test(o.label)) other = o;
-    b.onclick = () => sendKeys(it, [{ t: String(o.num) }], o.expect, T('option ' + o.num + ' « ' + o.label + ' »', 'option ' + o.num + ' "' + o.label + '"'));
+    b.onclick = () => sendKeys(it, arrows ? reach(o).concat([{ k: 'Enter' }]) : reach(o), o.expect, T('option ' + o.num + ' « ' + o.label + ' »', 'option ' + o.num + ' "' + o.label + '"'));
     os.append(b);
   }
   c.append(os);
@@ -3384,7 +3395,7 @@ function renderDialog(it, text, draft) {
   if (other) {
     const row = el('div', 'row'); const inp = promptArea('dlgother'); inp.placeholder = T('Ta réponse libre (option ' + other.num + ')… — Entrée pour envoyer · Maj+Entrée : à la ligne', 'Your free answer (option ' + other.num + ')… — Enter to send · Shift+Enter: new line'); inp.maxLength = 4000;
     const go = el('button', 'primary', T('Envoyer la réponse libre', 'Send the free answer'));
-    const fire = () => { const v = inp.value.trim(); if (!v) return; inp.value = ''; growArea(inp); inp.blur(); sendKeys(it, [{ t: String(other.num) }, { t: v }, { k: 'Enter' }], other.expect, T('réponse libre', 'free answer')); };
+    const fire = () => { const v = inp.value.trim(); if (!v) return; inp.value = ''; growArea(inp); inp.blur(); sendKeys(it, reach(other).concat([{ t: v }, { k: 'Enter' }]), other.expect, T('réponse libre', 'free answer')); };
     go.onclick = fire; inp.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fire(); } else if (e.key === 'Escape') inp.blur(); };
     row.append(inp, go); c.append(row);
   }
