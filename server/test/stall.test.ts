@@ -47,6 +47,8 @@ test('gel par CALCUL puis gel par ATTENTE : vus du fil de travail, avec la phase
   expect(log).toMatch(/boucle toujours figée depuis \d+ ms \(phase état\)/);   // un gel qui dure est re-signalé
   expect(log).toMatch(/débloquée après \d+ ms \(phase état\) : CPU \d+ ms sur \d+ ms, le serveur calculait/);
   expect(log).toMatch(/débloquée après \d+ ms \(phase index\) : CPU \d+ ms sur \d+ ms, le serveur attendait/);
+  // La fenêtre de mesure du CPU couvre TOUT le gel : un repère pris pendant le gel la raccourcirait.
+  for (const m of log.matchAll(/débloquée après (\d+) ms .* sur (\d+) ms/g)) expect(Number(m[2])).toBeGreaterThanOrEqual(Number(m[1]) * 0.9);
 }, 20000);
 
 test('boucle libre : aucune ligne', async () => {
