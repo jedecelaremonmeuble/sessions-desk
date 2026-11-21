@@ -100,8 +100,13 @@ main { --mp-t:22px; --mp-x:28px; overflow-y:auto; padding:var(--mp-t) var(--mp-x
 /* Détail d'une session : le nom et l'état (« ✻ Pondering… ») restent en haut quand on fait défiler. Le bandeau
    déborde sur la marge de main pour que rien ne passe au-dessus ni sur les côtés. */
 #dstick { position:sticky; top:calc(-1 * var(--mp-t)); z-index:5; margin:calc(-1 * var(--mp-t)) calc(-1 * var(--mp-x)) 0;
-  padding:var(--mp-t) var(--mp-x) 8px; background:var(--bg); border-bottom:1px solid transparent; }
+  padding:var(--mp-t) var(--mp-x) 6px; background:var(--bg); border-bottom:1px solid transparent;
+  display:flex; align-items:center; gap:4px 14px; }
 #dstick.stuck { border-bottom-color:var(--line); }
+/* Une seule ligne. Fenêtre étroite : les deux se resserrent, l'état plus vite (les tokens partent en premier),
+   le nom est tronqué et reste complet au survol. */
+#dstick .dtitle { flex:0 1 auto; min-width:0; margin:0; font-size:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#dstick .sline { flex:0 3 auto; min-width:0; overflow:hidden; display:flex; align-items:center; gap:6px; white-space:nowrap; }
 .dtitle { font-size:20px; font-weight:600; margin:0 0 4px; overflow-wrap:anywhere; }
 .chip { display:inline-flex; align-items:center; gap:6px; color:var(--c); font-weight:600; }
 .meta { color:var(--mute); font-size:12px; margin-top:4px; overflow-wrap:anywhere; } a { color:var(--shell); }
@@ -343,6 +348,8 @@ h2.viewtabs { display:flex; gap:4px; } .viewtabs .vtab { font:inherit; text-tran
   input, select, textarea, #q { font-size:16px !important; }
   button { min-height:36px; }
   .dtitle { font-size:18px; }
+  /* Téléphone : le nom est déjà dans la barre du haut, le bandeau collant ne garde que l'état. */
+  #dstick .dtitle { display:none; } #dstick { padding-bottom:4px; } #dstick .sline { flex-wrap:wrap; white-space:normal; }
   .actions button { flex:1 1 auto; }
   .sendbox input, .sendbox textarea { min-width:0; flex-basis:100%; } .sendbox > button.primary { flex:1; }
   .suggest .stext, .dlg .row input, .dlg .row textarea { min-width:0; flex-basis:100%; }
