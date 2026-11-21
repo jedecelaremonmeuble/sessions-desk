@@ -9,6 +9,7 @@ import { launchMs, readClaudeUsage, readUsageRaw, roundHalfEven } from './usage.
 import { exists, isDir, leaf, netTrim, nowMs, psString, readJson, setContent, splitPathParent } from './util.ts';
 import { ntfsSort } from './state.ts';
 import { T } from './i18n.ts';
+import { runLive } from './run-live.ts';
 
 type Obj = Record<string, unknown>;
 const FILE_EXT = ['.md', '.html', '.json', '.png', '.patch', '.diff', '.txt', '.sql', '.log'];
@@ -281,7 +282,9 @@ export class Launcher {
         runs.push({ hd, title: titles.get(hd) ?? null, phase, at, dir: d.full.slice(this.runs.length + 1),
           running: !!lv, pid: lv?.pid ?? null, liveSessionId: os?.sessionId ?? null, tokens: os?.tokens ?? null, model: os?.model ?? null, reply: os ? os.reply ?? null : null,
           outcome: info?.outcome ?? null, verdict: info?.verdict ?? null, detail: info?.detail ?? null, minutes: info?.minutes ?? null, costUsd: info?.costUsd ?? null, turns: info?.turns ?? null,
-          sessionId: sid, files, stage });
+          sessionId: sid, files, stage,
+          // Run en cours : ce qu'il fait maintenant, lu dans son transcript (pas d'écran à lire pour un claude -p).
+          live: lv ? runLive(join(d.full, 'transcript.jsonl')) : null });
       }
     }
     runs.sort((a, b) => (b.at as number) - (a.at as number));
