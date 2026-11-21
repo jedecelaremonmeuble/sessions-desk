@@ -2411,21 +2411,23 @@ function lineKeys(e) {
   if (!ok) { t.setRangeText(r.insert, r.from, r.to, 'end'); t.dispatchEvent(new Event('input')); }
 }
 function withAttachments(key, text) {
-  const refs = attList(key).filter(a => a.path).map(a => (a.img ? 'Capture' : 'Fichier') + ' : "' + a.path + '"');
+  const refs = attList(key).filter(a => a.path).map(a => (a.pasted ? 'Texte collé (' + a.pasted + (a.pasted > 1 ? ' lignes' : ' ligne') + ')' : a.img ? 'Capture' : 'Fichier') + ' : "' + a.path + '"');
   return [text.trim(), ...refs].filter(Boolean).join(' ');
 }
 function clearAttachments(key) { for (const a of attList(key)) if (a.url) URL.revokeObjectURL(a.url); attachSets[key] = []; refreshAttach(key); }
-async function uploadFile(key, file) {
+async function uploadFile(key, file, pasted = 0) {
   if (!canWrite) return say(T('lecture seule à distance', 'read-only remotely'));
   if (file.size > ATT_MAX) return say(T('« ' + file.name + ' » non joint : trop gros (20 Mo au plus)', '"' + file.name + '" not attached: too big (20 MB max)'));
   const img = /^image\//.test(file.type);
-  const a = { name: file.name || (img ? 'capture.png' : 'fichier'), img, size: file.size, url: img ? URL.createObjectURL(file) : null, path: null };
+  const a = { name: file.name || (img ? 'capture.png' : 'fichier'), img, size: file.size, url: img ? URL.createObjectURL(file) : null, path: null, pasted };
   attList(key).push(a); refreshAttach(key);
   try {
     const r = await fetch('/api/upload', { method:'POST', headers:{ 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(a.name) }, body: file });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.path) throw new Error(j.error || 'code ' + r.status);
-    a.path = j.path; say(T('« ' + a.name + ' » joint', '"' + a.name + '" attached'));
+    a.path = j.path;
+    say(pasted ? T('texte collé joint en fichier (' + plural(pasted, 'ligne', 'lignes') + ') : la session le lira en entier, mise en forme comprise — × pour le retirer', 'pasted text attached as a file (' + plural(pasted, 'line', 'lines') + '): the session will read all of it, formatting included — × to remove it')
+               : T('« ' + a.name + ' » joint', '"' + a.name + '" attached'));
   } catch (e) {
     const l = attList(key), i = l.indexOf(a); if (i >= 0) l.splice(i, 1); if (a.url) URL.revokeObjectURL(a.url);
     say(T('« ' + a.name + ' » non joint : ', '"' + a.name + '" not attached: ') + (e.message || T('échec de la demande', 'request failed')));
@@ -2469,8 +2471,29 @@ document.addEventListener('drop', e => {
   const key = activeAttach(); if (!key) return say(T('ouvre une session (Répondre), une nouvelle session ou le message groupé pour joindre un fichier', 'open a session (Reply), a new session or the group message to attach a file'));
   for (const f of e.dataTransfer.files) uploadFile(key, f);
 });
+// ── Long texte collé ⇒ pièce jointe. Tapé dans la session, un texte part sur UNE ligne (les retours à la ligne
+// deviennent des espaces, sinon Entrée enverrait le message trop tôt), est limité à 4 000 caractères et Claude Code le
+// lit par morceaux de 1 024 qu'il prend chacun pour un collage distinct. En fichier, la session le lit en entier, mise
+// en forme comprise — comme le « [Pasted text #1] » de Claude Code. Calcul PUR (testé) : null = on le colle tel quel. ──
+const PASTE_FILE_CHARS = 1000, PASTE_FILE_LINES = 5;
+function pastedAsFile(text, now) {
+  const t = String(text == null ? '' : text).replace(/\r\n?/g, '\n'), lines = t.replace(/\n+$/, '').split('\n').length;
+  if (!t.trim() || t.length < PASTE_FILE_CHARS && lines < PASTE_FILE_LINES) return null;
+  let json = false; if (/^\s*[{[]/.test(t)) try { JSON.parse(t); json = true; } catch { /* pas du JSON : texte */ }
+  const p = n => String(n).padStart(2, '0');
+  return { name: 'texte-colle-' + p(now.getHours()) + p(now.getMinutes()) + p(now.getSeconds()) + (json ? '.json' : '.txt'), type: json ? 'application/json' : 'text/plain', lines, text: t };
+}
+const PASTE_ZONES = { 'sendtext': 'reply:', 'bc-text': 'bc' };   // zone de saisie → zone de pièces jointes qui la porte
 document.addEventListener('paste', e => {
-  const files = [...((e.clipboardData && e.clipboardData.files) || [])]; if (!files.length) return;
+  const files = [...((e.clipboardData && e.clipboardData.files) || [])];
+  if (!files.length) {
+    const zone = e.target && PASTE_ZONES[e.target.id], key = activeAttach();
+    if (!zone || !key || !key.startsWith(zone)) return;
+    const f = pastedAsFile(e.clipboardData && e.clipboardData.getData('text/plain'), new Date()); if (!f) return;
+    e.preventDefault();                                  // long texte collé : pièce jointe, pas une ligne aplatie et tronquée
+    uploadFile(key, new File([f.text], f.name, { type: f.type }), f.lines);
+    return;
+  }
   const key = activeAttach(); if (!key) return;
   e.preventDefault();                                    // une capture collée devient une pièce jointe, pas du texte
   for (const f of files) uploadFile(key, f);
@@ -2766,7 +2789,7 @@ function renderBc() {
   main.append(el('div', 'dtitle', T('Écrire à plusieurs sessions', 'Write to several sessions')),
               el('div', 'meta', T('Le même message est tapé dans chaque session cochée, comme « Répondre » : seulement si elle est inactive et son invite vide (sinon elle est sautée). Chaque envoi est journalisé.', 'The same message is typed into each ticked session, like "Reply": only if it is idle and its prompt is empty (otherwise it is skipped). Each send is logged.')));
   const f = el('div'); f.id = 'bcform';
-  const tx = promptArea('bc-text'); tx.maxLength = 4000; tx.autocomplete = 'off'; tx.placeholder = T('ex. « rebase sur origin/master et dis-moi où tu en es »', 'e.g. "rebase on origin/master and tell me where you are"');
+  const tx = promptArea('bc-text'); tx.autocomplete = 'off'; tx.placeholder = T('ex. « rebase sur origin/master et dis-moi où tu en es »', 'e.g. "rebase on origin/master and tell me where you are"');
   const list = el('div', 'bclist'); list.id = 'bc-list';
   const quick = el('div', 'actions');
   const qa = el('button', null, T('Toutes', 'All')); qa.onclick = () => { bcEligible().forEach(it => bcPick.add(it.key)); fillBc(); };
@@ -3013,7 +3036,7 @@ function renderDetail(force) {
     if (term) {
       body.append(el('h2', null, T('Répondre', 'Reply')));
       const sg = el('div', 'suggest'); sg.id = 'suggest'; sg.hidden = true; body.append(sg);
-      const box = el('div', 'sendbox'); const inp = promptArea('sendtext'); inp.maxLength = 4000;
+      const box = el('div', 'sendbox'); const inp = promptArea('sendtext');
       inp.dataset.key = it.key; inp.value = draftLoad(sessionStorage, it.key); inp.addEventListener('input', keepDraft);
       const btn = el('button', 'primary', T('Envoyer', 'Send')); btn.id = 'sendbtn'; btn.onclick = () => sendReply();
       box.append(inp, btn);
