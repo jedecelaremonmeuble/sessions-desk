@@ -106,6 +106,7 @@ main { --mp-t:22px; --mp-x:28px; overflow-y:auto; padding:var(--mp-t) var(--mp-x
 .chip { display:inline-flex; align-items:center; gap:6px; color:var(--c); font-weight:600; }
 .meta { color:var(--mute); font-size:12px; margin-top:4px; overflow-wrap:anywhere; } a { color:var(--shell); }
 .actions { display:flex; gap:8px; flex-wrap:wrap; margin:14px 0 4px; }
+.actions button:disabled { opacity:.45; cursor:not-allowed; }   /* grisée : possible plus tard, la raison est dans l'infobulle */
 button { font:inherit; padding:6px 14px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); cursor:pointer; }
 button:hover { border-color:var(--mute); } button.primary { background:var(--ink); color:var(--bg); border-color:var(--ink); }
 kbd { font:11px ui-monospace, Consolas, monospace; border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 5px; background:var(--card); }
@@ -224,7 +225,6 @@ mark { background:#fde68a; color:inherit; border-radius:2px; padding:0 1px; } @m
 .ro .actions, .ro .sendbox, .ro .suggest, .ro #dialog, .ro #newbtn, .ro #bcbtn, .ro .grp a, .ro .gitbox a, .ro .notif.pick input, .ro .reboot { display:none !important; }
 .ro .sidehead h1::after { content:' · lecture seule'; color:var(--ask); font-size:12px; font-weight:600; }
 /* À distance avec écriture : « Afficher l'onglet » ouvrirait l'onglet sur le PC, pas sur le téléphone. */
-.remote .act-focus { display:none !important; }
 .remote:not(.ro) .sidehead h1::after { content:' · à distance'; color:var(--shell); font-size:12px; font-weight:600; }
 /* Lanceur (🤖). */
 #launchbtn { padding:2px 8px; font-size:13px; line-height:1; filter:grayscale(1); } #launchbtn.on { border-color:var(--shell); filter:none; }
