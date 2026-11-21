@@ -19,6 +19,7 @@ import type { Config } from './config.ts';
 import { startGitRefresh } from './gitpr.ts';
 import { answerCard, lookupCards } from './cards.ts';
 import { Launcher, lookupDeliveryDiff, lookupHd, runLauncherOrder } from './launcher.ts';
+import { parkedQuestions, type Parked } from './parked.ts';
 import { promptDraft } from './prompt.ts';
 import { Search } from './search.ts';
 import type { Dashboard } from './state.ts';
@@ -359,7 +360,7 @@ export class Server {
           let t: string | null = null; let sg: string | null = null;
           try { t = await this.d.driver.call('read', { pid }); } catch { /* illisible */ }
           if (t !== null) { try { sg = await this.d.driver.call('suggestion', { pid }); } catch { /* idem */ } }
-          json(res, 200, { text: t, suggestion: sg, draft: promptDraft(t, sg) });
+          json(res, 200, { text: t, suggestion: sg, draft: promptDraft(t, sg), parked: this.#parked(pid) });
           return;
         }
       }
@@ -378,6 +379,16 @@ export class Server {
     const until = nowMs() + seconds * 1000; let v: Buffer | null;
     while ((v = get()) === null && nowMs() < until) await sleep(100);
     return v;
+  }
+
+  /** Questions qu'un « Chat about this » a fermées dans le terminal de cette session (voir parked.ts). */
+  #parked(pid: number): Parked | null {
+    try {
+      const id = psString((JSON.parse(readFileSync(join(this.d.sessionsDir, `${pid}.json`), 'utf8')) as { sessionId?: unknown }).sessionId).trim().toLowerCase();
+      if (!GUID.test(id)) return null;
+      const f = this.d.metaCache.get(id)?.path ?? this.d.findTranscript(id);
+      return f ? parkedQuestions(f) : null;
+    } catch { return null; }
   }
 
   #transcript(url: URL, res: ServerResponse): void {

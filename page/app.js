@@ -3365,6 +3365,38 @@ function renderStuckPrompt(it, box, draft) {
   c.append(el('div', 'hint', T('Tant que ce texte est dans l’invite, aucun message ne peut être envoyé à la session. Envoie-le ou vide l’invite ; le texte est revérifié à l’écran juste avant.', 'While this text is in the prompt, no message can be sent to the session. Send it or clear the prompt; the text is checked again on the screen just before.')));
   box.append(c);
 }
+// QUESTIONS MISES DE CÔTÉ : « Chat about this » ferme le dialogue dans le terminal, et la page n'avait alors plus rien
+// à montrer — les questions et leurs options disparaissaient au moment d'en discuter. Le serveur les relit dans le
+// transcript (`parked` de /api/screen) : on les garde affichées, sans rien taper dans le terminal. Cliquer une option
+// la recopie dans la zone de réponse. Repliées dès qu'une réponse est partie ; remplacées par le dialogue suivant.
+function parkedHidden() { try { return localStorage.getItem('cc.parked.hide'); } catch { return null; } }
+function parkedPick(v, q, n, o) {
+  const line = (q.header || T('Question ' + n, 'Question ' + n)) + T(' : ', ': ') + o.label;
+  return v && v.trim() ? v.replace(/\s+$/, '') + '\n' + line : line;
+}
+function renderParked(box, p) {
+  box.append(el('h2', null, T('Questions mises de côté — tu as choisi d’en discuter', 'Questions set aside — you chose to chat about them')));
+  const c = el('details', 'dlg qcard parked'); c.open = !p.replies;
+  c.append(el('summary', null, p.questions.length > 1 ? T(p.questions.length + ' questions et leurs options', p.questions.length + ' questions and their options') : T('La question et ses options', 'The question and its options')));
+  p.questions.forEach((q, i) => {
+    const blk = el('div', 'qblock');
+    blk.append(el('div', 'q', (q.header ? q.header + ' — ' : '') + q.question));
+    const os = el('div', 'opts');
+    q.options.forEach((o, j) => {
+      const b = el('button', 'opt pk'); b.type = 'button'; b.append(el('span', 'n', (j + 1) + '.'), el('span', null, o.label));
+      if (o.description) b.append(el('span', 'd', o.description));
+      b.title = T('Recopie ce choix dans ta réponse — rien n’est envoyé', 'Copies this choice into your reply — nothing is sent');
+      b.onclick = () => { const t = $('sendtext'); if (!t || t.disabled) return; t.value = parkedPick(t.value, q, i + 1, o); t.dispatchEvent(new Event('input')); t.focus(); };
+      os.append(b);
+    });
+    blk.append(os); c.append(blk);
+  });
+  const row = el('div', 'row'); const hide = el('button', null, T('Masquer', 'Hide'));
+  hide.onclick = () => { try { localStorage.setItem('cc.parked.hide', p.id); } catch {} lastDialogSig = null; refreshScreen(); };
+  row.append(hide); c.append(row);
+  c.append(el('div', 'hint', T('« Chat about this » a fermé le dialogue dans le terminal : la session attend maintenant ton message, plus un choix. Clique une option pour la recopier dans ta réponse, ou écris librement.', '"Chat about this" closed the dialog in the terminal: the session now waits for your message, not a choice. Click an option to copy it into your reply, or write freely.')));
+  box.append(c);
+}
 let keying = false, lastDialogSig = null;
 async function sendKeys(it, keys, expect, what) {
   if (keying) return; keying = true; document.querySelectorAll('#dialog button').forEach(b => b.disabled = true);
@@ -3378,7 +3410,7 @@ async function sendKeys(it, keys, expect, what) {
 // pied « Enter to select · Esc to cancel » présent) ; une INVITE OCCUPÉE — un texte y est resté (brouillon tapé dans
 // le terminal, message tapé mais jamais parti, menu « / ») et tout envoi est refusé tant qu'il y est. `draft` vient de
 // /api/screen : null = pas d'invite à l'écran, '' = invite libre, sinon le texte resté.
-function renderDialog(it, text, draft) {
+function renderDialog(it, text, draft, parked) {
   const box = $('dialog'); if (!box) return;
   const free = it.status === 'idle' || it.status === 'shell';
   let d = it.status === 'waiting' ? parseDialog(text) : null;
@@ -3386,12 +3418,14 @@ function renderDialog(it, text, draft) {
   const stuck = !d && free && draft ? draft : null;
   if (stuck) { renderStuckPrompt(it, box, stuck); return; }
   const menu = !d && (it.status === 'waiting' || (free && draft == null)) ? parseKeyMenu(text) : null;
-  const sig = d ? JSON.stringify(d) : menu ? 'menu:' + JSON.stringify(menu) : '';
+  const pk = !d && !menu && parked && parked.questions && parked.questions.length && parkedHidden() !== parked.id ? parked : null;
+  const sig = d ? JSON.stringify(d) : menu ? 'menu:' + JSON.stringify(menu) : pk ? 'parked:' + JSON.stringify(pk) : '';
   if (sig === lastDialogSig && box.dataset.pid === String(it.pid)) return;
   // Ne pas écraser une saisie en cours dans le panneau.
   const act = document.activeElement; if (act && (act.tagName === 'INPUT' || act.tagName === 'TEXTAREA') && box.contains(act) && act.value) return;
   lastDialogSig = sig; box.dataset.pid = it.pid; box.replaceChildren();
   if (menu) { renderKeyMenu(it, box, menu); return; }
+  if (pk) { renderParked(box, pk); return; }
   if (!d) return;
   box.append(el('h2', null, T('Dialogue en attente — réponds ici', 'Pending dialog — answer here')));
   const c = el('div', 'dlg');
@@ -3680,7 +3714,7 @@ async function refreshScreen() {
     if (selected !== it.key) return;
     const text = r.text == null ? T('(écran illisible : la session n\'est pas dans une console accessible)', '(screen unreadable: the session is not in an accessible console)') : r.text;
     if (text !== lastScreen && !String(getSelection())) { lastScreen = text; pre.textContent = screenText(text); pre.scrollTop = pre.scrollHeight; }
-    renderDialog(it, r.text || '', r.draft);
+    renderDialog(it, r.text || '', r.draft, r.parked || null);
     renderSuggest(it, r.suggestion || null);
   } catch {}
 }
@@ -3805,7 +3839,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'n') { const todo = allItems().filter(it => TODO.includes(it.state)).sort((a, b) => TODO.indexOf(a.state) - TODO.indexOf(b.state) || a.since - b.since);
     if (!todo.length) { say(T('rien à traiter', 'nothing to handle')); return; } const i = todo.findIndex(it => it.key === selected); const it = todo[(i + 1) % todo.length]; select(it.key, true); openTab(it); }
   else if (e.key === 'f') { const it = selected && byKey(selected); if (it && it.kind !== 'run') toggleFav(it); }
-  else if (/^[1-9]$/.test(e.key) && $('dialog') && $('dialog').querySelectorAll('button.opt')[+e.key - 1]) { e.preventDefault(); $('dialog').querySelectorAll('button.opt')[+e.key - 1].click(); }
+  else if (/^[1-9]$/.test(e.key) && $('dialog') && $('dialog').querySelectorAll('button.opt:not(.pk)')[+e.key - 1]) { e.preventDefault(); $('dialog').querySelectorAll('button.opt:not(.pk)')[+e.key - 1].click(); }
   else if (e.key === 'p' && suggestion && suggestKey === selected) { if (fillSuggestion()) e.preventDefault(); }
   else if (e.key === 'r') { const i = $('sendtext'); if (i && !i.disabled) { e.preventDefault(); i.focus(); } }
   else if (e.key === 'c') { const it = selected && byKey(selected); if (it) copyCmd(it); }
