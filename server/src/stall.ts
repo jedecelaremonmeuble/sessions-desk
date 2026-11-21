@@ -53,7 +53,10 @@ let okCpu = process.cpuUsage(), okAt = Date.now(), stall = null;
 setInterval(() => {
   const now = Date.now(), age = now - beat[0];
   if (!stall) {
-    if (age <= w.threshold) { okCpu = process.cpuUsage(); okAt = now; return; }
+    // Repère CPU pris seulement sur un battement FRAIS : sous le seuil, un gel peut déjà avoir commencé, et un repère
+    // pris pendant le gel en sous-compterait la durée et le CPU (vu en production : « CPU 563 ms sur 1016 ms » pour 2,7 s).
+    if (age <= w.freshMs) { okCpu = process.cpuUsage(); okAt = now; }
+    if (age <= w.threshold) return;
     stall = { from: beat[0], cpu: okCpu, cpuAt: okAt, phase: w.phases[Atomics.load(phase, 0)] ?? '?', told: now };
     log('boucle figée depuis ' + age + ' ms (phase ' + stall.phase + ')');
     return;
@@ -80,7 +83,7 @@ export function startStallWatch(file: string, o: { thresholdMs?: number; everyMs
   // Le verdict est injecté dans le worker depuis sa source : une seule définition des seuils.
   const w = new Worker(`const verdict = ${stallVerdict.toString()};\n${WORKER}`, {
     eval: true,
-    workerData: { sab, file, phases: [...PHASES], threshold: o.thresholdMs ?? 2000, everyMs: o.everyMs ?? 500, repeatMs: o.repeatMs ?? 60_000 },
+    workerData: { sab, file, phases: [...PHASES], threshold: o.thresholdMs ?? 2000, freshMs: 2 * beatMs, everyMs: o.everyMs ?? 500, repeatMs: o.repeatMs ?? 60_000 },
   });
   w.unref();
   w.on('error', () => undefined);
