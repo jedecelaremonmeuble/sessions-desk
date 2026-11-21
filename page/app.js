@@ -2151,7 +2151,7 @@ function refreshHoverCard() {
   const c = hoverCardEl(); c.className = it.look || it.state || '';
   const sig = hoverKey + '\n' + reply + '\n' + (it.suggestion || '');
   if (c.dataset.sig !== sig) {                     // même contenu : on ne touche pas au DOM (pas de saut de défilement)
-    c.dataset.sig = sig; c.replaceChildren(el('div', 'hh', T('Dernier message de Claude', "Claude's last message")), el('div', 'hb', reply));
+    c.dataset.sig = sig; c.replaceChildren(el('div', 'hh', T('Dernier message de Claude', "Claude's last message")), mdBody('hb', reply));
     if (it.suggestion) c.append(el('div', 'hs', '💡 ' + it.suggestion));
   }
   c.hidden = false;
@@ -3026,7 +3026,7 @@ function renderDetail(force) {
       if (inp.value) growArea(inp);   // brouillon repris : la zone reprend sa hauteur
     }
     const pr = el('div', 'prompts'); pr.id = 'prompts';
-    if (it.headless && it.reply) { body.append(el('h2', null, T('Dernier message', 'Last message')), el('div', 'reply', it.reply)); }
+    if (it.headless && it.reply) { body.append(el('h2', null, T('Dernier message', 'Last message')), mdBody('reply', it.reply)); }
     if (term) {
       const split = el('div', 'split'), ct = el('div', 'cterm'), cp = el('div', 'cprompts');
       const pre = el('pre', null, '…'); pre.id = 'screen';
@@ -3539,6 +3539,8 @@ function mdRender(m) {
   catch (e) { console.log('[sessions] markdown :', e); root.className = 'tx'; root.textContent = m.t; }
   return root;
 }
+// Dernier message hors conversation (carte de survol, automate sans terminal) : même rendu markdown, dans un cadre.
+function mdBody(cls, text) { const w = el('div', cls); w.append(mdRender({ t:text })); return w; }
 // ── Provenance des messages ──
 // Tout ce qui porte le rôle « user » n'est pas tapé par la personne, et « assistant » n'est pas toujours la session
 // qu'on pilote : la consigne d'un run vient de l'orchestrateur, sa réponse de l'agent de cette étape (diagnostic,

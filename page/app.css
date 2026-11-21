@@ -283,18 +283,18 @@ h2.viewtabs { display:flex; gap:4px; } .viewtabs .vtab { font:inherit; text-tran
 .convlist .older { align-self:center; } .convlist .convtop { text-align:center; margin:0 0 4px; }
 .cm { overflow-wrap:anywhere; } .cm .who { font-size:11px; color:var(--mute); margin-bottom:2px; } .cm .tx { white-space:pre-wrap; }
 .cm.user, .cm.assistant { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 12px; }
-.cm .tx.md { white-space:normal; } .cm .md > * { margin:0 0 6px; } .cm .md > :last-child { margin-bottom:0; }
-.cm .md p, .cm .md .mdlitx { white-space:pre-wrap; }
-.cm .md code { font:12px "Cascadia Mono", Consolas, ui-monospace, monospace; background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:0 4px; }
-.cm .md pre.mdcode { padding:8px 10px; background:var(--bg); border:1px solid var(--line); border-radius:6px; overflow:auto; max-height:50vh; white-space:pre; }
-.cm .md pre.mdcode code { border:0; padding:0; background:none; }
-.cm .md .mdh { font-weight:700; margin-top:8px; } .cm .md .mdh1 { font-size:1.25em; } .cm .md .mdh2 { font-size:1.15em; } .cm .md .mdh3 { font-size:1.05em; }
-.cm .md .mdli { display:flex; gap:6px; } .cm .md .mdmark { color:var(--mute); flex:none; min-width:.8em; }
-.cm .md blockquote { margin-left:0; padding-left:10px; border-left:3px solid var(--line); color:var(--mute); }
-.cm .md hr { border:0; border-top:1px solid var(--line); }
-.cm .md .mdtable { overflow-x:auto; } .cm .md table { border-collapse:collapse; font-size:13px; }
-.cm .md th, .cm .md td { border:1px solid var(--line); padding:3px 8px; text-align:left; vertical-align:top; } .cm .md th { background:var(--bg); }
-.cm .md a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+.tx.md { white-space:normal; } .md > * { margin:0 0 6px; } .md > :last-child { margin-bottom:0; }
+.md p, .md .mdlitx { white-space:pre-wrap; }
+.md code { font:12px "Cascadia Mono", Consolas, ui-monospace, monospace; background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:0 4px; }
+.md pre.mdcode { padding:8px 10px; background:var(--bg); border:1px solid var(--line); border-radius:6px; overflow:auto; max-height:50vh; white-space:pre; }
+.md pre.mdcode code { border:0; padding:0; background:none; }
+.md .mdh { font-weight:700; margin-top:8px; } .md .mdh1 { font-size:1.25em; } .md .mdh2 { font-size:1.15em; } .md .mdh3 { font-size:1.05em; }
+.md .mdli { display:flex; gap:6px; } .md .mdmark { color:var(--mute); flex:none; min-width:.8em; }
+.md blockquote { margin-left:0; padding-left:10px; border-left:3px solid var(--line); color:var(--mute); }
+.md hr { border:0; border-top:1px solid var(--line); }
+.md .mdtable { overflow-x:auto; } .md table { border-collapse:collapse; font-size:13px; }
+.md th, .md td { border:1px solid var(--line); padding:3px 8px; text-align:left; vertical-align:top; } .md th { background:var(--bg); }
+.md a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
 .cm.user { border-left:4px solid var(--shell); } .cm.assistant { border-left:4px solid var(--done); }
 /* Provenance : consigne d'un automate (tirets, gris), collage (gris), agents du lanceur (une couleur par étape). */
 .cm.user.auto { border-left:4px dashed var(--idle); background:none; } .cm.user.paste { border-left-color:var(--closed); }
