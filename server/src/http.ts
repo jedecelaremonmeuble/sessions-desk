@@ -45,7 +45,7 @@ const PAGE: Record<string, [string, string]> = {
 const JSON_TYPE = 'application/json; charset=utf-8';
 const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/teams-conversations', '/api/teams-thread', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/commands', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards', '/api/image']);
 const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy', '/api/relay/restart']);
-const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/model', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/teams-reply', '/api/teams-link', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer', '/api/relay/restart']);
+const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/model', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/draft-save', '/api/draft-delete', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/teams-reply', '/api/teams-link', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer', '/api/relay/restart']);
 const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/model', '/api/close', '/api/relaunch']);
 /** Routes d'un module optionnel : sans lui, elles n'existent pas (404, comme une route inconnue). */
 const LAUNCHER_ROUTES = new Set(['/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/order', '/api/launcher/cards', '/api/launcher/answer', '/api/test-launcher-alerts']);
@@ -667,7 +667,22 @@ export class Server {
         case '/api/new': {
           const j = await payload();
           if (!isObjBody(j)) { status = 400; body = '{}'; }
-          else body = JSON.stringify({ error: await this.actions.newSession(psString(pget(j, 'cwd')), psString(pget(j, 'prompt')), psString(pget(j, 'model')), psString(pget(j, 'branch')), psString(pget(j, 'forkFrom')), pget(j, 'tags'), psString(pget(j, 'sessionId'))) });
+          else {
+            const error = await this.actions.newSession(psString(pget(j, 'cwd')), psString(pget(j, 'prompt')), psString(pget(j, 'model')), psString(pget(j, 'branch')), psString(pget(j, 'forkFrom')), pget(j, 'tags'), psString(pget(j, 'sessionId')));
+            const draftId = psString(pget(j, 'draftId'));
+            if (!error && draftId) this.d.drafts.remove(draftId);   // lancée depuis un brouillon : il a servi
+            body = JSON.stringify({ error });
+          }
+          break;
+        }
+        case '/api/draft-save': {                         // « Enregistrer en brouillon » du formulaire Nouvelle session
+          const j = await payload();
+          if (!isObjBody(j)) { status = 400; body = '{}'; } else body = JSON.stringify(this.d.drafts.save(j));
+          break;
+        }
+        case '/api/draft-delete': {
+          const j = await payload();
+          if (!isObjBody(j)) { status = 400; body = '{}'; } else body = JSON.stringify({ removed: this.d.drafts.remove(psString(pget(j, 'id'))) });
           break;
         }
         case '/api/ack': {

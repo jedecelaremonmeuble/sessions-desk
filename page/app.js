@@ -2045,6 +2045,23 @@ function renderList() {
     const b = el('div', 'rbanner', T('↻ ' + plural(data.reboot.sessions.length, 'session ouverte', 'sessions ouvertes') + ' avant le redémarrage — rouvrir…', '↻ ' + plural(data.reboot.sessions.length, 'session open', 'sessions open') + ' before the restart — reopen…'));
     b.title = T('Afficher la liste dans la vue d\'ensemble', 'Show the list in the overview'); b.onclick = () => select(null); list.append(b);
   }
+  // Brouillons de nouvelle session : en tête, avant tout. Recherche : seulement ceux qui correspondent ; filtre favoris : aucun.
+  const drafts = favOnly ? [] : (data.drafts || []).filter(d => tokens.every(t => norm(draftHay(d)).includes(t)));
+  if (drafts.length) {
+    const isCollapsed = !expandAll && collapsed.has('drafts');
+    const head = el('div', 'grp');
+    head.append(el('span', 'car', isCollapsed ? '▸' : '▾'), el('span', null, T('📝 Brouillons', '📝 Drafts')), el('span', 'n', drafts.length));
+    head.title = T('Nouvelles sessions enregistrées sans être lancées — clic sur une ligne : la relire, la modifier, la lancer', 'New sessions saved without being launched — click a row: read it, edit it, launch it');
+    head.onclick = () => { collapsed.has('drafts') ? collapsed.delete('drafts') : collapsed.add('drafts'); localStorage.setItem('cc.collapsed', JSON.stringify([...collapsed])); renderList(); };
+    list.append(head);
+    if (!isCollapsed) for (const d of drafts) {
+      const row = el('div', 'row-s draft' + (newMode && newPrefill && newPrefill.draft && newPrefill.draft.id === d.id ? ' sel' : ''));
+      row.append(el('span', 'dot'), el('span', 't', draftTitle(d)), el('span', 'age', ago(data.now - d.updatedAt)));
+      row.append(el('span', 'sub', [short(d.cwd) || T('dossier à choisir', 'folder to choose'), d.branch && '⎇ ' + d.branch, d.forkFrom && '⑂ ' + (d.forkTitle || d.forkFrom.slice(0, 8)), d.attachments.length && '📎 ' + d.attachments.length].filter(Boolean).join(' · ')));
+      row.title = d.prompt.slice(0, 600) || draftTitle(d); row.onclick = () => openDraft(d);
+      list.append(row);
+    }
+  }
   // Consultées récemment : raccourci en tête de liste. Pas pendant une recherche ou le filtre favoris (bruit),
   // et ces lignes n'entrent pas dans la navigation ↑ ↓ (la session y figure déjà dans son groupe d'état).
   if (!expandAll) {
@@ -2868,7 +2885,48 @@ function renderFind() {
 // refusée. Rien n'est lancé : on relit, on modifie, on choisit le dossier, puis « Lancer ».
 let newMode = false, launching = false, newFork = null, newPrefill = null;
 function openNew(fork = null, prefill = null) { newFork = fork; newPrefill = prefill; newTags = prefill ? prefill.tags.map(t => ({ ...t })) : forkTags(fork); findMode = false; bcMode = false; boardMode = false; launchMode = false; chatsMode = false; selected = null; sessionStorage.removeItem('cc.sel'); newMode = true; setPane(true); renderList(); renderDetail(true); }
-function closeNew() { newMode = false; setPane(false); renderDetail(true); }
+function closeNew() { if (newPrefill && newPrefill.draft) clearAttachments('new'); newMode = false; newPrefill = null; setPane(false); renderList(); renderDetail(true); }
+// ── Brouillons : le formulaire enregistré sans être lancé (serveur : drafts.ts, gardé sur le poste) ──
+// Rouvert, il préremplit tout ; « Lancer » refait les contrôles du lancement et supprime le brouillon s'il réussit.
+function draftTitle(d) {
+  const line = (d.prompt || '').split('\n').map(x => x.trim()).find(Boolean);
+  return line ? (line.length > 90 ? line.slice(0, 90) + '…' : line) : d.forkFrom ? '⑂ ' + (d.forkTitle || d.forkFrom.slice(0, 8)) : T('(sans premier message)', '(no first message)');
+}
+const draftHay = d => [d.prompt, d.cwd, d.branch, d.forkTitle, ...d.tags.map(t => t.v)].join(' ');
+function openDraft(d) {
+  clearAttachments('new');
+  attList('new').push(...d.attachments.map(a => ({ ...a, url: null })));
+  const fork = d.forkFrom ? { sessionId: d.forkFrom, title: d.forkTitle, cwd: d.cwd } : null;
+  openNew(fork, { title: draftTitle(d), prompt: d.prompt, tags: d.tags, draft: d });
+}
+async function saveDraft() {
+  const cwd = $('nf-cwd'), pr = $('nf-prompt'), mo = $('nf-model'), br = $('nf-branch');
+  if (!pr || launching) return;
+  if (attBusy('new')) return say(T('pièce jointe en cours d’envoi — un instant', 'attachment still uploading — one moment'));
+  if (!addNewTag()) return;
+  const draft = newPrefill && newPrefill.draft;
+  const body = { id: draft ? draft.id : '', cwd: cwd && !cwd.disabled ? cwd.value : draft ? draft.cwd : '', prompt: pr.value, model: mo.value.trim(), branch: br.value.trim(),
+    forkFrom: newFork ? newFork.sessionId : '', forkTitle: newFork ? newFork.title || '' : '', tags: newTags,
+    attachments: attList('new').filter(a => a.path).map(a => ({ name: a.name, path: a.path, img: !!a.img, size: a.size || 0, pasted: a.pasted || 0 })) };
+  launching = true; say(T('enregistrement du brouillon…', 'saving the draft…'));
+  try {
+    const r = await (await fetch('/api/draft-save', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) })).json();
+    launching = false;
+    if (r.error) return say(T('brouillon non enregistré : ', 'draft not saved: ') + r.error);
+    clearAttachments('new'); say(draft ? T('brouillon mis à jour', 'draft updated') : T('brouillon enregistré — il t’attend en tête de liste', 'draft saved — it waits at the top of the list'));
+    newPrefill = null; closeNew(); tick(); return;
+  } catch { say(T('échec de la demande', 'request failed')); }
+  launching = false;
+}
+async function deleteDraft() {
+  const draft = newPrefill && newPrefill.draft; if (!draft || launching) return;
+  if (!confirm(T('Supprimer ce brouillon ?\n\n', 'Delete this draft?\n\n') + draftTitle(draft))) return;
+  try {
+    const r = await (await fetch('/api/draft-delete', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ id: draft.id }) })).json();
+    say(r.removed ? T('brouillon supprimé', 'draft deleted') : T('brouillon déjà parti (lancé ou supprimé ailleurs)', 'draft already gone (launched or deleted elsewhere)'));
+    closeNew(); tick();
+  } catch { say(T('échec de la demande', 'request failed')); }
+}
 
 // ── Message à plusieurs sessions (✉) : même texte tapé dans chaque session cochée — seulement les inactives ou
 // celles qui attendent une commande en arrière-plan (invite libre) ; le serveur revérifie chacune. ──
@@ -2975,20 +3033,23 @@ function newTagOptions(dl) {
 }
 function renderNew() {
   detailKey = '__new__'; const main = $('main'); main.replaceChildren();
-  const fork = newFork;
-  main.append(el('div', 'dtitle', T(fork ? 'Nouvelle session à partir de « ' + (fork.title || fork.sessionId.slice(0, 8)) + ' »' : newPrefill ? 'Nouvelle session — ' + newPrefill.title : 'Nouvelle session', fork ? 'New session from "' + (fork.title || fork.sessionId.slice(0, 8)) + '"' : newPrefill ? 'New session — ' + newPrefill.title : 'New session')),
+  const fork = newFork, draft = newPrefill && newPrefill.draft;
+  if (draft) main.append(el('div', 'dtitle', T('Brouillon — ', 'Draft — ') + newPrefill.title),
+                         el('div', 'meta', T('Enregistré il y a ' + ago(Date.now() - draft.updatedAt) + '. Rien n’est lancé tant que tu ne cliques pas « Lancer » : la session s’ouvre alors dans un nouvel onglet de Windows Terminal et le brouillon disparaît.', 'Saved ' + ago(Date.now() - draft.updatedAt) + ' ago. Nothing is launched until you click "Launch": the session then opens in a new Windows Terminal tab and the draft goes away.')));
+  else main.append(el('div', 'dtitle', T(fork ? 'Nouvelle session à partir de « ' + (fork.title || fork.sessionId.slice(0, 8)) + ' »' : newPrefill ? 'Nouvelle session — ' + newPrefill.title : 'Nouvelle session', fork ? 'New session from "' + (fork.title || fork.sessionId.slice(0, 8)) + '"' : newPrefill ? 'New session — ' + newPrefill.title : 'New session')),
               el('div', 'meta', T('S’ouvre dans un nouvel onglet de la fenêtre Windows Terminal la plus récente, puis apparaît dans la liste.', 'Opens in a new tab of the most recent Windows Terminal window, then appears in the list.')));
   if (fork) main.append(el('div', 'banner', T('La nouvelle session repart de TOUTE la conversation de « ' + (fork.title || fork.sessionId) + ' » (claude --resume ' + fork.sessionId.slice(0, 8) + '… --fork-session) : elle a son propre identifiant, la session d’origine continue de son côté sans rien voir de la suite. Le contexte hérité compte dans la fenêtre de la nouvelle session.', 'The new session starts from the WHOLE conversation of "' + (fork.title || fork.sessionId) + '" (claude --resume ' + fork.sessionId.slice(0, 8) + '… --fork-session): it has its own id, the original session goes on by itself without seeing what follows. The inherited context counts in the context window of the new session.')));
   const f = el('div'); f.id = 'newform';
   const cwd = el('select'); cwd.id = 'nf-cwd'; cwd.append(el('option', null, T('chargement des dossiers…', 'loading folders…'))); cwd.disabled = true;
-  if (newPrefill) main.append(el('div', 'banner', T('Premier message prérempli par le lanceur : relis-le, ajuste-le, choisis le dossier du dépôt de la PR, puis « Lancer ». Rien n’est lancé ni mergé d’ici.', 'First message prefilled by the launcher: read it, adjust it, choose the folder of the PR repository, then "Launch". Nothing is launched or merged from here.')));
+  if (newPrefill && !draft) main.append(el('div', 'banner', T('Premier message prérempli par le lanceur : relis-le, ajuste-le, choisis le dossier du dépôt de la PR, puis « Lancer ». Rien n’est lancé ni mergé d’ici.', 'First message prefilled by the launcher: read it, adjust it, choose the folder of the PR repository, then "Launch". Nothing is launched or merged from here.')));
   const pr = el('textarea'); pr.id = 'nf-prompt'; pr.maxLength = 20000; pr.spellcheck = true;
   if (newPrefill) { pr.value = newPrefill.prompt; pr.rows = 8; }
+  if (draft && draft.attachments.length && Date.now() - draft.updatedAt > 25 * 864e5) say(T('brouillon de plus de 25 jours : ses pièces jointes sont purgées du poste au bout de 30', 'draft older than 25 days: its attachments are purged from the machine after 30'));
   pr.placeholder = T('Facultatif — ex. « /cadrage HD-123456 » ou « regarde pourquoi … »', 'Optional — e.g. "/code-review" or "look at why …"');
   // Modèle : un groupe de boutons (un seul actif) plutôt qu'une liste ; « Autre… » ouvre la saisie libre pour un
   // identifiant complet (ex. claude-opus-5-5[1m]). Le champ #nf-model reste la valeur envoyée par launchNew.
   const mo = el('input'); mo.id = 'nf-model'; mo.autocomplete = 'off'; mo.spellcheck = false;
-  mo.placeholder = T('identifiant complet — ex. claude-opus-5-5[1m]', 'full id — e.g. claude-opus-5-5[1m]'); mo.value = localStorage.getItem('cc.newmodel') || '';
+  mo.placeholder = T('identifiant complet — ex. claude-opus-5-5[1m]', 'full id — e.g. claude-opus-5-5[1m]'); mo.value = draft ? draft.model : localStorage.getItem('cc.newmodel') || '';
   // Modèles proposés : ceux de ui.models marqués `offer` (table du poste, ou table par défaut), avec leur coût relatif.
   const MODELS = [['', T('Par défaut', 'Default'), T('celui de ta config', 'the one in your config')],
     ...(ui().models || []).filter(e => e.offer !== false).map(e => [e.match, e.label + (e.cost !== 1 ? ' ' + costFactor(e.cost) : ''), modelBadge(e.match).title.split('\n').slice(1, -1).join('\n'), e])];
@@ -3019,6 +3080,7 @@ function renderNew() {
   const mbox = el('div', 'nf-model'); mbox.append(mg, mo, costNote);
   const br = el('input'); br.id = 'nf-branch'; br.autocomplete = 'off'; br.spellcheck = false;
   br.placeholder = T('facultatif — ex. feat/ma-branche : worktree neuf sur origin/master', 'optional — e.g. feat/my-branch: new worktree on origin/master');
+  if (draft) br.value = draft.branch;
   const tbox = el('div', 'nf-tags'); tbox.id = 'nf-tags';
   const ti = el('input'); ti.id = 'nf-tag'; ti.setAttribute('list', 'nf-tagopts'); ti.autocomplete = 'off'; ti.spellcheck = false;
   const tdl = el('datalist'); tdl.id = 'nf-tagopts';
@@ -3032,8 +3094,12 @@ function renderNew() {
   tbox.onclick = e => { if (e.target === tbox) ti.focus(); };
   tbox.append(ti);                   // drawNewTags le retrouve par son id et place les puces devant
   const go = el('button', 'primary', T('Lancer', 'Launch')); go.id = 'nf-go'; go.onclick = () => launchNew();
-  const cancel = el('button', null, T('Annuler', 'Cancel')); cancel.onclick = () => closeNew();
-  const acts = el('div', 'actions'); acts.append(go, cancel);
+  const save = el('button', null, draft ? T('💾 Mettre à jour le brouillon', '💾 Update the draft') : T('💾 Enregistrer en brouillon', '💾 Save as draft')); save.id = 'nf-save';
+  save.title = T('Garder ce formulaire sans lancer la session : il t’attend en tête de liste  ( Ctrl+S )', 'Keep this form without launching the session: it waits at the top of the list  ( Ctrl+S )');
+  save.onclick = () => saveDraft();
+  const cancel = el('button', null, draft ? T('Fermer', 'Close') : T('Annuler', 'Cancel')); cancel.onclick = () => closeNew();
+  const acts = el('div', 'actions'); acts.append(go, save, cancel);
+  if (draft) { const del = el('button', 'danger', T('Supprimer le brouillon', 'Delete the draft')); del.onclick = () => deleteDraft(); acts.append(del); }
   f.append(el('label', null, T('Dossier', 'Folder')), cwd, el('label', null, T('Premier message', 'First message')), pr,
            el('div', 'hint', T('Envoyé tel quel à la session dès son démarrage. Vide : la session attend ta première demande.', 'Sent as is to the session as soon as it starts. Empty: the session waits for your first request.')),
            el('label', null, T('Pièces jointes', 'Attachments')), attachBar('new'),
@@ -3042,15 +3108,17 @@ function renderNew() {
            el('label', null, T('Modèle', 'Model')), mbox,
            el('label', null, T('Branche neuve', 'New branch')), br,
            el('div', 'hint', T('Remplie : l’onglet récupère origin/master, crée la branche dans un worktree neuf (.claude\\worktrees\\<dernier segment>) et y lance la session, au même sous-dossier. Vide : session dans le dossier choisi.', 'Filled: the tab fetches origin/master, creates the branch in a new worktree (.claude\\worktrees\\<last segment>) and starts the session there, in the same subfolder. Empty: session in the chosen folder.')),
-           acts, el('div', 'hint', T('Ctrl+Entrée lance · Échap annule', 'Ctrl+Enter launches · Esc cancels')));
+           acts, el('div', 'hint', T('Ctrl+Entrée lance · Ctrl+S enregistre en brouillon · Échap annule', 'Ctrl+Enter launches · Ctrl+S saves as draft · Esc cancels')));
   main.append(f); drawNewTags(); loadTagVocab(); pr.focus();
   fetch('/api/folders', { cache:'no-store' }).then(r => r.json()).then(r => {
     if (!newMode || !$('nf-cwd')) return;
     cwd.replaceChildren(); const last = localStorage.getItem('cc.newcwd');
     for (const d of r.folders || []) { const o = el('option', null, (short(d.path) || d.path) + T('   —   il y a ' + ago(Date.now() - d.last), '   —   ' + ago(Date.now() - d.last) + ' ago') + ' · ' + d.count + ' session' + (d.count > 1 ? 's' : '')); o.value = d.path; o.title = d.path; cwd.append(o); }
     if (!cwd.options.length) { cwd.append(el('option', null, T('aucun dossier récent trouvé', 'no recent folder found'))); return; }
-    const want = fork && fork.cwd ? fork.cwd.replace(/\\+$/, '').toLowerCase() : null, same = want && [...cwd.options].find(o => o.value.toLowerCase() === want);
+    const from = draft && draft.cwd ? draft.cwd : fork && fork.cwd ? fork.cwd : '';
+    const want = from ? from.replace(/\\+$/, '').toLowerCase() : null, same = want && [...cwd.options].find(o => o.value.toLowerCase() === want);
     if (same) cwd.value = same.value;
+    else if (draft && draft.cwd) say(T('le dossier du brouillon n’est plus proposé (' + (short(draft.cwd) || draft.cwd) + ') : choisis-en un autre', 'the draft’s folder is no longer offered (' + (short(draft.cwd) || draft.cwd) + '): choose another one'));
     else if (last && [...cwd.options].some(o => o.value === last)) cwd.value = last;
     cwd.disabled = false;
   }).catch(() => { cwd.replaceChildren(el('option', null, T('liste des dossiers indisponible', 'folder list unavailable'))); });
@@ -3064,9 +3132,9 @@ async function launchNew() {
   if (!addNewTag()) return;          // un tag tapé mais pas encore validé part avec la session — ou bloque s'il est invalide
   launching = true; $('nf-go').disabled = true; say(T('lancement d’une nouvelle session…', 'starting a new session…'));
   try {
-    const r = await (await fetch('/api/new', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ cwd: cwd.value, prompt, model: mo.value.trim(), branch: br.value.trim(), forkFrom: newFork ? newFork.sessionId : '', tags: newTags }) })).json();
+    const r = await (await fetch('/api/new', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ cwd: cwd.value, prompt, model: mo.value.trim(), branch: br.value.trim(), forkFrom: newFork ? newFork.sessionId : '', tags: newTags, draftId: newPrefill && newPrefill.draft ? newPrefill.draft.id : '' }) })).json();
     if (r.error) say(T('non lancée : ', 'not launched: ') + r.error);
-    else { clearAttachments('new'); localStorage.setItem('cc.newcwd', cwd.value); localStorage.setItem('cc.newmodel', mo.value.trim()); say(br.value.trim() ? T('onglet ouvert : création du worktree puis lancement (suivre dans l’onglet)', 'tab opened: creating the worktree then launching (follow in the tab)') : T('nouvel onglet ouvert — la session apparaît dans quelques secondes', 'new tab opened — the session appears in a few seconds')); launching = false; closeNew(); return; }
+    else { clearAttachments('new'); localStorage.setItem('cc.newcwd', cwd.value); localStorage.setItem('cc.newmodel', mo.value.trim()); if (newPrefill && newPrefill.draft) tick(); say(br.value.trim() ? T('onglet ouvert : création du worktree puis lancement (suivre dans l’onglet)', 'tab opened: creating the worktree then launching (follow in the tab)') : T('nouvel onglet ouvert — la session apparaît dans quelques secondes', 'new tab opened — the session appears in a few seconds')); launching = false; closeNew(); return; }
   } catch { say(T('échec de la demande', 'request failed')); }
   launching = false; if ($('nf-go')) $('nf-go').disabled = false;
 }
@@ -3895,6 +3963,7 @@ function move(delta) {
 document.addEventListener('keydown', e => {
   if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#newform')) {   // dans le formulaire : Ctrl+Entrée / Échap seulement
     if (e.key === 'Escape') { e.preventDefault(); closeNew(); } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); launchNew(); }
+    else if (e.key.toLowerCase() === 's' && (e.ctrlKey || e.metaKey) && !e.altKey) { e.preventDefault(); saveDraft(); }
     return;
   }
   if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#bcform')) {    // message groupé : Ctrl+Entrée / Échap seulement

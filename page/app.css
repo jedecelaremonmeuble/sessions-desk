@@ -484,3 +484,7 @@ body.ro .crow .cb button { display:none; }
 .runlive-l.stale { color:var(--ask); }
 /* Questions mises de côté (« Chat about this ») : la carte de questions, sans attente — repliable. */
 .dlg.parked { border-left-color:var(--line); } .dlg.parked > summary { cursor:pointer; color:var(--mute); font-size:12px; } .dlg.parked[open] > summary { margin-bottom:10px; }
+/* Brouillons de nouvelle session : en tête de liste, puce en pointillés (rien ne tourne), bouton de suppression en rouge. */
+.row-s.draft { --c:var(--idle); } .row-s.draft .dot { background:transparent; border:1.5px dashed var(--c); box-sizing:border-box; }
+.row-s.draft .t { font-weight:400; }
+button.danger { color:var(--waiting); } button.danger:hover { border-color:var(--waiting); }
