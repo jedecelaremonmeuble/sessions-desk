@@ -67,5 +67,6 @@ test('serveur réel : une ligne de démarrage par lancement, phases jusqu\'au 1e
   try {
     await until(() => read(f).includes('1er état'), 30000);
     expect(read(f)).toMatch(/démarrage( LENT)? : modules \d+ ms · préparation \d+ ms · protocole \d+ ms · identité \d+ ms · purge \d+ ms · écoute \d+ ms · 1er état \d+ ms · total \d+ ms \(CPU \d+ ms, /);
+    expect(Number(/modules (\d+) ms/.exec(read(f))![1])).toBeGreaterThan(0);   // le chargement des modules compte, depuis le lancement
   } finally { proc.kill(); }
 }, 60000);

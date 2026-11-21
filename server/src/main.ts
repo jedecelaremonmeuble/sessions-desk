@@ -15,7 +15,7 @@ import { registerFocusProtocol } from './watch.ts';
 
 export async function start(argv: string[]): Promise<Server> {
   // Trace de démarrage : performance.now() compte depuis le lancement du process (chargement des modules compris).
-  const steps: [string, number][] = []; let mark = performance.now();
+  const steps: [string, number][] = []; let mark = 0;   // 0 = lancement du process : « modules » compte le chargement
   const step = (name: string): void => { const t = performance.now(); steps.push([name, t - mark]); mark = t; };
   step('modules');
   const cfg = parseArgs(argv);
