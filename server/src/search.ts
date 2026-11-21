@@ -5,6 +5,7 @@
 import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Dashboard } from './state.ts';
+import { setPhase } from './stall.ts';
 import { ntfsSort } from './state.ts';
 import { imatch, leaf, mtimeMs, netTrim, nowMs, parent, readJson, setContent, stripBom } from './util.ts';
 
@@ -77,7 +78,7 @@ export class Search {
     return hits;
   }
   /** Warm : tout l'index en mémoire au démarrage, sinon la première recherche prend ~20 s. */
-  warm(): void { setTimeout(() => { try { this.searchDir(['\u0001']); } catch { /* idem */ } }, 0); }
+  warm(): void { setTimeout(() => { setPhase('recherche'); try { this.searchDir(['\u0001']); } catch { /* idem */ } }, 0); }
 
   /** Find-InConversations */
   find(query: string): Record<string, unknown> {
@@ -155,6 +156,7 @@ export class Search {
     files.sort((a, b) => b.mtime - a.mtime);
     let n = 0;
     for (const f of files) {
+      setPhase('index');
       if (nowMs() > deadline) break;
       const e = man[f.path]; let off = e ? e.offset : 0;
       if (f.size === off) continue;

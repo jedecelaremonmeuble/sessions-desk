@@ -187,6 +187,13 @@ first asked to stop cleanly (`/api/stop`: it finishes what it has received), and
 Each deployment is logged next to the watchdog's restarts in `%TEMP%\sessions-desk-node-watchdog.log` (hot page swap
 or restart, clean or forced stop, length of the outage).
 
+The server keeps its own performance trace in `%TEMP%\sessions-desk-node-<port>.perf.log` (moved to `.old` past
+1 MB): one line per start with the time spent in each phase up to the first computed state (marked `LENT` past
+5 s), and one line per event-loop stall longer than 2 s. Stalls are spotted from a worker thread, so a stall that
+never ends is still logged. Each stall gives the phase the server was in and the CPU it used meanwhile: CPU close to
+the stall's length means our code was computing; CPU close to zero means the process was waiting (disk,
+antivirus, overloaded machine), not running our code.
+
 ## Keyboard shortcuts
 
 `/` search · `n` next session that needs you · `r` reply · `p` take the suggested prompt · `h` screen /
