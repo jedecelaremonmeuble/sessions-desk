@@ -3162,7 +3162,7 @@ function renderDetail(force) {
   }
   const stick = $('dstick'); stick.replaceChildren(); stick.className = it.state + ($('main').scrollTop > 0 ? ' stuck' : '');
   const head = $('head'); head.replaceChildren(); head.className = it.state;
-  { const dt = el('div', 'dtitle', label(it)), d = driftTag(it); if (d) dt.append(d); stick.append(dt); }
+  { const dt = el('div', 'dtitle', label(it)), d = driftTag(it); dt.title = label(it); if (d) dt.append(d); stick.append(dt); }
   const sline = el('div', 'sline'); stick.append(sline);
   const chip = el('span', 'chip'); chip.append(el('span', 'dot'));
   if (it.state === 'busy') chip.append(spinLabel(it)); else chip.append(T(LABEL[it.state] + ' · depuis ' + ago(data.now - it.since), LABEL[it.state] + ' · for ' + ago(data.now - it.since)) + (it.waitingFor ? ' · ' + it.waitingFor : ''));
