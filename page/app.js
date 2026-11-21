@@ -1428,7 +1428,7 @@ function renderRunDetail(it, force) {
     // Changement de run : sa note s'ouvre d'office (sauf fichier déjà choisi dans ce run).
     if (detailKey !== dk && !(runFile && runFile.startsWith(r.dir + '/'))) { const n = !r.running && runNote(r.phase, r.files); if (n) openRunFile(it, n, true); else { runFile = null; runFileText = null; } }
     detailKey = dk; main.replaceChildren();
-    const head = el('div'); head.id = 'head'; const body = el('div'); body.id = 'body'; main.append(head, body);
+    const head = el('div'); head.id = 'head'; const acts = el('div'); acts.id = 'dacts'; const body = el('div'); body.id = 'body'; main.append(head, acts, body);
     if (res) {
       const card = el('div', 'rcard ' + res.look); card.append(el('div', 'rtitle', res.title));
       for (const l of res.lines) card.append(el('div', 'rline', l));
@@ -1504,10 +1504,7 @@ function renderRunDetail(it, force) {
     } }
   if (it.wait && it.wait.detail) head.append(el('div', 'meta', T('Demande : ', 'Request: ') + it.wait.detail));
   head.append(hdBlock(r.hd));
-  const actions = el('div', 'actions');
-  if (!r.running && r.sessionId) { const b = el('button', 'primary', T('↻ Reprendre dans un onglet', '↻ Resume in a tab')); b.title = 'claude --resume ' + r.sessionId + T(' — pour l’inspecter ou la questionner ; le lanceur ne la reprend pas', ' — to inspect or question it; the launcher does not resume it'); b.onclick = () => openRunConversation(r); actions.append(b); }
-  const bl = el('button', null, T('Vue 🤖 Lanceur', '🤖 Launcher view')); bl.onclick = () => openLauncher(); actions.append(bl);
-  head.append(actions);
+  actionBar($('dacts'), it, actionsFor(it, actionCtx(it)));
   head.append(el('div', 'banner', runBanner(!!r.running, !!(it.sessionId || r.sessionId))));
 }
 // La DEMANDE derrière un run (en-tête du détail) : demandeur, date, type, statut, assigné, client, liens Teams et
@@ -2729,6 +2726,72 @@ async function reopen(it) {
 const resumeCmd = it => (it.cwd ? 'cd "' + it.cwd + '"; ' : '') + 'claude --dangerously-skip-permissions --resume ' + it.sessionId;
 async function copyCmd(it) { try { await navigator.clipboard.writeText(resumeCmd(it)); say(T('commande de reprise copiée', 'resume command copied')); } catch { say(T('copie refusée par le navigateur', 'copy refused by the browser')); } }
 const primary = it => { touchRecent(it.key); if (it.kind === 'pass') return undefined; return it.kind === 'run' ? (!it.run.running && it.run.sessionId ? openRunConversation(it.run) : undefined) : it.kind === 'open' ? openTab(it) : reopen(it); };
+// ── BOUTONS D'ACTION SELON L'ÉTAT. actionsFor est PURE (testée) : ce que la session ou le run permet MAINTENANT.
+// Règles : une action qui n'a pas de sens dans cet état est ABSENTE ; une action qui en aura plus tard est GRISÉE avec sa
+// raison en infobulle ; il y a UNE seule action principale. ctx : { noTab, canWrite, remote }.
+const WRITE_ACTIONS = new Set(['focus', 'reopen', 'fav', 'hide', 'close', 'relaunch', 'resume']);
+function actionsFor(it, ctx) {
+  const c = ctx || {}, out = [];
+  const add = (id, label, title, o) => out.push(Object.assign({ id, label, title: title || '', primary: false, disabled: false, why: null }, o || {}));
+  const fav = () => add('fav', it.fav ? T('★ Favori', '★ Favourite') : T('☆ Favori', '☆ Favourite'), (it.fav ? T('Retirer des favoris', 'Remove from favourites') : T('Mettre en favori', 'Add to favourites')) + '  ( f )', { on: !!it.fav });
+  let main = null;
+  if (it.kind === 'run') {
+    const r = it.run || {}, sid = r.sessionId || it.sessionId;
+    if (!r.running && sid) { add('resume', T('↻ Reprendre dans un onglet', '↻ Resume in a tab'), 'claude --resume ' + sid + T(' — pour l’inspecter ou la questionner ; le lanceur ne la reprend pas', ' — to inspect or question it; the launcher does not resume it')); main = 'resume'; }
+    add('launcher', T('Vue 🤖 Lanceur', '🤖 Launcher view'));
+  } else if (it.headless) {
+    fav();                                     // automate sans terminal : ni onglet, ni réponse, ni fermeture
+  } else if (it.kind === 'open') {
+    const idle = it.status === 'idle';
+    if (!c.remote) add('focus', T('Afficher l\'onglet', 'Show the tab'), T('Met l’onglet de la session au premier plan  ( Entrée )', 'Brings the session tab to the front  ( Enter )'));
+    add('copy', T('Copier la commande de reprise', 'Copy the resume command'), it.resumeCmd || '');
+    fav();
+    add('fork', T('⑂ Nouvelle session à partir de celle-ci', '⑂ New session from this one'), T('Ouvre une NOUVELLE session qui reprend toute cette conversation (claude --resume … --fork-session) ; celle-ci n’est pas touchée  ( d )', 'Opens a NEW session that carries over this whole conversation (claude --resume … --fork-session); this one is not touched  ( d )'));
+    add('close', T('✕ Fermer la session', '✕ Close the session'), T('Quitte la session (/exit) ; la conversation reste reprenable  ( x )', 'Quits the session (/exit); the conversation can still be reopened  ( x )'));
+    add('relaunch', T('↻ Fermer et rouvrir', '↻ Close and reopen'), T('Ferme la session (/exit) et la reprend aussitôt dans un nouvel onglet (claude --resume) ; la conversation est conservée', 'Closes the session (/exit) and resumes it right away in a new tab (claude --resume); the conversation is kept'),
+      idle ? null : { disabled: true, why: T('possible seulement quand la session est inactive', 'only possible when the session is idle') });
+    // Onglet introuvable : la relance devient le geste principal (si elle est possible), sinon on retente l'onglet.
+    main = c.noTab && idle ? 'relaunch' : !c.remote ? 'focus' : null;
+  } else {
+    add('reopen', T('Rouvrir dans un nouvel onglet', 'Reopen in a new tab'), T('Reprend la conversation là où elle s’était arrêtée (claude --resume)  ( Entrée )', 'Picks the conversation up where it left off (claude --resume)  ( Enter )'));
+    add('copy', T('Copier la commande de reprise', 'Copy the resume command'), it.resumeCmd || '');
+    fav();
+    add('fork', T('⑂ Nouvelle session à partir de celle-ci', '⑂ New session from this one'), T('Ouvre une NOUVELLE session qui reprend toute cette conversation (claude --resume … --fork-session)  ( d )', 'Opens a NEW session that carries over this whole conversation (claude --resume … --fork-session)  ( d )'));
+    add('hide', it.hidden ? T('Ré-afficher dans la liste', 'Show in the list again') : T('Masquer', 'Hide'), it.hidden ? T('La remet dans « Fermées, reprenables »  ( x )', 'Puts it back in "Closed, reopenable"  ( x )') : T('La retire de la liste ; la recherche la retrouve, le transcript est intact  ( x )', 'Removes it from the list; search still finds it, the transcript is intact  ( x )'));
+    main = 'reopen';
+  }
+  if (c.canWrite === false) for (const a of out) if (WRITE_ACTIONS.has(a.id) && !a.disabled) { a.disabled = true; a.why = T('lecture seule à distance', 'read-only remotely'); }
+  const m = out.find(a => a.id === main && !a.disabled);
+  if (m) m.primary = true;
+  return out;
+}
+// Ce que fait chaque action. Le gestionnaire relit l'élément par sa clé au clic : la barre survit aux rafraîchissements,
+// l'objet qu'elle a vu à sa création peut être périmé.
+const ACTION_RUN = {
+  focus: it => primary(it), reopen: it => primary(it), resume: it => openRunConversation(it.run), launcher: () => openLauncher(),
+  copy: it => copyCmd(it), fav: it => toggleFav(it), hide: it => setHidden([it], !it.hidden), close: it => closeSession(it), relaunch: it => relaunch(it),
+  fork: it => openNew({ sessionId: it.sessionId, title: it.title, cwd: it.cwd, tags: it.tags }),
+};
+// Barre d'actions persistante : posée dans `holder` (hors de l'en-tête reconstruit toutes les 2 s) et refaite SEULEMENT
+// quand la liste change (actions, libellés, principale, grisées) — le survol, l'infobulle et le focus restent.
+function actionBar(holder, it, list) {
+  if (!holder) return;
+  const sig = it.key + '|' + list.map(a => [a.id, a.label, a.title, a.primary ? 1 : 0, a.disabled ? 1 : 0, a.why || ''].join('~')).join('|');
+  if (holder.dataset.sig === sig) return;
+  holder.dataset.sig = sig;
+  const key = it.key, box = el('div', 'actions');
+  for (const a of list) {
+    const b = el('button', a.primary ? 'primary' : null, a.label);
+    b.dataset.act = a.id;
+    b.title = a.disabled && a.why ? a.why : a.title;
+    b.disabled = a.disabled;
+    if (a.id === 'fav' && a.on) b.style.color = 'var(--fav)';
+    b.onclick = () => { const cur = byKey(key) || it; const f = ACTION_RUN[a.id]; if (f) f(cur.kind === 'run' && it.kind === 'run' ? pickRun(cur) : cur); };
+    box.append(b);
+  }
+  holder.replaceChildren(box);
+}
+const actionCtx = it => ({ noTab: noTab.has(it.key), canWrite, remote: !!REMOTE });
 
 // ── Recherche dans les conversations ──
 // Dès 3 caractères dans la recherche, le panneau de droite liste les passages des conversations (index plein
@@ -3057,7 +3120,7 @@ function renderDetail(force) {
     // Bandeau collant (nom de la session + état « au travail ») : enfant direct de main, qui défile — dans #head,
     // il ne collerait que tant que l'en-tête est à l'écran.
     const stick = el('div'); stick.id = 'dstick';
-    const head = el('div'); head.id = 'head'; const body = el('div'); body.id = 'body'; main.append(stick, head, body);
+    const head = el('div'); head.id = 'head'; const acts = el('div'); acts.id = 'dacts'; const body = el('div'); body.id = 'body'; main.append(stick, head, acts, body);
     // Ouverte depuis la recherche dans les conversations : on garde sous les yeux les passages trouvés.
     const fh = findRes && findQ && $('q').value.trim() === findQ && findRes.hits.find(h => h.sessionId === it.sessionId);
     if (fh) {
@@ -3157,29 +3220,10 @@ function renderDetail(force) {
   if (it.kind === 'open') head.append(gitBlock(it));
   if (it.headless) {
     head.append(el('div', 'banner', T('Automate sans terminal : ce claude -p a été lancé par un script (' + (it.entrypoint || 'sdk') + '), par exemple le diagnostic automatique. Il n’a ni onglet, ni écran, et ne lit pas de réponse : il se pilote depuis son lanceur. On voit ici son avancement (derniers prompts, dernier message, git).', 'Automation without a terminal: this claude -p was started by a script (' + (it.entrypoint || 'sdk') + '), for example the automatic diagnosis. It has no tab, no screen, and reads no reply: it is driven from its launcher. Here you see its progress (recent prompts, last message, git).')));
-    const fa = el('div', 'actions'); const bf = el('button', null, it.fav ? T('★ Favori', '★ Favourite') : T('☆ Favori', '☆ Favourite')); bf.onclick = () => toggleFav(it); fa.append(bf); head.append(fa);
+    actionBar($('dacts'), it, actionsFor(it, actionCtx(it)));
     return renderPromptsOnly(it);
   }
-  const actions = el('div', 'actions');
-  const b1 = el('button', 'primary' + (it.kind === 'open' ? ' act-focus' : ''), it.kind === 'open' ? T('Afficher l\'onglet', 'Show the tab') : T('Rouvrir dans un nouvel onglet', 'Reopen in a new tab')); b1.onclick = () => primary(it);
-  const b2 = el('button', null, T('Copier la commande de reprise', 'Copy the resume command')); b2.title = resumeCmd(it); b2.onclick = () => copyCmd(it);
-  const bf = el('button', null, it.fav ? T('★ Favori', '★ Favourite') : T('☆ Favori', '☆ Favourite')); bf.title = (it.fav ? T('Retirer des favoris', 'Remove from favourites') : T('Mettre en favori', 'Add to favourites')) + '  ( f )'; if (it.fav) bf.style.color = 'var(--fav)'; bf.onclick = () => toggleFav(it);
-  actions.append(b1, b2, bf);
-  const bk = el('button', null, T('⑂ Nouvelle session à partir de celle-ci', '⑂ New session from this one')); bk.title = T('Ouvre une NOUVELLE session qui reprend toute cette conversation (claude --resume … --fork-session) ; celle-ci n’est pas touchée  ( d )', 'Opens a NEW session that carries over this whole conversation (claude --resume … --fork-session); this one is not touched  ( d )');
-  bk.onclick = () => openNew({ sessionId: it.sessionId, title: it.title, cwd: it.cwd, tags: it.tags }); actions.append(bk);
-  if (it.kind === 'closed') {
-    const bh = el('button', null, it.hidden ? T('Ré-afficher dans la liste', 'Show in the list again') : T('Masquer', 'Hide'));
-    bh.title = it.hidden ? T('La remet dans « Fermées, reprenables »  ( x )', 'Puts it back in "Closed, reopenable"  ( x )') : T('La retire de la liste ; la recherche la retrouve, le transcript est intact  ( x )', 'Removes it from the list; search still finds it, the transcript is intact  ( x )');
-    bh.onclick = () => setHidden([it], !it.hidden); actions.append(bh);
-  }
-  if (it.kind === 'open') { const bx = el('button', null, T('✕ Fermer la session', '✕ Close the session')); bx.title = T('Quitte la session (/exit) ; la conversation reste reprenable  ( x )', 'Quits the session (/exit); the conversation can still be reopened  ( x )'); bx.onclick = () => closeSession(it); actions.append(bx); }
-  // Toujours proposé (pas seulement quand l'onglet est introuvable) : fermer puis rouvrir en un seul geste.
-  if (it.kind === 'open' && !it.headless) {
-    const b3 = el('button', noTab.has(it.key) ? 'primary' : null, T('↻ Fermer et rouvrir', '↻ Close and reopen')); b3.disabled = it.status !== 'idle';
-    b3.title = it.status === 'idle' ? T('Ferme la session (/exit) et la reprend aussitôt dans un nouvel onglet (claude --resume) ; la conversation est conservée', 'Closes the session (/exit) and resumes it right away in a new tab (claude --resume); the conversation is kept') : T('Possible seulement quand la session est inactive', 'Only possible when the session is idle');
-    b3.onclick = () => relaunch(it); actions.append(b3);
-  }
-  head.append(actions);
+  actionBar($('dacts'), it, actionsFor({ ...it, resumeCmd: resumeCmd(it) }, actionCtx(it)));
   if (it.kind === 'closed') head.append(el('div', 'banner', T('Session fermée : son terminal n’existe plus. Tu peux la rouvrir dans un nouvel onglet (la conversation reprend où elle s’était arrêtée)' + (it.hidden ? ', ou la ré-afficher dans la liste — elle est masquée.' : ', ou la masquer si tu n’en as plus besoin.'), 'Closed session: its terminal no longer exists. You can reopen it in a new tab (the conversation picks up where it left off)' + (it.hidden ? ', or show it in the list again — it is hidden.' : ', or hide it if you no longer need it.'))));
   const inp = $('sendtext');
   if (inp) {
