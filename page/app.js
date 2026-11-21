@@ -2169,6 +2169,7 @@ function hoverRow(key) {
 $('list').addEventListener('mouseover', e => { const r = e.target.closest ? e.target.closest('.row-s') : null; hoverRow(r && r.dataset.key ? r.dataset.key : null); });
 $('list').addEventListener('mouseleave', () => hoverRow(null));
 $('list').addEventListener('scroll', () => { if (hoverShown) refreshHoverCard(); }, { passive: true });
+$('main').addEventListener('scroll', () => { const s = $('dstick'); if (s) s.classList.toggle('stuck', $('main').scrollTop > 0); }, { passive: true });   // filet sous le bandeau collant, seulement quand on a défilé
 $('list').addEventListener('click', () => { hoverMuted = hoverKey; hideHoverCard(); });   // on ouvre la session : la carte ne masque pas le détail
 
 // Sessions consultées : une session compte comme « vue » si elle reste sélectionnée 1,5 s (parcourir la
@@ -3001,7 +3002,10 @@ function renderDetail(force) {
   if (it.kind === 'pass') return renderPassDetail(it, force);
   if (detailKey !== it.key || force) {
     detailKey = it.key; main.replaceChildren();
-    const head = el('div'); head.id = 'head'; const body = el('div'); body.id = 'body'; main.append(head, body);
+    // Bandeau collant (nom de la session + état « au travail ») : enfant direct de main, qui défile — dans #head,
+    // il ne collerait que tant que l'en-tête est à l'écran.
+    const stick = el('div'); stick.id = 'dstick';
+    const head = el('div'); head.id = 'head'; const body = el('div'); body.id = 'body'; main.append(stick, head, body);
     // Ouverte depuis la recherche dans les conversations : on garde sous les yeux les passages trouvés.
     const fh = findRes && findQ && $('q').value.trim() === findQ && findRes.hits.find(h => h.sessionId === it.sessionId);
     if (fh) {
@@ -3041,15 +3045,17 @@ function renderDetail(force) {
     if (!term) body.append(el('h2', null, T('Conversation complète', 'Full conversation')), convPane());
     applyConvView(it);
   }
+  const stick = $('dstick'); stick.replaceChildren(); stick.className = it.state + ($('main').scrollTop > 0 ? ' stuck' : '');
   const head = $('head'); head.replaceChildren(); head.className = it.state;
-  { const dt = el('div', 'dtitle', label(it)), d = driftTag(it); if (d) dt.append(d); head.append(dt); }
+  { const dt = el('div', 'dtitle', label(it)), d = driftTag(it); if (d) dt.append(d); stick.append(dt); }
+  const sline = el('div', 'sline'); stick.append(sline);
   const chip = el('span', 'chip'); chip.append(el('span', 'dot'));
   if (it.state === 'busy') chip.append(spinLabel(it)); else chip.append(T(LABEL[it.state] + ' · depuis ' + ago(data.now - it.since), LABEL[it.state] + ' · for ' + ago(data.now - it.since)) + (it.waitingFor ? ' · ' + it.waitingFor : ''));
   if (it.status === 'shell' && it.state !== 'shell') { const t = el('span', 'tag cl', T('commande en arrière-plan', 'background command')); t.title = T('Tour terminé ; une commande lancée en arrière-plan tourne encore dans cette session', 'Turn finished; a command started in the background is still running in this session'); chip.append(t); }
   if (it.stale) { const t = el('span', 'tag cl', T('statut corrigé d\'après l\'écran', 'status corrected from the screen')); t.title = T('Claude Code la déclare encore « au travail », mais ' + (it.stale === 'hook' ? 'elle a signalé la fin de son tour (hook Stop)' : 'son écran montre un tour terminé'), 'Claude Code still reports it as "working", but ' + (it.stale === 'hook' ? 'it signalled the end of its turn (Stop hook)' : 'its screen shows a finished turn')); chip.append(t); }
-  head.append(chip);
-  if (it.model) head.append(modelBadge(it.model, false, T('Modèle du dernier message de la session (suit un /model en cours de route)', 'Model of the last message of the session (follows a /model on the way)')));
-  if (it.tokens) { const tk = el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString(LOCALE) + ' tokens'); tk.title = T('Taille du dernier appel au modèle : entrée + cache lu + cache écrit', 'Size of the last model call: input + cache read + cache written'); head.append(tk); }
+  sline.append(chip);
+  if (it.model) sline.append(modelBadge(it.model, false, T('Modèle du dernier message de la session (suit un /model en cours de route)', 'Model of the last message of the session (follows a /model on the way)')));
+  if (it.tokens) { const tk = el('span', 'tok', T('  ·  contexte : ', '  ·  context: ') + it.tokens.toLocaleString(LOCALE) + ' tokens'); tk.title = T('Taille du dernier appel au modèle : entrée + cache lu + cache écrit', 'Size of the last model call: input + cache read + cache written'); sline.append(tk); }
   const meta = el('div', 'meta', [it.name, short(it.cwd), it.pid ? 'pid ' + it.pid : null, it.sessionId, it.version ? 'v' + it.version : null, it.startedAt ? T('lancée il y a ' + ago(data.now - it.startedAt), 'started ' + ago(data.now - it.startedAt) + ' ago') : null].filter(Boolean).join(' · '));
   const a = prLink(it); if (a) { meta.append(' · ', a); prTags(it).forEach(t => meta.append(t)); }
   head.append(meta);
