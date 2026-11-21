@@ -1340,9 +1340,40 @@ function runSub(it) {
     .concat(multi ? tail : [r.minutes != null ? Math.round(r.minutes) + ' min' : null, r.costUsd != null ? money(r.costUsd) : null]).filter(Boolean).join(' · ') || '—';
 }
 // ── Résultat d'un run : ce que le lanceur a CONSTATÉ, lu dans ses propres fichiers — report.json (production : verdict,
-// PR, images déployées) et verdict.json (recette : verdict, résumé, étapes). runResult est PURE (testée par
-// sessions-dashboard-tests.ps1) : null quand le run n'a ni l'un ni l'autre (l'en-tête montre déjà son `detail`).
-function runResult(report, verdict) {
+// PR, images déployées), verdict.json (recette : verdict, résumé, étapes) et steps.json (journal d'une étape
+// SCRIPTÉE, la livraison : pas de session, donc pas de conversation — ses étapes sont tout ce qu'on peut en voir).
+// runResult est PURE (testée) : null quand le run n'a aucun des trois (l'en-tête montre déjà son `detail`).
+const STEP_ICON = { ok:'✅', ko:'❌', running:'⏳', pending:'○', skipped:'–', warn:'⚠️' };
+// Une ligne par étape : { status, icon, title, detail, time }. Deux formes d'étape, un seul rendu — celle du journal
+// (status pending|running|ok|ko|skipped, startedAt, endedAt, detail) et celle de la recette (status ok|ko|autre,
+// observed). PURE (testée).
+function stepRows(steps, now) {
+  return (Array.isArray(steps) ? steps : []).filter(s => s && typeof s === 'object' && (s.title || s.key)).map(s => {
+    const status = ['ok', 'ko', 'running', 'pending', 'skipped'].includes(s.status) ? s.status : 'warn';
+    const a = Date.parse(s.startedAt), b = Date.parse(s.endedAt);
+    const time = status === 'running' && a ? T('depuis ', 'for ') + ago(now - a) : a && b && b - a >= 1000 ? ago(b - a) : null;
+    // Recette : ce qui a été constaté ne se répète pas sous une étape conforme (la note du run le dit déjà).
+    const detail = s.detail != null ? String(s.detail) : s.observed != null && status !== 'ok' ? String(s.observed) : null;
+    return { status, icon: STEP_ICON[status], title: String(s.title || s.key), detail: detail || null, time };
+  });
+}
+// Journal d'étapes d'une livraison : où elle en est (titre), ses lignes, et `live` tant qu'il peut encore changer —
+// la page le relit alors (un journal muet depuis 3 jours n'est plus relu : son processus est mort). PURE (testée).
+function stepsResult(j, now) {
+  if (!j || typeof j !== 'object' || !Array.isArray(j.steps)) return null;
+  const rows = stepRows(j.steps, now);
+  if (!rows.length) return null;
+  const done = rows.filter(r => r.status === 'ok').length, cur = rows.find(r => r.status === 'running'), ko = rows.find(r => r.status === 'ko');
+  const t = j.outcome === 'in-production' ? ['done', T('🚀 Livrée, en production', '🚀 Delivered, in production')]
+    : j.outcome === 'refused' ? ['waiting', T('❌ Livraison non faite', '❌ Delivery not done')]
+    : j.outcome === 'merged' ? (ko ? ['waiting', T('⚠️ Mergée — déploiement à regarder', '⚠️ Merged — deployment needs a look')] : ['busy', T('🚚 Mergée — déploiement en cours', '🚚 Merged — deploying')])
+    : ['busy', T('🚚 Livraison en cours', '🚚 Delivery in progress')];
+  const at = Date.parse(j.updatedAt);
+  return { look: t[0], title: t[1] + ' · ' + done + '/' + rows.length + T(' étape', ' step') + (rows.length > 1 ? 's' : '') + (cur ? ' — ' + cur.title : ko ? ' — ' + ko.title : ''),
+    lines: [], rows, pr: null,
+    live: !['refused', 'in-production'].includes(j.outcome) && rows.some(r => r.status === 'running' || r.status === 'pending') && !(at && now - at > 72 * 3600000) };
+}
+function runResult(report, verdict, steps, now) {
   if (report && typeof report === 'object' && report.verdict) {
     const live = report.verdict === 'in-production';
     const lines = [[report.mergeSha ? 'merge ' + String(report.mergeSha).slice(0, 10) : null,
@@ -1357,9 +1388,21 @@ function runResult(report, verdict) {
   if (verdict && typeof verdict === 'object' && verdict.verdict) {
     const v = String(verdict.verdict).toLowerCase(), n = Array.isArray(verdict.steps) ? verdict.steps.length : 0;
     const t = v === 'ok' ? ['done', T('✅ Recette OK', '✅ Testing OK')] : v === 'ko' ? ['waiting', T('❌ Recette KO', '❌ Testing failed')] : ['ask', T('❔ Recette non concluante', '❔ Testing inconclusive')];
-    return { look: t[0], title: t[1] + (n ? ' · ' + n + T(' étape', ' step') + (n > 1 ? 's' : '') : ''), lines: verdict.summary ? [String(verdict.summary)] : [], pr: null };
+    return { look: t[0], title: t[1] + (n ? ' · ' + n + T(' étape', ' step') + (n > 1 ? 's' : '') : ''), lines: verdict.summary ? [String(verdict.summary)] : [], rows: stepRows(verdict.steps, now), pr: null };
   }
-  return null;
+  return stepsResult(steps, now);
+}
+// Carte du résultat : titre, lignes, puis une ligne par étape (statut, titre, durée, détail).
+function resultCard(res) {
+  const card = el('div', 'rcard ' + res.look); card.id = 'rcard'; card.append(el('div', 'rtitle', res.title));
+  for (const l of res.lines) card.append(el('div', 'rline', l));
+  for (const s of res.rows || []) {
+    const row = el('div', 'rstep ' + s.status), txt = el('div', 'rt');
+    txt.append(el('span', null, s.title)); if (s.time) txt.append(el('span', 'rw', ' · ' + s.time));
+    if (s.detail) txt.append(el('div', 'rd', s.detail));
+    row.append(el('span', 'ri', s.icon), txt); card.append(row);
+  }
+  return card;
 }
 // Note ouverte d'office dans le détail d'un run : celle que l'on vient relire — ce qui change pour le métier
 // (production), le compte rendu de recette, la note de doc, sinon la note postée sur le ticket. PURE (testée).
@@ -1380,17 +1423,28 @@ function runSpan(runs, now) {
 const dur = m => m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0');
 const hhmm = t => new Date(t).toLocaleTimeString(LOCALE, { hour:'2-digit', minute:'2-digit' });
 // report.json / verdict.json d'un run TERMINÉ, lus une fois (ils ne changent plus) ; la page les relit par
-// /api/launcher/file, route existante — rien de neuf côté serveur.
+// /api/launcher/file, route existante — rien de neuf côté serveur. steps.json fait exception : le journal d'une
+// livraison en route est RELU toutes les 5 s. Un run scripté n'est jamais « en cours » pour la page (pas de processus
+// Claude) : sans cette relecture, sa carte resterait figée à sa première lecture.
 const runAux = new Map();
+// Faut-il (re)lire, et quoi ? PURE (testée). c = ce qu'on a déjà lu de ce run ({ at, busy, steps… }), names = ses fichiers.
+function runAuxWant(c, names, now) {
+  if (!c) return ['report.json', 'verdict.json', 'steps.json'].filter(n => names.includes(n));
+  if (c.busy || !names.includes('steps.json') || now - c.at < 5000) return [];
+  const res = c.steps ? stepsResult(c.steps, now) : null;
+  return !c.steps || (res && res.live) ? ['steps.json'] : [];
+}
 async function loadRunAux(r) {
-  if (r.running || runAux.has(r.dir)) return;
-  const names = (r.files || []).map(f => f.name), want = ['report.json', 'verdict.json'].filter(n => names.includes(n));
+  if (r.running) return;
+  const c = runAux.get(r.dir), want = runAuxWant(c, (r.files || []).map(f => f.name), Date.now());
   if (!want.length) return;
-  runAux.set(r.dir, {});
-  const aux = {};
+  const aux = c || {}; aux.busy = true; aux.at = Date.now(); runAux.set(r.dir, aux);
   for (const n of want) { try { aux[n.replace('.json', '')] = JSON.parse(await (await fetch('/api/launcher/file?path=' + encodeURIComponent(r.dir + '\\' + n), { cache:'no-store' })).text()); } catch {} }
-  runAux.set(r.dir, aux);
-  if (detailKey && detailKey.endsWith('|' + r.dir)) renderDetail(true);
+  aux.busy = false; aux.at = Date.now();
+  if (!detailKey || !detailKey.endsWith('|' + r.dir)) return;
+  // Relecture du journal : la carte seule est remplacée — reconstruire le corps effacerait une consigne en cours de frappe.
+  const old = c && $('rcard'), res = old && runResult(aux.report, aux.verdict, aux.steps, Date.now());
+  if (old && res) old.replaceWith(resultCard(res)); else renderDetail(true);
 }
 // Note HTML du lanceur rendue (le serveur la sert en text/plain, exprès) : iframe SANS scripts — allow-same-origin
 // seulement pour lire sa hauteur ; les liens s'ouvrent dans un nouvel onglet.
@@ -1422,18 +1476,14 @@ function renderRunDetail(it, force) {
   // Résultat constaté (report.json / verdict.json) ; sa PR complète celle de la demande quand le lanceur ne la
   // donnait plus (étape scriptée hors attente : pas de `waiting`, donc pas de PR — l'en-tête n'avait aucun lien).
   loadRunAux(r);
-  const aux = runAux.get(r.dir) || {}, res = runResult(aux.report, aux.verdict);
+  const aux = runAux.get(r.dir) || {}, res = runResult(aux.report, aux.verdict, aux.steps, Date.now());
   if (res && res.pr && !it.pr) it = { ...it, pr: res.pr, prUrl: ui().prUrl ? ui().prUrl + res.pr : null };
   if (detailKey !== dk || force) {
     // Changement de run : sa note s'ouvre d'office (sauf fichier déjà choisi dans ce run).
     if (detailKey !== dk && !(runFile && runFile.startsWith(r.dir + '/'))) { const n = !r.running && runNote(r.phase, r.files); if (n) openRunFile(it, n, true); else { runFile = null; runFileText = null; } }
     detailKey = dk; main.replaceChildren();
     const head = el('div'); head.id = 'head'; const acts = el('div'); acts.id = 'dacts'; const body = el('div'); body.id = 'body'; main.append(head, acts, body);
-    if (res) {
-      const card = el('div', 'rcard ' + res.look); card.append(el('div', 'rtitle', res.title));
-      for (const l of res.lines) card.append(el('div', 'rline', l));
-      body.append(card);
-    }
+    if (res) body.append(resultCard(res));
     // Bloc « Piloter » dans le CORPS (reconstruit au changement de run seulement) : la consigne en cours de frappe ne
     // doit pas être effacée par le rafraîchissement de l'en-tête, toutes les 2 s.
     const ob = el('div', 'orders'); ob.id = 'orders'; body.append(ob); renderOrders(it);
@@ -1469,7 +1519,7 @@ function renderRunDetail(it, force) {
       }
     }
     if (it.sessionId) { body.append(el('h2', null, T('Conversation complète', 'Full conversation')), convPane()); applyConvView(it); }
-    else body.append(el('div', 'empty', it.scripted ? T('Étape scriptée du lanceur : aucune session Claude, donc pas de conversation (voir ses fichiers).', 'Scripted launcher step: no Claude session, so no conversation (see its files).') : T('Conversation introuvable : identifiant de session inconnu pour ce run.', 'Conversation not found: unknown session id for this run.')));
+    else body.append(el('div', 'empty', it.scripted ? T('Étape scriptée du lanceur : aucune session Claude, donc pas de conversation (voir ses étapes ci-dessus quand elle en écrit, et ses fichiers).', 'Scripted launcher step: no Claude session, so no conversation (see its steps above when it writes some, and its files).') : T('Conversation introuvable : identifiant de session inconnu pour ce run.', 'Conversation not found: unknown session id for this run.')));
   }
   // L'étape de la demande change sans changement de run (ordre pris, livraison démarrée) : le corps n'est pas reconstruit,
   // le bloc « Piloter » doit suivre quand même — sinon « Livrer la PR » reste offert alors que la livraison tourne.

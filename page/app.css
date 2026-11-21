@@ -388,6 +388,11 @@ pre.diff .add { color:var(--busy); } pre.diff .del { color:var(--waiting); } pre
 /* Détail d'un run : résultat constaté (report.json / verdict.json), demande de bout en bout, note HTML rendue */
 .rcard { margin:12px 0 4px; padding:10px 14px; background:var(--card); border:1px solid var(--line); border-left:4px solid var(--c); border-radius:8px; }
 .rcard .rtitle { font-weight:600; color:var(--c); } .rcard .rline { color:var(--mute); font-size:12px; margin-top:3px; overflow-wrap:anywhere; }
+/* Étapes d'un run (journal steps.json d'une livraison, étapes de la recette) : statut, titre, durée, détail */
+.rcard .rstep { display:flex; gap:8px; align-items:baseline; font-size:13px; margin-top:5px; } .rcard .rline + .rstep, .rcard .rtitle + .rstep { margin-top:9px; }
+.rstep .ri { flex:none; width:1.5em; text-align:center; } .rstep .rt { flex:1; min-width:0; overflow-wrap:anywhere; }
+.rstep .rw, .rstep .rd { color:var(--mute); font-size:12px; } .rstep .rw { white-space:nowrap; }
+.rstep.pending, .rstep.skipped { color:var(--mute); } .rstep.running .rt > span:first-child { font-weight:600; } .rstep.ko .rd { color:var(--ink); }
 .rspan { color:var(--mute); font-size:12px; margin:-2px 0 6px; }
 iframe.lnote { display:block; width:100%; height:160px; margin:8px 0 2px; border:1px solid var(--line); border-radius:6px; background:#fff; }
 /* La demande derrière un run (en-tête du détail) : demandeur, date, type, statut, liens */
