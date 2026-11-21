@@ -133,8 +133,39 @@ try {
         "mode $role"
     )
 
-    # 2. Remplacer le dossier d'exécution, tâche désactivée pour que le watchdog ne relance pas en plein échange.
+    # 2. Tâche : mêmes réglages que celle du .ps1 (ouverture de session + toutes les 2 min, sans fenêtre). Sa pose
+    #    (Register-ScheduledTask) prend de temps à autre 6 à 19 s au lieu d'une : elle ne se fait donc PAS pendant la
+    #    coupure. Tâche en place et identique à celle voulue — le cas de presque tous les déploiements — : elle n'est
+    #    pas reposée. Différente : reposée ici, serveur encore en service. Absente (première installation) : posée
+    #    plus bas, il n'y a alors aucun serveur à couper.
+    $watchdog = Join-Path $runDir 'server\watchdog\sessions-desk-node-watchdog.ps1'
+    $taskExe = 'conhost.exe'
+    $taskArgs = "--headless `"$pwsh`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$watchdog`" -Port $Port -Node `"$node`"$(if ($Primary) { ' -Primary' } elseif ($AllowWrite) { ' -AllowWrite' })"
+    $user = "$env:USERDOMAIN\$env:USERNAME"
+    $poseTask = {
+        $action = New-ScheduledTaskAction -Execute $taskExe -Argument $taskArgs
+        $triggers = @(
+            (New-ScheduledTaskTrigger -AtLogOn -User $user),
+            (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2))
+        )
+        $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+        $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 1) `
+            -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+        $null = Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -Principal $principal -Settings $settings `
+            -Description "Serveur Node sessions-desk $(if ($Primary) { 'de PRODUCTION (primary)' } else { "à côté du .ps1, $role" }) (port $Port). Posé par server/watchdog/Install-NodeWatchdog.ps1 ; dossier $runDir." -Force
+        # Relecture : l'action posée ne doit viser aucun dossier versionné du Store.
+        $posed = (Get-ScheduledTask -TaskName $taskName).Actions[0].Arguments
+        if ($posed -match '\\Program Files\\WindowsApps\\') { throw "action de la tâche sur un chemin versionné : $posed" }
+    }
     $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    $taskNote = 'tâche inchangée, non reposée'
+    if (-not $existing) { $taskNote = 'tâche absente, posée pendant la coupure' }
+    elseif (-not (Test-SameWatchdogTask $existing $taskExe $taskArgs $user)) {
+        $t0 = Get-Date; & $poseTask
+        $taskNote = "tâche différente, reposée avant la coupure en $([math]::Round(((Get-Date) - $t0).TotalSeconds, 1)) s"
+        Write-DeployLog $Port "tâche planifiée différente de celle voulue : $taskNote"
+    }
+    # Dossier d'exécution remplacé tâche désactivée, pour que le watchdog ne relance pas en plein échange.
     if ($existing) { $null = Disable-ScheduledTask -TaskName $taskName }
     # L'ancienne copie de secours part AVANT l'arrêt : la coupure ne dure que l'échange des dossiers.
     if (Test-Path "$runDir.previous") { Remove-Item "$runDir.previous" -Recurse -Force }
@@ -154,27 +185,13 @@ try {
     Move-Item $stage $runDir
     & $mark 'dossiers échangés'
 
-    # 3. Tâche : mêmes réglages que celle du .ps1 (ouverture de session + toutes les 2 min, sans fenêtre).
-    $watchdog = Join-Path $runDir 'server\watchdog\sessions-desk-node-watchdog.ps1'
-    $action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument "--headless `"$pwsh`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$watchdog`" -Port $Port -Node `"$node`"$(if ($Primary) { ' -Primary' } elseif ($AllowWrite) { ' -AllowWrite' })"
-    $user = "$env:USERDOMAIN\$env:USERNAME"
-    $triggers = @(
-        (New-ScheduledTaskTrigger -AtLogOn -User $user),
-        (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2))
-    )
-    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
-    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 1) `
-        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    $null = Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $triggers -Principal $principal -Settings $settings `
-        -Description "Serveur Node sessions-desk $(if ($Primary) { 'de PRODUCTION (primary)' } else { "à côté du .ps1, $role" }) (port $Port). Posé par server/watchdog/Install-NodeWatchdog.ps1 ; dossier $runDir." -Force
-    # Relecture : l'action posée ne doit viser aucun dossier versionné du Store.
-    $posed = (Get-ScheduledTask -TaskName $taskName).Actions[0].Arguments
-    if ($posed -match '\\Program Files\\WindowsApps\\') { throw "action de la tâche sur un chemin versionné : $posed" }
+    # 3. Tâche remise en service : réactivée si elle était là (elle a été désactivée pour l'échange), posée sinon.
+    if ($existing) { $null = Enable-ScheduledTask -TaskName $taskName; & $mark 'tâche réactivée' }
+    else { & $poseTask; & $mark 'tâche posée' }
 
     # 4. Lancer et attendre le serveur. Le marqueur dit au watchdog que ce démarrage est un déploiement : il démarre
     #    sans son délai de grâce et ne le trace pas comme une panne (« serveur muet => relance »).
     Set-Content $marker $sha.Substring(0, 10)
-    & $mark 'tâche posée'
     Start-ScheduledTask -TaskName $taskName
     & $mark 'tâche lancée'
     $up = $false
@@ -188,7 +205,7 @@ try {
         $pf = Join-Path $env:TEMP "sessions-desk-node-$Port.pid"
         if ((Test-Path $pf) -and (Get-Item $pf).LastWriteTime -gt $cut) { $steps['node lancé'] = [math]::Round(((Get-Item $pf).LastWriteTime - $cut).TotalSeconds, 1) }
         $detail = ($steps.GetEnumerator() | Sort-Object Value | ForEach-Object { "$($_.Key) $($_.Value)" }) -join ' · '
-        Write-DeployLog $Port "serveur $($sha.Substring(0, 10)) en service : coupure de $($steps['première réponse']) s (s depuis l'arrêt demandé : $detail)"
+        Write-DeployLog $Port "serveur $($sha.Substring(0, 10)) en service : coupure de $($steps['première réponse']) s (s depuis l'arrêt demandé : $detail ; $taskNote)"
     }
     if (-not $up) { throw "le serveur ne répond pas sur $Port (voir $env:TEMP\sessions-desk-node-watchdog.log et sessions-desk-node-$Port.err.log)" }
     $w = Invoke-RestMethod "http://localhost:$Port/api/whoami"

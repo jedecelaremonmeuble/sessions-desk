@@ -78,6 +78,23 @@ function Write-DeployLog([int]$Port, [string]$Message) {
 }
 
 <# Prend le verrou de déploiement du port ; attend (au plus $TimeoutSec) qu'un autre déploiement finisse. #>
+# La tâche planifiée en place est-elle celle qu'Install-NodeWatchdog.ps1 poserait ? Compare TOUT ce qu'il pose : action,
+# compte, déclencheurs (ouverture de session + toutes les 2 min) et réglages. Au moindre écart : $false, et la tâche
+# est reposée — une tâche périmée laissée en place lancerait un serveur avec d'anciens chemins. Pure : reçoit la tâche.
+function Test-SameWatchdogTask($Task, [string]$Execute, [string]$Arguments, [string]$User) {
+    if (-not $Task) { return $false }
+    $a = @($Task.Actions); $t = @($Task.Triggers); $p = $Task.Principal; $s = $Task.Settings
+    if ($a.Count -ne 1 -or "$($a[0].Execute)" -ne $Execute -or "$($a[0].Arguments)" -cne $Arguments) { return $false }
+    $leaf = { param([string]$u) ($u -split '\\')[-1] }   # le planificateur rend le compte sans son domaine
+    if (-not $p -or (& $leaf "$($p.UserId)") -ne (& $leaf $User) -or "$($p.LogonType)" -ne 'Interactive' -or "$($p.RunLevel)" -ne 'Limited') { return $false }
+    if ($t.Count -ne 2) { return $false }
+    if (@($t | Where-Object { "$($_.Repetition.Interval)" -eq 'PT2M' }).Count -ne 1) { return $false }
+    if (@($t | Where-Object { -not "$($_.Repetition.Interval)" -and (& $leaf "$($_.UserId)") -eq (& $leaf $User) }).Count -ne 1) { return $false }
+    if (-not $s -or "$($s.MultipleInstances)" -ne 'IgnoreNew' -or "$($s.ExecutionTimeLimit)" -ne 'PT1M') { return $false }
+    if ($s.DisallowStartIfOnBatteries -or $s.StopIfGoingOnBatteries -or -not $s.StartWhenAvailable) { return $false }
+    return $true
+}
+
 function Enter-DeployLock([int]$Port, [string]$What, [int]$TimeoutSec = 600) {
     $m = [Threading.Mutex]::new($false, "Local\sessions-desk-deploy-$Port")
     $info = Join-Path $env:TEMP "sessions-desk-deploy-$Port.lock.txt"
