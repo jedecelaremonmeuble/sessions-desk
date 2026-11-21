@@ -25,6 +25,7 @@ import { Search } from './search.ts';
 import type { Dashboard } from './state.ts';
 import { readTranscript } from './transcript.ts';
 import { upload } from './upload.ts';
+import { readImage } from './image.ts';
 import { addContent, exists, GUID, ieq, nowMs, psArray, psIntZero, psString, psTruthy, sleep, tryParseInt, tryParseUInt } from './util.ts';
 import { Watch } from './watch.ts';
 import { setPhase } from './stall.ts';
@@ -42,7 +43,7 @@ const PAGE: Record<string, [string, string]> = {
   '/app.css': ['app.css', 'text/css; charset=utf-8'],
 };
 const JSON_TYPE = 'application/json; charset=utf-8';
-const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/teams-conversations', '/api/teams-thread', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/commands', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards']);
+const REMOTE_OK = new Set(['/', '/app.js', '/app.css', '/api/ping', '/api/state', '/api/teams-conversations', '/api/teams-thread', '/api/closed', '/api/screen', '/api/transcript', '/api/find', '/api/folders', '/api/commands', '/api/launcher', '/api/launcher/file', '/api/launcher/hd', '/api/launcher/delivery-diff', '/api/tag-vocab', '/api/automations', '/api/automations/file', '/api/launcher/cards', '/api/image']);
 const REMOTE_NEVER = new Set(['/api/stop', '/api/hook', '/api/test-busy', '/api/relay/restart']);
 const ACTIONS = new Set(['/api/focus', '/api/reopen', '/api/ack', '/api/send', '/api/keys', '/api/model', '/api/relaunch', '/api/fav', '/api/new', '/api/close', '/api/hide', '/api/reopen-many', '/api/reboot-dismiss', '/api/git-refresh', '/api/close-many', '/api/relaunch-many', '/api/send-many', '/api/tags', '/api/teams-wait', '/api/teams-seen', '/api/teams-reply', '/api/teams-link', '/api/launcher/order', '/api/automations/order', '/api/launcher/answer', '/api/relay/restart']);
 const HEADLESS_REFUSED = new Set(['/api/focus', '/api/send', '/api/keys', '/api/model', '/api/close', '/api/relaunch']);
@@ -354,6 +355,17 @@ export class Server {
         case '/api/state': { const b = await this.#wait(() => this.#state, 20); if (b) { reply(res, 200, JSON_TYPE, b); return; } break; }
         case '/api/closed': { const b = await this.#wait(() => this.#closed, 30); if (b) { reply(res, 200, JSON_TYPE, b); return; } break; }
         case '/api/transcript': this.#transcript(url, res); return;
+        case '/api/image': {
+          // Aperçu d'une image citée par chemin dans la conversation (voir image.ts). Cache court : la conversation
+          // est redessinée à chaque lecture, la vignette ne doit pas être relue sur le disque à chaque fois.
+          const r = readImage(url.searchParams.get('path'));
+          try {
+            res.statusCode = r.status; res.setHeader('Content-Type', r.type); res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.setHeader('Cache-Control', r.status === 200 ? 'private, max-age=300' : 'no-store');
+            res.end(r.body);
+          } catch { try { res.end(); } catch { /* fermé */ } }
+          return;
+        }
         case '/api/screen': {
           const pid = tryParseUInt(url.searchParams.get('pid'));
           if (pid === null || !exists(join(this.d.sessionsDir, `${pid}.json`))) { json(res, 400, '{}'); return; }
