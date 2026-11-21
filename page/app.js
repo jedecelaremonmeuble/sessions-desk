@@ -3688,6 +3688,47 @@ function mdRender(m) {
 }
 // Dernier message hors conversation (carte de survol, automate sans terminal) : même rendu markdown, dans un cadre.
 function mdBody(cls, text) { const w = el('div', cls); w.append(mdRender({ t:text })); return w; }
+// ── Images citées par chemin ──
+// Claude écrit « Captures : `C:\…\capture.png` » : la vignette s'affiche sous le message, un clic l'agrandit. Le
+// fichier est lu par /api/image (images d'un disque local seulement, contenu vérifié). PURE (testée) : texte ->
+// chemins absolus d'images, dans l'ordre du texte, sans doublon, 8 au plus. Entre ` `, " " ou « » le chemin peut
+// contenir des espaces ; nu, il s'arrête au premier blanc. Jamais un partage réseau (\\serveur\…).
+function imagePaths(text) {
+  const s = String(text == null ? '' : text), found = [];
+  const ok = p => /^(?:[A-Za-z]:[\\/]|\/(?!\/))[^\n"<>|?*]*\.(?:png|jpe?g|gif|webp|bmp)$/i.test(p) && !p.slice(2).includes(':');   // « : » plus loin = flux NTFS
+  for (const m of s.matchAll(/`([^`\n]+)`|"([^"\n]+)"|«\s*([^»\n]+?)\s*»/g)) { const p = (m[1] || m[2] || m[3]).trim(); if (ok(p)) found.push([m.index, p]); }
+  for (const m of s.matchAll(/(^|[\s(\[=])([A-Za-z]:[\\/][^\s"'`<>|?*]*?\.(?:png|jpe?g|gif|webp|bmp))(?=$|[\s)\],;!?'"»]|[.:](?:\s|$))/gim)) if (ok(m[2])) found.push([m.index + m[1].length, m[2]]);
+  found.sort((a, b) => a[0] - b[0]);
+  const out = [], seen = new Set();
+  for (const [, p] of found) { const k = p.toLowerCase(); if (!seen.has(k) && out.length < 8) { seen.add(k); out.push(p); } }
+  return out;
+}
+const imgUrl = p => '/api/image?path=' + encodeURIComponent(p);
+const imgBad = new Set();   // illisibles (capture purgée…) : plus redessinées, sinon chaque lecture ferait sauter la liste
+function convImages(text) {
+  const paths = imagePaths(text).filter(p => !imgBad.has(p)); if (!paths.length) return null;
+  const w = el('div', 'cimgs');
+  for (const p of paths) {
+    const f = el('figure', 'cimg'), img = el('img'), name = p.split(/[\\/]/).pop();
+    img.src = imgUrl(p); img.alt = name; img.title = p + T(' — clic : agrandir', ' — click: enlarge'); img.decoding = 'async';
+    img.onerror = () => { imgBad.add(p); f.remove(); if (!w.childElementCount) w.remove(); };
+    img.onclick = () => openImage(p);
+    f.append(img, el('figcaption', null, name)); w.append(f);
+  }
+  return w;
+}
+function openImage(p) {
+  document.querySelector('.imgview')?.remove();
+  const o = el('div', 'imgview'), bar = el('div', 'imgbar'), a = el('a', null, T('ouvrir dans un onglet', 'open in a tab')), x = el('button', 'quick', '✕'), img = el('img');
+  a.href = imgUrl(p); a.target = '_blank'; a.rel = 'noopener';
+  img.src = imgUrl(p); img.alt = p;
+  bar.append(el('span', 'ipath', p), a, x); o.append(bar, img);
+  const close = () => { o.remove(); document.removeEventListener('keydown', onKey, true); };
+  const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+  o.onclick = e => { if (e.target !== a && !bar.contains(e.target) || e.target === x) close(); };
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(o);
+}
 // ── Provenance des messages ──
 // Tout ce qui porte le rôle « user » n'est pas tapé par la personne, et « assistant » n'est pas toujours la session
 // qu'on pilote : la consigne d'un run vient de l'orchestrateur, sa réponse de l'agent de cette étape (diagnostic,
@@ -3729,6 +3770,7 @@ function convItem(m) {
   }
   const d = el('div', 'cm ' + m.r + (og.cls ? ' ' + og.cls : ''));
   d.append(el('div', 'who', og.who + when), m.r === 'assistant' ? mdRender(m) : el('div', 'tx', og.text != null ? og.text : m.t));
+  const imgs = convImages(og.text != null ? og.text : m.t); if (imgs) d.append(imgs);
   return d;
 }
 function drawConv(toBottom, keepTop) {
