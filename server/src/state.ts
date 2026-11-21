@@ -16,6 +16,7 @@ import { activeAccountUuid, markActiveAccount, readClaudeUsage, promptSuggestion
 import { isProbeCwd } from './usage-probe.ts';
 import { AskJudge, claudeAskAsync } from './asks-judge.ts';
 import { T } from './i18n.ts';
+import { Drafts } from './drafts.ts';
 import {
   addContent, GUID, ieq, imatch, isDir, isFile, leaf, mtimeMs, netTrim, nowMs, parent, psString, readJson, readTail,
   setContent, setContentAtomic, splitPathParent, transcriptCreatedAt,
@@ -150,6 +151,8 @@ export class Dashboard {
   readonly bootMs: number;
   /** Juge « attend l'utilisateur ? » (asks-judge.ts) : serveur en écriture (8765 ou 8767 --allow-write), hors --no-background (tests). */
   askJudge: AskJudge | null = null;
+  /** Brouillons de nouvelle session (drafts.ts) : enregistrés sans être lancés. */
+  readonly drafts: Drafts;
   #stamps = new Map<string, number>();
 
   constructor(cfg: Config, driver: DriverClient) {
@@ -159,6 +162,7 @@ export class Dashboard {
     this.bootMs = Date.now() - Math.round(uptime() * 1000);
     this.reloadSeen(true); this.reloadFavs(true); this.reloadHidden(true); this.reloadTagsManual(true);
     this.notifs = this.readNotifsFile();
+    this.drafts = new Drafts(this.sf('sessions-new-drafts.json'));
     this.initReboot();
     if (cfg.allowWrite && !cfg.noBackground && process.env.SD_ASK_JUDGE !== '0')
       this.askJudge = new AskJudge(this.sf('sessions-ask-verdicts.json'), claudeAskAsync(process.env.SD_CLAUDE_EXE ?? 'claude', process.env.SD_ASK_MODEL ?? 'claude-haiku-5-5'));
@@ -601,7 +605,7 @@ export class Dashboard {
     try { this.writeStatusChanges(sess); } catch { /* idem */ }
     let quota: unknown[] = [];
     try { quota = markActiveAccount(readClaudeUsage(this.cfg), activeAccountUuid(this.cfg)); } catch { /* idem */ }
-    return { now: nowMs(), sessions: sess, reboot: this.rebootInfo(sess), restarts: restarts.slice(-40), favs: [...this.favs], hidden: [...this.hidden], notifs: this.notifs.slice(-60), quota, promptSuggestion: promptSuggestionSetting(this.cfg), teams: this.cfg.modules.teams ? this.teamsWaits() : null, modules: modulesView(this.cfg.modules), ui: this.cfg.ui, configError: this.cfg.configError };
+    return { now: nowMs(), sessions: sess, reboot: this.rebootInfo(sess), restarts: restarts.slice(-40), favs: [...this.favs], hidden: [...this.hidden], drafts: this.drafts.list(), notifs: this.notifs.slice(-60), quota, promptSuggestion: promptSuggestionSetting(this.cfg), teams: this.cfg.modules.teams ? this.teamsWaits() : null, modules: modulesView(this.cfg.modules), ui: this.cfg.ui, configError: this.cfg.configError };
   }
 
   /** Get-TeamsWaits : résumé tenu par teams-watcher.ts (state/teams-waits/_summary.json), relu quand il change. */
