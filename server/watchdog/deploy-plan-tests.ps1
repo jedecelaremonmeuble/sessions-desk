@@ -98,5 +98,39 @@ try {
     Check 'journal : ligne datée, port, « déploiement : »' ((Get-Content (Join-Path $lt 'sessions-desk-node-watchdog.log') -Tail 1) -match "^\d{4}-\d\d-\d\dT[\d:]+ \[$tp\] déploiement : essai$")
 } finally { $env:TEMP = $realTemp; Remove-Item $lt -Recurse -Force -ErrorAction SilentlyContinue }
 
+# ── Tâche planifiée : celle en place est-elle celle qu'on poserait ? (elle n'est alors pas reposée) ──
+$tx = 'conhost.exe'; $ta = '--headless "C:\pw\pwsh.exe" -NoProfile -File "C:\run\watchdog.ps1" -Port 8999 -Node "C:\n\node.exe"'; $tu = 'POSTE\quelquun'
+function FakeTask([hashtable]$o = @{}) {
+    $d = @{ Exe = $tx; Args = $ta; User = 'quelquun'; Logon = 'Interactive'; Run = 'Limited'; Interval = 'PT2M'; LogonUser = $tu; Multi = 'IgnoreNew'; Limit = 'PT1M'; NoBatt = $false; StopBatt = $false; Avail = $true; Actions = 1; Triggers = 2 }
+    foreach ($k in $o.Keys) { $d[$k] = $o[$k] }
+    [pscustomobject]@{
+        Actions   = @(1..$d.Actions | ForEach-Object { [pscustomobject]@{ Execute = $d.Exe; Arguments = $d.Args } })
+        Principal = [pscustomobject]@{ UserId = $d.User; LogonType = $d.Logon; RunLevel = $d.Run }
+        Triggers  = @(@([pscustomobject]@{ UserId = $d.LogonUser; Repetition = [pscustomobject]@{ Interval = $null } }, [pscustomobject]@{ UserId = $null; Repetition = [pscustomobject]@{ Interval = $d.Interval } }, [pscustomobject]@{ UserId = $null; Repetition = [pscustomobject]@{ Interval = 'PT1H' } }) | Select-Object -First $d.Triggers)
+        Settings  = [pscustomobject]@{ MultipleInstances = $d.Multi; ExecutionTimeLimit = $d.Limit; DisallowStartIfOnBatteries = $d.NoBatt; StopIfGoingOnBatteries = $d.StopBatt; StartWhenAvailable = $d.Avail }
+    }
+}
+Check 'tâche : identique (compte rendu sans domaine) ⇒ pas reposée' (Test-SameWatchdogTask (FakeTask) $tx $ta $tu)
+Check 'tâche : absente ⇒ à poser' (-not (Test-SameWatchdogTask $null $tx $ta $tu))
+foreach ($c in @(
+        @('chemin de node changé', @{ Args = $ta.Replace('C:\n\node.exe', 'C:\n2\node.exe') }), @('casse d''un chemin changée', @{ Args = $ta.Replace('C:\run', 'C:\RUN') }),
+        @('-Primary ajouté', @{ Args = "$ta -Primary" }), @('autre exécutable', @{ Exe = 'pwsh.exe' }), @('deux actions', @{ Actions = 2 }),
+        @('autre compte', @{ User = 'autre' }), @('droits élevés', @{ Run = 'Highest' }), @('autre type de session', @{ Logon = 'S4U' }),
+        @('autre cadence', @{ Interval = 'PT5M' }), @('un seul déclencheur', @{ Triggers = 1 }), @('un déclencheur de trop', @{ Triggers = 3 }),
+        @('ouverture de session d''un autre compte', @{ LogonUser = 'POSTE\autre' }), @('instances multiples', @{ Multi = 'Parallel' }), @('autre durée limite', @{ Limit = 'PT72H' }),
+        @('arrêt sur batterie', @{ StopBatt = $true }), @('pas de démarrage sur batterie', @{ NoBatt = $true }), @('pas de rattrapage', @{ Avail = $false }))) {
+    Check "tâche : $($c[0]) ⇒ reposée" (-not (Test-SameWatchdogTask (FakeTask $c[1]) $tx $ta $tu))
+}
+# Sur une vraie définition (en mémoire, rien n'est posé) : les propriétés lues sont bien celles que les cmdlets écrivent.
+if (Get-Command New-ScheduledTask -ErrorAction SilentlyContinue) {
+    $me = "$env:USERDOMAIN\$env:USERNAME"
+    $real = New-ScheduledTask -Action (New-ScheduledTaskAction -Execute $tx -Argument $ta) `
+        -Trigger @((New-ScheduledTaskTrigger -AtLogOn -User $me), (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2))) `
+        -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited) `
+        -Settings (New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable)
+    Check 'tâche : définition réelle des cmdlets ⇒ identique' (Test-SameWatchdogTask $real $tx $ta $me)
+    Check 'tâche : définition réelle, autre argument ⇒ reposée' (-not (Test-SameWatchdogTask $real $tx "$ta -AllowWrite" $me))
+}
+
 if ($script:fail) { Write-Host "$($script:fail) échec(s)"; exit 1 }
 Write-Host 'tous les tests passent'
