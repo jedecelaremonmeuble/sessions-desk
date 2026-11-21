@@ -468,3 +468,5 @@ body.ro .crow .cb button { display:none; }
 .runlive .rl-sub { color:var(--mute); font-size:12px; margin-top:3px; overflow-wrap:anywhere; }
 .runlive.stale { border-left-color:var(--ask); }
 .runlive-l.stale { color:var(--ask); }
+/* Questions mises de côté (« Chat about this ») : la carte de questions, sans attente — repliable. */
+.dlg.parked { border-left-color:var(--line); } .dlg.parked > summary { cursor:pointer; color:var(--mute); font-size:12px; } .dlg.parked[open] > summary { margin-bottom:10px; }
